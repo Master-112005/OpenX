@@ -1,0 +1,17 @@
+{
+  "name": "Sample Plugin",
+  "id": "sample_plugin",
+  "version": "1.0.0",
+  "description": "Example plugin showing the JARVIS plugin API",
+  "author": "",
+  "permissions": ["low"],
+  "intents": [
+    {
+      "id": "sample.hello",
+      "patterns": ["say hello", "hello plugin", "plugin test"],
+      "permissionLevel": "low",
+      "action": "sample.hello",
+      "entities": []
+    }
+  ]
+}

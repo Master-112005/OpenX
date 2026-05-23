@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Assistant Settings</title>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background:
+        radial-gradient(circle at top right, rgba(255, 255, 255, 0.08), transparent 28%),
+        linear-gradient(150deg, rgba(255, 255, 255, 0.04), transparent 36%),
+        #141828;
+      color: #eef2ff;
+      font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+      min-height: 100vh;
+      padding: 28px;
+    }
+
+    .card {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 18px;
+      margin: 0 auto;
+      max-width: 620px;
+      padding: 28px;
+    }
+
+    h1 {
+      font-size: 24px;
+      margin-bottom: 8px;
+    }
+
+    p {
+      color: rgba(238, 242, 255, 0.72);
+      line-height: 1.6;
+      margin-bottom: 16px;
+    }
+
+    .meta {
+      color: rgba(238, 242, 255, 0.56);
+      font-size: 13px;
+      margin-bottom: 24px;
+    }
+
+    .btn-row {
+      display: flex;
+      gap: 10px;
+    }
+
+    button {
+      background: rgba(88, 142, 255, 0.92);
+      border: none;
+      border-radius: 12px;
+      color: white;
+      cursor: pointer;
+      font: inherit;
+      padding: 11px 16px;
+    }
+
+    button.secondary {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1 id="title">Assistant Settings</h1>
+    <div class="meta" id="meta">Settings now live inside the chat window.</div>
+    <p>
+      Use the in-chat Settings panel to update the assistant name, your profile details,
+      the chat theme, and saved contacts. This keeps the settings flow close to the place
+      where you actually use the assistant.
+    </p>
+    <div class="btn-row">
+      <button id="open-chat-settings">Open Chat</button>
+      <button class="secondary" id="close-window">Close</button>
+    </div>
+  </div>
+
+  <script>
+    async function initialize() {
+      const snapshot = await window.jarvis.getSettings();
+      const assistantName = snapshot?.settings?.assistant?.displayName || 'JARVIS';
+      document.getElementById('title').textContent = `${assistantName} Settings`;
+      document.getElementById('meta').textContent = `${assistantName} settings now live inside the chat window.`;
+    }
+
+    document.getElementById('open-chat-settings').addEventListener('click', async () => {
+      await window.jarvis.openChat();
+      window.close();
+    });
+
+    document.getElementById('close-window').addEventListener('click', () => {
+      window.close();
+    });
+
+    initialize();
+  </script>
+</body>
+</html>

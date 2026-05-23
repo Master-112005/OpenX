@@ -1,0 +1,282 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>JARVIS Orb</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; user-select: none; }
+
+    body {
+      background: transparent;
+      overflow: hidden;
+      width: 100vw;
+      height: 100vh;
+      font-family: 'Segoe UI', sans-serif;
+    }
+
+    #orb-container {
+      width: 100vw;
+      height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      cursor: grab;
+      position: relative;
+    }
+
+    #orb-container:active {
+      cursor: grabbing;
+    }
+
+    #orb {
+      width: 60px;
+      height: 60px;
+      border-radius: 50%;
+      background: radial-gradient(circle at 35% 35%, #888, #444);
+      box-shadow:
+        0 0 20px rgba(100, 100, 100, 0.3),
+        inset 0 -3px 6px rgba(0, 0, 0, 0.4),
+        inset 0 3px 6px rgba(255, 255, 255, 0.1);
+      transition: box-shadow 0.3s ease, background 0.3s ease, transform 0.15s ease;
+      position: relative;
+    }
+
+    #orb .glow {
+      position: absolute;
+      inset: -8px;
+      border-radius: 50%;
+      opacity: 0;
+      transition: opacity 0.4s ease;
+      pointer-events: none;
+    }
+
+    #orb .ripple {
+      position: absolute;
+      inset: -4px;
+      border-radius: 50%;
+      border: 2px solid rgba(255, 255, 255, 0.3);
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    #orb.state-idle {
+      background: radial-gradient(circle at 35% 35%, #777, #333);
+      box-shadow:
+        0 0 15px rgba(100, 100, 100, 0.2),
+        inset 0 -3px 6px rgba(0,0,0,0.4);
+    }
+
+    #orb.state-listening {
+      background: radial-gradient(circle at 35% 35%, #4488ff, #0044cc);
+      box-shadow:
+        0 0 30px rgba(0, 100, 255, 0.5),
+        0 0 60px rgba(0, 100, 255, 0.2),
+        inset 0 -3px 6px rgba(0,0,0,0.3);
+      animation: pulse-listening 1.5s ease-in-out infinite;
+    }
+
+    #orb.state-listening .glow {
+      opacity: 0.6;
+      background: radial-gradient(circle at 35% 35%, rgba(68,136,255,0.4), transparent 70%);
+    }
+
+    #orb.state-processing {
+      background: radial-gradient(circle at 35% 35%, #ffaa33, #cc7700);
+      box-shadow:
+        0 0 30px rgba(255, 165, 0, 0.5),
+        0 0 60px rgba(255, 165, 0, 0.2),
+        inset 0 -3px 6px rgba(0,0,0,0.3);
+      animation: spin-processing 0.8s linear infinite;
+    }
+
+    #orb.state-processing .glow {
+      opacity: 0.7;
+      background: radial-gradient(circle at 35% 35%, rgba(255,170,51,0.4), transparent 70%);
+    }
+
+    #orb.state-success {
+      background: radial-gradient(circle at 35% 35%, #44dd66, #00aa33);
+      box-shadow:
+        0 0 30px rgba(0, 200, 80, 0.5),
+        0 0 60px rgba(0, 200, 80, 0.2),
+        inset 0 -3px 6px rgba(0,0,0,0.3);
+      animation: flash-success 1s ease-out;
+    }
+
+    #orb.state-success .glow {
+      opacity: 0.5;
+      background: radial-gradient(circle at 35% 35%, rgba(68,221,102,0.4), transparent 70%);
+    }
+
+    #orb.state-error {
+      background: radial-gradient(circle at 35% 35%, #ff4444, #cc0000);
+      box-shadow:
+        0 0 30px rgba(255, 50, 50, 0.5),
+        0 0 60px rgba(255, 50, 50, 0.2),
+        inset 0 -3px 6px rgba(0,0,0,0.3);
+      animation: shake-error 0.5s ease-out;
+    }
+
+    #orb.state-error .glow {
+      opacity: 0.5;
+      background: radial-gradient(circle at 35% 35%, rgba(255,68,68,0.4), transparent 70%);
+    }
+
+    #waveform {
+      position: absolute;
+      bottom: -30px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: none;
+      align-items: center;
+      gap: 3px;
+      height: 20px;
+    }
+
+    #orb.state-listening #waveform {
+      display: flex;
+    }
+
+    .wave-bar {
+      width: 3px;
+      background: #4488ff;
+      border-radius: 2px;
+      animation: wave-anim 0.5s ease-in-out infinite alternate;
+    }
+
+    .wave-bar:nth-child(1) { height: 8px; animation-delay: 0s; }
+    .wave-bar:nth-child(2) { height: 14px; animation-delay: 0.1s; }
+    .wave-bar:nth-child(3) { height: 20px; animation-delay: 0.2s; }
+    .wave-bar:nth-child(4) { height: 14px; animation-delay: 0.3s; }
+    .wave-bar:nth-child(5) { height: 8px; animation-delay: 0.4s; }
+
+    @keyframes pulse-listening {
+      0%, 100% { transform: scale(1); }
+      50% { transform: scale(1.08); }
+    }
+
+    @keyframes spin-processing {
+      0% { transform: rotate(0deg) scale(1); }
+      50% { transform: rotate(180deg) scale(1.05); }
+      100% { transform: rotate(360deg) scale(1); }
+    }
+
+    @keyframes flash-success {
+      0% { transform: scale(1); }
+      30% { transform: scale(1.2); box-shadow: 0 0 50px rgba(0,200,80,0.8); }
+      100% { transform: scale(1); }
+    }
+
+    @keyframes shake-error {
+      0%, 100% { transform: translateX(0); }
+      20% { transform: translateX(-5px); }
+      40% { transform: translateX(5px); }
+      60% { transform: translateX(-3px); }
+      80% { transform: translateX(3px); }
+    }
+
+    @keyframes wave-anim {
+      0% { height: 4px; }
+      100% { height: 20px; }
+    }
+
+    #status-tooltip {
+      position: absolute;
+      bottom: -50px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: rgba(255, 255, 255, 0.8);
+      font-size: 11px;
+      white-space: nowrap;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+      text-shadow: 0 0 8px rgba(0,0,0,0.8);
+      pointer-events: none;
+    }
+
+    #orb-container:hover #status-tooltip {
+      opacity: 1;
+    }
+  </style>
+</head>
+<body>
+  <div id="orb-container">
+    <div id="orb" class="state-idle">
+      <div class="glow"></div>
+      <div class="ripple"></div>
+      <div id="waveform">
+        <div class="wave-bar"></div>
+        <div class="wave-bar"></div>
+        <div class="wave-bar"></div>
+        <div class="wave-bar"></div>
+        <div class="wave-bar"></div>
+      </div>
+    </div>
+    <div id="status-tooltip">JARVIS • Idle</div>
+  </div>
+
+  <script>
+    const orb = document.getElementById('orb');
+    const tooltip = document.getElementById('status-tooltip');
+    const container = document.getElementById('orb-container');
+    const states = ['idle', 'listening', 'processing', 'success', 'error'];
+    let isDragging = false;
+    let dragStart = { x: 0, y: 0 };
+    let currentState = 'idle';
+    let lastStateChange = Date.now();
+
+    function setState(state) {
+      if (!states.includes(state)) return;
+      lastStateChange = Date.now();
+      orb.className = `state-${state}`;
+      currentState = state;
+      const labels = {
+        idle: 'JARVIS • Idle',
+        listening: 'JARVIS • Listening',
+        processing: 'JARVIS • Processing',
+        success: 'JARVIS • Done',
+        error: 'JARVIS • Error'
+      };
+      tooltip.textContent = labels[state] || 'JARVIS';
+    }
+
+    orb.addEventListener('click', () => {
+      if (window.jarvis) window.jarvis.openChat();
+    });
+
+    container.addEventListener('mousedown', (e) => {
+      if (e.target === orb || e.target.closest('#orb')) {
+        isDragging = true;
+        dragStart.x = e.clientX;
+        dragStart.y = e.clientY;
+      }
+    });
+
+    document.addEventListener('mousemove', (e) => {
+      if (!isDragging) return;
+      const dx = e.clientX - dragStart.x;
+      const dy = e.clientY - dragStart.y;
+      dragStart.x = e.clientX;
+      dragStart.y = e.clientY;
+      if (window.jarvis) window.jarvis.moveOrb(dx, dy);
+    });
+
+    document.addEventListener('mouseup', () => { isDragging = false; });
+
+    if (window.jarvis) {
+      window.jarvis.onOrbStateChange((state) => setState(state));
+      window.jarvis.onVoiceActivated(() => setState('listening'));
+      window.jarvis.onVoiceListening(() => setState('listening'));
+    }
+
+    setInterval(() => {
+      if (currentState === 'success' || currentState === 'error') {
+        if (Date.now() - lastStateChange > 2000) setState('idle');
+      }
+    }, 500);
+
+    setState('idle');
+  </script>
+</body>
+</html>

@@ -1,0 +1,1759 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Assistant Chat</title>
+  <style>
+    :root {
+      --panel-bg: rgba(20, 20, 40, 0.92);
+      --surface-bg: rgba(22, 33, 62, 0.72);
+      --surface-strong: rgba(15, 52, 96, 0.74);
+      --border-color: rgba(255, 255, 255, 0.08);
+      --text-color: #e0e0e0;
+      --muted-color: rgba(255, 255, 255, 0.58);
+      --accent-color: rgba(68, 136, 255, 0.9);
+      --success-color: #5ad59f;
+      --danger-color: #ff7b7b;
+      --warning-color: #ffcc66;
+      --overlay-bg: rgba(7, 10, 18, 0.74);
+      --body-font: "Segoe UI", -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background: transparent;
+      color: var(--text-color);
+      font-family: var(--body-font);
+      height: 100vh;
+      overflow: hidden;
+    }
+
+    button,
+    input,
+    select,
+    textarea {
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    #chat-shell {
+      background:
+        radial-gradient(circle at top right, rgba(255, 255, 255, 0.08), transparent 30%),
+        linear-gradient(160deg, rgba(255, 255, 255, 0.04), transparent 40%),
+        var(--panel-bg);
+      backdrop-filter: blur(16px);
+      border: 1px solid var(--border-color);
+      border-radius: 16px;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+      position: relative;
+    }
+
+    #header {
+      align-items: center;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      display: flex;
+      justify-content: space-between;
+      padding: 12px 16px;
+      -webkit-app-region: drag;
+    }
+
+    #header-info {
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+
+    #header-title {
+      color: rgba(255, 255, 255, 0.94);
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    #header-subtitle {
+      color: var(--muted-color);
+      font-size: 11px;
+    }
+
+    #header-actions {
+      align-items: center;
+      display: flex;
+      gap: 8px;
+      -webkit-app-region: no-drag;
+    }
+
+    .header-btn,
+    .icon-btn,
+    .secondary-btn,
+    .primary-btn,
+    .danger-btn,
+    .chip-btn {
+      border: 1px solid transparent;
+      transition: background 0.2s ease, border-color 0.2s ease, opacity 0.2s ease;
+    }
+
+    .header-btn {
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(255, 255, 255, 0.08);
+      border-radius: 10px;
+      color: var(--text-color);
+      font-size: 12px;
+      padding: 7px 10px;
+    }
+
+    .header-btn:hover,
+    .icon-btn:hover,
+    .secondary-btn:hover,
+    .primary-btn:hover,
+    .danger-btn:hover,
+    .chip-btn:hover {
+      opacity: 0.92;
+    }
+
+    #messages {
+      display: flex;
+      flex: 1;
+      flex-direction: column;
+      gap: 10px;
+      overflow-y: auto;
+      padding: 14px 16px;
+    }
+
+    #messages::-webkit-scrollbar,
+    .panel-scroll::-webkit-scrollbar {
+      width: 5px;
+    }
+
+    #messages::-webkit-scrollbar-thumb,
+    .panel-scroll::-webkit-scrollbar-thumb {
+      background: rgba(255, 255, 255, 0.15);
+      border-radius: 999px;
+    }
+
+    .message {
+      animation: fade-in 0.18s ease-out;
+      border-radius: 12px;
+      font-size: 13px;
+      line-height: 1.5;
+      max-width: 88%;
+      padding: 10px 12px;
+    }
+
+    .message.user {
+      align-self: flex-end;
+      background: var(--surface-strong);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-bottom-right-radius: 4px;
+    }
+
+    .message.assistant {
+      align-self: flex-start;
+      background: var(--surface-bg);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-bottom-left-radius: 4px;
+    }
+
+    .message.system {
+      align-self: center;
+      background: rgba(255, 204, 102, 0.14);
+      border: 1px solid rgba(255, 204, 102, 0.22);
+      color: var(--warning-color);
+      max-width: 96%;
+      text-align: center;
+    }
+
+    .message .meta {
+      color: var(--muted-color);
+      font-size: 10px;
+      margin-top: 6px;
+    }
+
+    .typing {
+      align-items: center;
+      display: flex;
+      gap: 5px;
+      padding: 8px 12px;
+    }
+
+    .typing span {
+      animation: pulse 1s infinite ease-in-out;
+      background: rgba(255, 255, 255, 0.5);
+      border-radius: 50%;
+      height: 6px;
+      width: 6px;
+    }
+
+    .typing span:nth-child(2) {
+      animation-delay: 0.15s;
+    }
+
+    .typing span:nth-child(3) {
+      animation-delay: 0.3s;
+    }
+
+    #input-area {
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+      padding: 12px 16px 14px;
+    }
+
+    #input-row {
+      align-items: center;
+      display: flex;
+      gap: 8px;
+    }
+
+    #input-box,
+    .field,
+    .field-textarea,
+    .field-select {
+      background: rgba(13, 16, 28, 0.62);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 10px;
+      color: var(--text-color);
+      outline: none;
+      transition: border-color 0.2s ease, background 0.2s ease;
+    }
+
+    #input-box:focus,
+    .field:focus,
+    .field-textarea:focus,
+    .field-select:focus {
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    #input-box {
+      flex: 1;
+      padding: 10px 12px;
+    }
+
+    #send-btn {
+      align-items: center;
+      background: var(--accent-color);
+      border: none;
+      border-radius: 12px;
+      color: white;
+      display: inline-flex;
+      font-size: 12px;
+      font-weight: 700;
+      justify-content: center;
+      min-width: 54px;
+      padding: 10px 12px;
+    }
+
+    #quick-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 6px;
+      margin-top: 10px;
+    }
+
+    .chip-btn {
+      background: rgba(255, 255, 255, 0.06);
+      border-color: rgba(255, 255, 255, 0.08);
+      border-radius: 999px;
+      color: rgba(255, 255, 255, 0.75);
+      font-size: 11px;
+      padding: 5px 10px;
+    }
+
+    .chip-btn:hover {
+      background: rgba(255, 255, 255, 0.12);
+    }
+
+    #status-bar {
+      color: rgba(255, 255, 255, 0.32);
+      font-size: 10px;
+      padding: 0 16px 12px;
+      text-align: center;
+    }
+
+    .confirm-actions {
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+      margin-top: 8px;
+    }
+
+    .primary-btn,
+    .secondary-btn,
+    .danger-btn,
+    .icon-btn {
+      border-radius: 14px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      padding: 10px 14px;
+      text-transform: uppercase;
+    }
+
+    .primary-btn {
+      background:
+        linear-gradient(160deg, rgba(255, 255, 255, 0.16), transparent 42%),
+        var(--accent-color);
+      border-color: rgba(255, 255, 255, 0.18);
+      box-shadow: 0 12px 24px rgba(0, 0, 0, 0.22);
+      color: white;
+    }
+
+    .secondary-btn {
+      background: rgba(255, 255, 255, 0.07);
+      border-color: rgba(255, 255, 255, 0.1);
+      color: var(--text-color);
+    }
+
+    .danger-btn {
+      background: rgba(255, 123, 123, 0.12);
+      border-color: rgba(255, 123, 123, 0.24);
+      color: #ffd6d6;
+    }
+
+    .icon-btn {
+      align-items: center;
+      background: rgba(255, 255, 255, 0.07);
+      border-color: rgba(255, 255, 255, 0.1);
+      color: var(--text-color);
+      display: inline-flex;
+      justify-content: center;
+      min-width: 42px;
+      padding: 10px 12px;
+    }
+
+    #settings-overlay {
+      align-items: stretch;
+      background:
+        radial-gradient(circle at top left, rgba(255, 255, 255, 0.06), transparent 24%),
+        linear-gradient(180deg, rgba(5, 9, 16, 0.68), rgba(5, 9, 16, 0.82)),
+        var(--overlay-bg);
+      display: none;
+      inset: 0;
+      justify-content: flex-end;
+      position: absolute;
+      z-index: 10;
+    }
+
+    #settings-overlay.open {
+      display: flex;
+    }
+
+    #settings-panel {
+      background:
+        radial-gradient(circle at top right, rgba(255, 255, 255, 0.08), transparent 28%),
+        linear-gradient(168deg, rgba(255, 255, 255, 0.05), transparent 34%),
+        rgba(10, 14, 24, 0.97);
+      border-left: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: -18px 0 48px rgba(0, 0, 0, 0.3);
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      margin-left: auto;
+      max-width: 100%;
+      width: 432px;
+    }
+
+    .panel-header {
+      align-items: flex-start;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      display: flex;
+      justify-content: space-between;
+      padding: 18px 20px 14px;
+    }
+
+    .panel-title {
+      font-size: 13px;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    .panel-subtitle {
+      color: var(--muted-color);
+      font-size: 11px;
+      line-height: 1.5;
+      margin-top: 4px;
+      max-width: 280px;
+    }
+
+    .panel-scroll {
+      display: flex;
+      flex: 1;
+      flex-direction: column;
+      gap: 14px;
+      overflow-y: auto;
+      padding: 18px;
+    }
+
+    .settings-hero {
+      background:
+        radial-gradient(circle at top right, rgba(255, 255, 255, 0.12), transparent 28%),
+        linear-gradient(145deg, rgba(255, 255, 255, 0.06), rgba(255, 255, 255, 0.01)),
+        rgba(255, 255, 255, 0.04);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      padding: 16px;
+    }
+
+    .hero-top {
+      display: flex;
+      gap: 12px;
+      justify-content: space-between;
+    }
+
+    .hero-badge {
+      align-items: center;
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 14px;
+      color: rgba(255, 255, 255, 0.86);
+      display: inline-flex;
+      font-size: 11px;
+      font-weight: 700;
+      gap: 8px;
+      letter-spacing: 0.08em;
+      padding: 7px 10px;
+      text-transform: uppercase;
+    }
+
+    .hero-badge::before {
+      background: var(--accent-color);
+      border-radius: 999px;
+      content: '';
+      height: 8px;
+      width: 8px;
+    }
+
+    .hero-name {
+      font-size: 23px;
+      font-weight: 800;
+      letter-spacing: -0.03em;
+      line-height: 1.1;
+      margin-top: 2px;
+    }
+
+    .hero-role {
+      color: rgba(255, 255, 255, 0.68);
+      font-size: 12px;
+      line-height: 1.5;
+      margin-top: 6px;
+    }
+
+    .hero-stats {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: repeat(3, 1fr);
+    }
+
+    .hero-stat {
+      background: rgba(255, 255, 255, 0.045);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 16px;
+      padding: 12px 10px;
+    }
+
+    .hero-stat-label {
+      color: rgba(255, 255, 255, 0.54);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .hero-stat-value {
+      font-size: 13px;
+      font-weight: 700;
+      line-height: 1.35;
+      margin-top: 6px;
+    }
+
+    .settings-nav {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: 1fr 1fr;
+    }
+
+    .settings-nav-chip {
+      align-items: flex-start;
+      background:
+        linear-gradient(160deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.03)),
+        rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 18px;
+      color: rgba(255, 255, 255, 0.82);
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+      min-height: 72px;
+      padding: 12px 14px;
+      text-align: left;
+      transition: transform 0.18s ease, background 0.18s ease, border-color 0.18s ease, box-shadow 0.18s ease;
+    }
+
+    .settings-nav-chip:hover {
+      background:
+        linear-gradient(160deg, rgba(255, 255, 255, 0.1), rgba(255, 255, 255, 0.05)),
+        rgba(255, 255, 255, 0.06);
+      transform: translateY(-1px);
+    }
+
+    .settings-nav-chip.active {
+      background:
+        linear-gradient(160deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.06)),
+        rgba(255, 255, 255, 0.08);
+      border-color: rgba(255, 255, 255, 0.2);
+      box-shadow: 0 14px 28px rgba(0, 0, 0, 0.18);
+    }
+
+    .nav-label {
+      font-size: 11px;
+      font-weight: 800;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .nav-hint {
+      color: var(--muted-color);
+      font-size: 11px;
+      line-height: 1.45;
+    }
+
+    .settings-section {
+      background: rgba(255, 255, 255, 0.035);
+      border: 1px solid rgba(255, 255, 255, 0.07);
+      border-radius: 18px;
+      display: none;
+      flex-direction: column;
+      gap: 12px;
+      padding: 15px;
+    }
+
+    .settings-section.open {
+      animation: fade-in 0.2s ease-out;
+      display: flex;
+    }
+
+    .section-heading {
+      color: rgba(255, 255, 255, 0.85);
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .section-note {
+      color: var(--muted-color);
+      font-size: 11px;
+      line-height: 1.5;
+    }
+
+    .field-grid {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: 1fr 1fr;
+    }
+
+    .field-grid.single {
+      grid-template-columns: 1fr;
+    }
+
+    .field-wrap {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .field-label {
+      color: rgba(255, 255, 255, 0.72);
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .field,
+    .field-select {
+      padding: 9px 10px;
+    }
+
+    .field-textarea {
+      min-height: 72px;
+      padding: 9px 10px;
+      resize: vertical;
+    }
+
+    .theme-grid {
+      display: grid;
+      gap: 10px;
+      grid-template-columns: 1fr 1fr;
+    }
+
+    .theme-card {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 16px;
+      padding: 10px;
+      text-align: left;
+    }
+
+    .theme-card.active {
+      border-color: rgba(255, 255, 255, 0.28);
+      box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.14) inset, 0 10px 24px rgba(0, 0, 0, 0.18);
+    }
+
+    .theme-preview {
+      border-radius: 10px;
+      height: 56px;
+      margin-bottom: 8px;
+    }
+
+    .theme-name {
+      font-size: 12px;
+      font-weight: 700;
+      margin-bottom: 4px;
+    }
+
+    .theme-caption {
+      color: var(--muted-color);
+      font-size: 10px;
+      line-height: 1.4;
+      margin-bottom: 8px;
+      min-height: 28px;
+    }
+
+    .theme-select {
+      align-items: center;
+      display: flex;
+      gap: 8px;
+      justify-content: space-between;
+    }
+
+    .contact-layout {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: 1fr;
+    }
+
+    .contact-stage {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 16px;
+      padding: 12px;
+    }
+
+    .contact-stage-header {
+      align-items: center;
+      display: flex;
+      gap: 10px;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+
+    .contact-stage-title {
+      color: rgba(255, 255, 255, 0.82);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .contact-stage-tools {
+      align-items: center;
+      display: flex;
+      gap: 8px;
+    }
+
+    .contact-usage {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: 999px;
+      color: var(--muted-color);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      padding: 6px 10px;
+      text-transform: uppercase;
+    }
+
+    .contact-add-btn {
+      align-items: center;
+      background:
+        linear-gradient(160deg, rgba(255, 255, 255, 0.14), transparent 44%),
+        rgba(255, 255, 255, 0.1);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 14px;
+      color: var(--text-color);
+      cursor: pointer;
+      display: inline-flex;
+      font-size: 18px;
+      font-weight: 500;
+      height: 38px;
+      justify-content: center;
+      line-height: 1;
+      width: 38px;
+    }
+
+    .contact-add-btn:disabled {
+      cursor: not-allowed;
+      opacity: 0.45;
+    }
+
+    .contact-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      max-height: 180px;
+      overflow-y: auto;
+    }
+
+    .contact-item {
+      align-items: flex-start;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 14px;
+      color: var(--text-color);
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+      padding: 10px;
+      text-align: left;
+      width: 100%;
+    }
+
+    .contact-item:hover {
+      border-color: rgba(255, 255, 255, 0.14);
+      transform: translateY(-1px);
+    }
+
+    .contact-item.active {
+      border-color: rgba(255, 255, 255, 0.22);
+      background:
+        linear-gradient(145deg, rgba(255, 255, 255, 0.07), rgba(255, 255, 255, 0.03)),
+        rgba(255, 255, 255, 0.08);
+      box-shadow: 0 8px 18px rgba(0, 0, 0, 0.14);
+    }
+
+    .contact-name {
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .contact-meta {
+      color: var(--muted-color);
+      font-size: 11px;
+    }
+
+    .contact-actions,
+    .panel-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+
+    .contact-editor {
+      display: none;
+    }
+
+    .contact-editor.open {
+      display: block;
+    }
+
+    .contact-editor .field-grid,
+    .contact-editor .contact-actions {
+      margin-top: 12px;
+    }
+
+    #settings-status {
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 14px;
+      color: var(--muted-color);
+      font-size: 11px;
+      line-height: 1.5;
+      min-height: 16px;
+      padding: 10px 12px;
+    }
+
+    @media (max-width: 720px) {
+      #settings-panel {
+        width: 100%;
+      }
+
+      .hero-stats,
+      .field-grid,
+      .theme-grid,
+      .settings-nav {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @keyframes fade-in {
+      from {
+        opacity: 0;
+        transform: translateY(6px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    @keyframes pulse {
+      0%, 100% {
+        opacity: 0.35;
+        transform: scale(1);
+      }
+      50% {
+        opacity: 1;
+        transform: scale(1.2);
+      }
+    }
+  </style>
+</head>
+<body>
+  <div id="chat-shell">
+    <div id="header">
+      <div id="header-info">
+        <div id="header-title">Assistant Chat</div>
+        <div id="header-subtitle">Profile and theme controls live here</div>
+      </div>
+      <div id="header-actions">
+        <button class="header-btn" id="settings-btn" title="Settings">Settings</button>
+        <button class="header-btn" id="minimize-btn" title="Minimize">Hide</button>
+        <button class="header-btn" id="close-btn" title="Close">Close</button>
+      </div>
+    </div>
+
+    <div id="messages"></div>
+
+    <div id="input-area">
+      <div id="input-row">
+        <input type="text" id="input-box" placeholder="Type a command..." autocomplete="off">
+        <button id="send-btn" title="Send">Send</button>
+      </div>
+      <div id="quick-actions">
+        <button class="chip-btn" data-cmd="Open Downloads">Open Downloads</button>
+        <button class="chip-btn" data-cmd="Increase Volume">Volume Up</button>
+        <button class="chip-btn" data-cmd="Launch Chrome">Chrome</button>
+        <button class="chip-btn" data-cmd="System Status">Status</button>
+        <button class="chip-btn" data-cmd="Help">Help</button>
+      </div>
+    </div>
+
+    <div id="status-bar">Press Enter to send. Open Settings to manage profile, theme, and contacts.</div>
+
+    <div id="settings-overlay">
+      <aside id="settings-panel">
+        <div class="panel-header">
+          <div>
+            <div class="panel-title">Assistant Settings</div>
+            <div class="panel-subtitle">Assistant identity, user profile, theme, and contacts</div>
+          </div>
+          <button class="icon-btn" id="settings-close-btn" title="Close settings">X</button>
+        </div>
+
+        <div class="panel-scroll">
+          <section class="settings-hero">
+            <div class="hero-top">
+              <div>
+                <div class="hero-badge">Local Workspace</div>
+                <div class="hero-name" id="settings-hero-name">JARVIS</div>
+                <div class="hero-role" id="settings-hero-title">Desktop Assistant configured for local automation and contact-aware actions.</div>
+              </div>
+            </div>
+            <div class="hero-stats">
+              <div class="hero-stat">
+                <div class="hero-stat-label">Addressing</div>
+                <div class="hero-stat-value" id="settings-hero-honorific">sir</div>
+              </div>
+              <div class="hero-stat">
+                <div class="hero-stat-label">Theme</div>
+                <div class="hero-stat-value" id="settings-hero-theme">Midnight</div>
+              </div>
+              <div class="hero-stat">
+                <div class="hero-stat-label">Contacts</div>
+                <div class="hero-stat-value" id="settings-hero-contacts">0 saved</div>
+              </div>
+            </div>
+          </section>
+
+          <div class="settings-nav">
+            <button class="settings-nav-chip" data-section-target="identity" type="button">
+              <span class="nav-label">Identity</span>
+              <span class="nav-hint">Assistant name, title, honorific, and wake word.</span>
+            </button>
+            <button class="settings-nav-chip" data-section-target="profile" type="button">
+              <span class="nav-label">Profile</span>
+              <span class="nav-hint">Personal details for future form-filling workflows.</span>
+            </button>
+            <button class="settings-nav-chip" data-section-target="theme" type="button">
+              <span class="nav-label">Theme</span>
+              <span class="nav-hint">Reveal chat themes only when needed.</span>
+            </button>
+            <button class="settings-nav-chip" data-section-target="contacts" type="button">
+              <span class="nav-label">Contacts</span>
+              <span class="nav-hint">Manage up to 10 saved contacts from one compact list.</span>
+            </button>
+          </div>
+
+          <section class="settings-section" data-settings-section="identity" id="settings-section-identity">
+            <div class="section-heading">Assistant Identity</div>
+            <div class="field-grid">
+              <label class="field-wrap">
+                <span class="field-label">Assistant Name</span>
+                <input class="field" id="assistant-display-name" type="text" placeholder="JARVIS">
+              </label>
+              <label class="field-wrap">
+                <span class="field-label">Assistant Title</span>
+                <input class="field" id="assistant-title" type="text" placeholder="Desktop Assistant">
+              </label>
+            </div>
+            <div class="field-grid">
+              <label class="field-wrap">
+                <span class="field-label">Honorific</span>
+                <select class="field-select" id="assistant-honorific">
+                  <option value="sir">sir</option>
+                  <option value="master">master</option>
+                  <option value="boss">boss</option>
+                  <option value="commander">commander</option>
+                </select>
+              </label>
+              <label class="field-wrap">
+                <span class="field-label">Wake Word</span>
+                <input class="field" id="assistant-wake-word" type="text" placeholder="jarvis">
+              </label>
+            </div>
+          </section>
+
+          <section class="settings-section" data-settings-section="profile" id="settings-section-profile">
+            <div class="section-heading">User Profile</div>
+            <div class="section-note">These details are stored locally so the assistant can reuse them when form-filling features are added or expanded.</div>
+            <div class="field-grid">
+              <label class="field-wrap">
+                <span class="field-label">Full Name</span>
+                <input class="field" id="profile-full-name" type="text">
+              </label>
+              <label class="field-wrap">
+                <span class="field-label">Email</span>
+                <input class="field" id="profile-email" type="email">
+              </label>
+            </div>
+            <div class="field-grid">
+              <label class="field-wrap">
+                <span class="field-label">Phone</span>
+                <input class="field" id="profile-phone" type="text">
+              </label>
+              <label class="field-wrap">
+                <span class="field-label">Company</span>
+                <input class="field" id="profile-company" type="text">
+              </label>
+            </div>
+            <div class="field-grid">
+              <label class="field-wrap">
+                <span class="field-label">Role</span>
+                <input class="field" id="profile-role" type="text">
+              </label>
+              <label class="field-wrap">
+                <span class="field-label">Country</span>
+                <input class="field" id="profile-country" type="text">
+              </label>
+            </div>
+            <div class="field-grid single">
+              <label class="field-wrap">
+                <span class="field-label">Address Line</span>
+                <input class="field" id="profile-address-line1" type="text">
+              </label>
+            </div>
+            <div class="field-grid">
+              <label class="field-wrap">
+                <span class="field-label">City</span>
+                <input class="field" id="profile-city" type="text">
+              </label>
+              <label class="field-wrap">
+                <span class="field-label">State</span>
+                <input class="field" id="profile-state" type="text">
+              </label>
+            </div>
+            <div class="field-grid">
+              <label class="field-wrap">
+                <span class="field-label">Postal Code</span>
+                <input class="field" id="profile-postal-code" type="text">
+              </label>
+              <label class="field-wrap">
+                <span class="field-label">Chat History Limit</span>
+                <input class="field" id="chat-max-history" type="number" min="50" max="2000">
+              </label>
+            </div>
+          </section>
+
+          <section class="settings-section" data-settings-section="theme" id="settings-section-theme">
+            <div class="section-heading">Theme</div>
+            <div class="theme-grid" id="theme-grid"></div>
+          </section>
+
+          <section class="settings-section" data-settings-section="contacts" id="settings-section-contacts">
+            <div class="section-heading">Contacts</div>
+            <div class="section-note">Save family, friends, and work contacts here so call and message commands resolve reliably. Maximum 10 contacts are stored locally.</div>
+            <div class="contact-layout">
+              <div class="contact-stage">
+                <div class="contact-stage-header">
+                  <div class="contact-stage-title">Saved Contacts</div>
+                  <div class="contact-stage-tools">
+                    <div class="contact-usage" id="contact-usage">0 / 10 saved</div>
+                    <button class="contact-add-btn" id="contact-add-btn" title="Add contact" type="button">+</button>
+                  </div>
+                </div>
+                <div class="contact-list" id="contact-list"></div>
+              </div>
+
+              <div class="contact-stage contact-editor" id="contact-editor-stage">
+                <div class="contact-stage-header">
+                  <div class="contact-stage-title" id="contact-editor-title">Add Contact</div>
+                </div>
+                <div class="field-grid">
+                  <label class="field-wrap">
+                    <span class="field-label">Name</span>
+                    <input class="field" id="contact-name" type="text">
+                  </label>
+                  <label class="field-wrap">
+                    <span class="field-label">Phone</span>
+                    <input class="field" id="contact-phone" type="text">
+                  </label>
+                </div>
+
+                <div class="field-grid single">
+                  <label class="field-wrap">
+                    <span class="field-label">Aliases</span>
+                    <input class="field" id="contact-aliases" type="text" placeholder="dad, father">
+                  </label>
+                </div>
+
+                <div class="field-grid">
+                  <label class="field-wrap">
+                    <span class="field-label">Preferred Messaging</span>
+                    <select class="field-select" id="contact-message-platform">
+                      <option value="">Default</option>
+                      <option value="whatsapp">whatsapp</option>
+                      <option value="phone">phone</option>
+                    </select>
+                  </label>
+                  <label class="field-wrap">
+                    <span class="field-label">Preferred Call</span>
+                    <select class="field-select" id="contact-call-platform">
+                      <option value="">Default</option>
+                      <option value="whatsapp">whatsapp</option>
+                      <option value="phone">phone</option>
+                    </select>
+                  </label>
+                </div>
+
+                <div class="field-grid single">
+                  <label class="field-wrap">
+                    <span class="field-label">WhatsApp Call URI</span>
+                    <input class="field" id="contact-whatsapp-uri" type="text" placeholder="Optional fallback URI">
+                  </label>
+                </div>
+
+                <div class="contact-actions">
+                  <button class="secondary-btn" id="contact-cancel-btn" type="button">Cancel</button>
+                  <button class="primary-btn" id="contact-save-btn" type="button">Save Contact</button>
+                  <button class="danger-btn" id="contact-delete-btn" type="button">Delete Contact</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="settings-section" id="settings-footer-section">
+            <div class="panel-actions">
+              <button class="primary-btn" id="settings-save-btn" type="button">Save Settings</button>
+              <button class="secondary-btn" id="settings-reset-btn" type="button">Reset Defaults</button>
+            </div>
+            <div id="settings-status"></div>
+          </section>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <script>
+    const messagesEl = document.getElementById('messages');
+    const inputBox = document.getElementById('input-box');
+    const sendBtn = document.getElementById('send-btn');
+    const closeBtn = document.getElementById('close-btn');
+    const minimizeBtn = document.getElementById('minimize-btn');
+    const settingsBtn = document.getElementById('settings-btn');
+    const settingsOverlay = document.getElementById('settings-overlay');
+    const settingsCloseBtn = document.getElementById('settings-close-btn');
+    const settingsNavButtons = document.querySelectorAll('.settings-nav-chip');
+    const settingsSections = document.querySelectorAll('[data-settings-section]');
+    const settingsFooterSection = document.getElementById('settings-footer-section');
+    const quickBtns = document.querySelectorAll('.chip-btn');
+    const themeGrid = document.getElementById('theme-grid');
+    const contactListEl = document.getElementById('contact-list');
+    const contactUsageEl = document.getElementById('contact-usage');
+    const contactAddBtn = document.getElementById('contact-add-btn');
+    const contactEditorStage = document.getElementById('contact-editor-stage');
+    const contactEditorTitleEl = document.getElementById('contact-editor-title');
+    const contactDeleteBtn = document.getElementById('contact-delete-btn');
+    const settingsStatusEl = document.getElementById('settings-status');
+
+    const CONFIRM_WORDS = ['proceed', 'yes', 'confirm', 'do it', 'go ahead', 'yeah', 'yep', 'sure', 'continue'];
+    const CANCEL_WORDS = ['no', 'cancel', 'stop', 'never mind', 'abort', 'dont'];
+    const CONTACT_LIMIT = 10;
+
+    let isProcessing = false;
+    let pendingConfirmation = null;
+    let settingsSnapshot = null;
+    let selectedThemeId = 'midnight';
+    let selectedContactName = null;
+    let activeSettingsSection = null;
+    let isContactEditorOpen = false;
+    let hasRenderedWelcome = false;
+
+    const fieldIds = {
+      assistantDisplayName: 'assistant-display-name',
+      assistantTitle: 'assistant-title',
+      assistantHonorific: 'assistant-honorific',
+      assistantWakeWord: 'assistant-wake-word',
+      profileFullName: 'profile-full-name',
+      profileEmail: 'profile-email',
+      profilePhone: 'profile-phone',
+      profileAddressLine1: 'profile-address-line1',
+      profileCity: 'profile-city',
+      profileState: 'profile-state',
+      profilePostalCode: 'profile-postal-code',
+      profileCountry: 'profile-country',
+      profileCompany: 'profile-company',
+      profileRole: 'profile-role',
+      chatMaxHistory: 'chat-max-history',
+      contactName: 'contact-name',
+      contactPhone: 'contact-phone',
+      contactAliases: 'contact-aliases',
+      contactMessagePlatform: 'contact-message-platform',
+      contactCallPlatform: 'contact-call-platform',
+      contactWhatsappUri: 'contact-whatsapp-uri'
+    };
+
+    function getAssistantDisplayName() {
+      return settingsSnapshot?.settings?.assistant?.displayName || 'JARVIS';
+    }
+
+    function getHonorific() {
+      return settingsSnapshot?.settings?.assistant?.honorific || 'sir';
+    }
+
+    function assistantMeta(label = 'just now') {
+      return `${getAssistantDisplayName()} - ${label}`;
+    }
+
+    function addMessage(text, type, meta) {
+      const msg = document.createElement('div');
+      msg.className = `message ${type}`;
+      msg.innerHTML = `${text}${meta ? `<div class="meta">${meta}</div>` : ''}`;
+      messagesEl.appendChild(msg);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+      return msg;
+    }
+
+    function showTyping() {
+      const el = document.createElement('div');
+      el.className = 'typing';
+      el.id = 'typing-indicator';
+      el.innerHTML = '<span></span><span></span><span></span>';
+      messagesEl.appendChild(el);
+      messagesEl.scrollTop = messagesEl.scrollHeight;
+    }
+
+    function hideTyping() {
+      const el = document.getElementById('typing-indicator');
+      if (el) {
+        el.remove();
+      }
+    }
+
+    function isConfirmWord(text) {
+      const lower = String(text || '').trim().toLowerCase();
+      return CONFIRM_WORDS.some(word => lower === word || lower.startsWith(`${word} `));
+    }
+
+    function isCancelWord(text) {
+      const lower = String(text || '').trim().toLowerCase();
+      return CANCEL_WORDS.some(word => lower === word || lower.startsWith(`${word} `));
+    }
+
+    function addConfirmationButtons(result) {
+      pendingConfirmation = {
+        commandId: result.commandId,
+        intent: result.intent,
+        entities: result.entities
+      };
+
+      const msgDiv = addMessage(
+        result.response || `Please confirm this action, ${getHonorific()}.`,
+        'system',
+        `${getAssistantDisplayName()} - confirmation required`
+      );
+
+      const row = document.createElement('div');
+      row.className = 'confirm-actions';
+
+      const proceedBtn = document.createElement('button');
+      proceedBtn.className = 'primary-btn';
+      proceedBtn.textContent = 'Proceed';
+      proceedBtn.addEventListener('click', executeConfirmed);
+
+      const cancelBtn = document.createElement('button');
+      cancelBtn.className = 'danger-btn';
+      cancelBtn.textContent = 'Cancel';
+      cancelBtn.addEventListener('click', cancelConfirmation);
+
+      row.appendChild(proceedBtn);
+      row.appendChild(cancelBtn);
+      msgDiv.appendChild(row);
+    }
+
+    async function executeConfirmed() {
+      if (!pendingConfirmation) {
+        return;
+      }
+
+      const { commandId, intent, entities } = pendingConfirmation;
+      pendingConfirmation = null;
+      isProcessing = true;
+      showTyping();
+
+      try {
+        const result = await window.jarvis.confirmAction(commandId, intent, entities);
+        hideTyping();
+        addMessage(result.response || `Operation completed, ${getHonorific()}.`, 'assistant', assistantMeta());
+      } catch (err) {
+        hideTyping();
+        addMessage(`Unable to complete that action, ${getHonorific()}.`, 'system', assistantMeta('error'));
+      } finally {
+        isProcessing = false;
+        inputBox.focus();
+      }
+    }
+
+    function cancelConfirmation() {
+      pendingConfirmation = null;
+      addMessage(`Action cancelled, ${getHonorific()}.`, 'assistant', assistantMeta('cancelled'));
+      inputBox.focus();
+    }
+
+    async function sendCommand(text) {
+      if (!text.trim() || isProcessing) {
+        return;
+      }
+
+      if (pendingConfirmation) {
+        addMessage(text, 'user', 'You - just now');
+        if (isConfirmWord(text)) {
+          await executeConfirmed();
+        } else if (isCancelWord(text)) {
+          cancelConfirmation();
+        } else {
+          addMessage(`Please reply with Proceed or Cancel, ${getHonorific()}.`, 'system', assistantMeta());
+        }
+        return;
+      }
+
+      isProcessing = true;
+      addMessage(text, 'user', 'You - just now');
+      inputBox.value = '';
+      showTyping();
+
+      try {
+        const result = await window.jarvis.processCommand(text, 'chat');
+        hideTyping();
+
+        if (result.requiresConfirmation) {
+          addConfirmationButtons(result);
+          return;
+        }
+
+        addMessage(result.response || `Operation completed, ${getHonorific()}.`, 'assistant', assistantMeta());
+      } catch (err) {
+        hideTyping();
+        addMessage(`An error occurred, ${getHonorific()}.`, 'system', assistantMeta('error'));
+      } finally {
+        isProcessing = false;
+        inputBox.focus();
+      }
+    }
+
+    function handleSend() {
+      const text = inputBox.value.trim();
+      if (text) {
+        sendCommand(text);
+      }
+    }
+
+    function applyTheme(themeId) {
+      if (!settingsSnapshot) {
+        return;
+      }
+
+      const theme = (settingsSnapshot.availableThemes || []).find(entry => entry.id === themeId)
+        || settingsSnapshot.availableThemes?.[0];
+      if (!theme) {
+        return;
+      }
+
+      selectedThemeId = theme.id;
+      const root = document.documentElement;
+      root.style.setProperty('--panel-bg', theme.colors.panel);
+      root.style.setProperty('--surface-bg', theme.colors.surface);
+      root.style.setProperty('--surface-strong', theme.colors.surfaceStrong);
+      root.style.setProperty('--border-color', theme.colors.border);
+      root.style.setProperty('--text-color', theme.colors.text);
+      root.style.setProperty('--muted-color', theme.colors.muted);
+      root.style.setProperty('--accent-color', theme.colors.accent);
+
+      document.querySelectorAll('.theme-card').forEach(card => {
+        card.classList.toggle('active', card.dataset.themeId === theme.id);
+      });
+
+      if (settingsSnapshot) {
+        updateSettingsSummary();
+      }
+    }
+
+    function renderThemeCards() {
+      themeGrid.innerHTML = '';
+      const captions = {
+        midnight: 'Cold glass, deep contrast, focused on commands.',
+        dawn: 'Warm copper tones for a softer workspace.',
+        forest: 'Calm green surfaces with lower visual glare.',
+        graphite: 'Neutral slate palette for long sessions.'
+      };
+      (settingsSnapshot?.availableThemes || []).forEach(theme => {
+        const card = document.createElement('button');
+        card.type = 'button';
+        card.className = 'theme-card';
+        card.dataset.themeId = theme.id;
+        card.innerHTML = `
+          <div class="theme-preview" style="background:
+            radial-gradient(circle at top right, rgba(255,255,255,0.14), transparent 30%),
+            linear-gradient(160deg, rgba(255,255,255,0.06), transparent 35%),
+            ${theme.colors.panel}; border: 1px solid ${theme.colors.border};"></div>
+          <div class="theme-name">${theme.label}</div>
+          <div class="theme-caption">${captions[theme.id] || theme.id}</div>
+          <div class="theme-select">
+            <span class="section-note">${theme.id}</span>
+            <input type="radio" name="theme-choice" value="${theme.id}">
+          </div>
+        `;
+        card.addEventListener('click', () => {
+          applyTheme(theme.id);
+          const radio = card.querySelector('input[type="radio"]');
+          if (radio) {
+            radio.checked = true;
+          }
+        });
+        themeGrid.appendChild(card);
+      });
+    }
+
+    function setFieldValue(id, value) {
+      const element = document.getElementById(id);
+      if (element) {
+        element.value = value || '';
+      }
+    }
+
+    function populateSettingsForm() {
+      const settings = settingsSnapshot?.settings;
+      if (!settings) {
+        return;
+      }
+
+      setFieldValue(fieldIds.assistantDisplayName, settings.assistant.displayName);
+      setFieldValue(fieldIds.assistantTitle, settings.assistant.title);
+      setFieldValue(fieldIds.assistantHonorific, settings.assistant.honorific);
+      setFieldValue(fieldIds.assistantWakeWord, settings.voice.wakeWord);
+      setFieldValue(fieldIds.profileFullName, settings.userProfile.fullName);
+      setFieldValue(fieldIds.profileEmail, settings.userProfile.email);
+      setFieldValue(fieldIds.profilePhone, settings.userProfile.phone);
+      setFieldValue(fieldIds.profileAddressLine1, settings.userProfile.addressLine1);
+      setFieldValue(fieldIds.profileCity, settings.userProfile.city);
+      setFieldValue(fieldIds.profileState, settings.userProfile.state);
+      setFieldValue(fieldIds.profilePostalCode, settings.userProfile.postalCode);
+      setFieldValue(fieldIds.profileCountry, settings.userProfile.country);
+      setFieldValue(fieldIds.profileCompany, settings.userProfile.company);
+      setFieldValue(fieldIds.profileRole, settings.userProfile.role);
+      setFieldValue(fieldIds.chatMaxHistory, String(settings.chat.maxHistory));
+
+      renderThemeCards();
+      applyTheme(settings.chat.themeId);
+
+      const selectedThemeInput = document.querySelector(`input[name="theme-choice"][value="${settings.chat.themeId}"]`);
+      if (selectedThemeInput) {
+        selectedThemeInput.checked = true;
+      }
+    }
+
+    function setActiveSettingsSection(sectionName) {
+      activeSettingsSection = sectionName || null;
+
+      settingsNavButtons.forEach(button => {
+        const isActive = button.dataset.sectionTarget === activeSettingsSection;
+        button.classList.toggle('active', isActive);
+      });
+
+      settingsSections.forEach(section => {
+        section.classList.toggle('open', section.dataset.settingsSection === activeSettingsSection);
+      });
+
+      settingsFooterSection.classList.toggle('open', Boolean(activeSettingsSection));
+    }
+
+    function setContactEditorOpen(isOpen, mode = 'create') {
+      isContactEditorOpen = Boolean(isOpen);
+      contactEditorStage.classList.toggle('open', isContactEditorOpen);
+      contactEditorTitleEl.textContent = mode === 'edit' ? 'Edit Contact' : 'Add Contact';
+      contactDeleteBtn.style.display = mode === 'edit' ? 'inline-flex' : 'none';
+    }
+
+    function openNewContactEditor() {
+      const contacts = settingsSnapshot?.contacts || [];
+      if (contacts.length >= CONTACT_LIMIT) {
+        setSettingsStatus(`Contact limit reached. Remove one of the ${CONTACT_LIMIT} saved contacts before adding another.`, 'error');
+        return;
+      }
+
+      setActiveSettingsSection('contacts');
+      selectedContactName = null;
+      setFieldValue(fieldIds.contactName, '');
+      setFieldValue(fieldIds.contactPhone, '');
+      setFieldValue(fieldIds.contactAliases, '');
+      setFieldValue(fieldIds.contactMessagePlatform, '');
+      setFieldValue(fieldIds.contactCallPlatform, '');
+      setFieldValue(fieldIds.contactWhatsappUri, '');
+      setContactEditorOpen(true, 'create');
+      renderContacts();
+      document.getElementById(fieldIds.contactName).focus();
+    }
+
+    function renderContacts() {
+      const contacts = settingsSnapshot?.contacts || [];
+      contactListEl.innerHTML = '';
+      contactUsageEl.textContent = `${contacts.length} / ${CONTACT_LIMIT} saved`;
+      contactAddBtn.disabled = contacts.length >= CONTACT_LIMIT;
+
+      if (contacts.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'section-note';
+        empty.textContent = `No contacts saved yet. Press + to add one for ${getAssistantDisplayName()}.`;
+        contactListEl.appendChild(empty);
+        updateSettingsSummary();
+        return;
+      }
+
+      contacts.forEach(contact => {
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'contact-item';
+        if (selectedContactName && selectedContactName.toLowerCase() === contact.name.toLowerCase()) {
+          button.classList.add('active');
+        }
+        button.innerHTML = `
+          <span class="contact-name">${contact.name}</span>
+          <span class="contact-meta">${contact.phone || 'No phone saved'}</span>
+          <span class="contact-meta">${(contact.aliases || []).join(', ') || 'No aliases'}</span>
+        `;
+        button.addEventListener('click', () => fillContactForm(contact));
+        contactListEl.appendChild(button);
+      });
+
+      if (settingsSnapshot) {
+        updateSettingsSummary();
+      }
+    }
+
+    function clearContactForm(options = {}) {
+      const shouldOpenEditor = Boolean(options.openEditor);
+      selectedContactName = null;
+      setFieldValue(fieldIds.contactName, '');
+      setFieldValue(fieldIds.contactPhone, '');
+      setFieldValue(fieldIds.contactAliases, '');
+      setFieldValue(fieldIds.contactMessagePlatform, '');
+      setFieldValue(fieldIds.contactCallPlatform, '');
+      setFieldValue(fieldIds.contactWhatsappUri, '');
+      setContactEditorOpen(shouldOpenEditor, 'create');
+      renderContacts();
+    }
+
+    function populateContactForm(contact, options = {}) {
+      const shouldOpenEditor = options.openEditor !== false;
+      selectedContactName = contact.name;
+      setFieldValue(fieldIds.contactName, contact.name);
+      setFieldValue(fieldIds.contactPhone, contact.phone);
+      setFieldValue(fieldIds.contactAliases, (contact.aliases || []).join(', '));
+      setFieldValue(fieldIds.contactMessagePlatform, contact.preferredMessagingPlatform || '');
+      setFieldValue(fieldIds.contactCallPlatform, contact.preferredCallPlatform || '');
+      setFieldValue(fieldIds.contactWhatsappUri, contact.whatsappCallUri || '');
+      setContactEditorOpen(shouldOpenEditor, 'edit');
+    }
+
+    function fillContactForm(contact) {
+      populateContactForm(contact, { openEditor: true });
+      renderContacts();
+    }
+
+    function collectSettingsPayload() {
+      return {
+        assistant: {
+          displayName: document.getElementById(fieldIds.assistantDisplayName).value.trim(),
+          title: document.getElementById(fieldIds.assistantTitle).value.trim(),
+          honorific: document.getElementById(fieldIds.assistantHonorific).value
+        },
+        voice: {
+          wakeWord: document.getElementById(fieldIds.assistantWakeWord).value.trim().toLowerCase()
+        },
+        userProfile: {
+          fullName: document.getElementById(fieldIds.profileFullName).value.trim(),
+          email: document.getElementById(fieldIds.profileEmail).value.trim(),
+          phone: document.getElementById(fieldIds.profilePhone).value.trim(),
+          addressLine1: document.getElementById(fieldIds.profileAddressLine1).value.trim(),
+          city: document.getElementById(fieldIds.profileCity).value.trim(),
+          state: document.getElementById(fieldIds.profileState).value.trim(),
+          postalCode: document.getElementById(fieldIds.profilePostalCode).value.trim(),
+          country: document.getElementById(fieldIds.profileCountry).value.trim(),
+          company: document.getElementById(fieldIds.profileCompany).value.trim(),
+          role: document.getElementById(fieldIds.profileRole).value.trim()
+        },
+        chat: {
+          themeId: selectedThemeId,
+          maxHistory: Number(document.getElementById(fieldIds.chatMaxHistory).value || 500)
+        }
+      };
+    }
+
+    function collectContactPayload() {
+      return {
+        name: document.getElementById(fieldIds.contactName).value.trim(),
+        phone: document.getElementById(fieldIds.contactPhone).value.trim(),
+        aliases: document.getElementById(fieldIds.contactAliases).value.trim(),
+        preferredMessagingPlatform: document.getElementById(fieldIds.contactMessagePlatform).value,
+        preferredCallPlatform: document.getElementById(fieldIds.contactCallPlatform).value,
+        whatsappCallUri: document.getElementById(fieldIds.contactWhatsappUri).value.trim()
+      };
+    }
+
+    function updateBranding() {
+      const assistantName = getAssistantDisplayName();
+      const assistantTitle = settingsSnapshot?.settings?.assistant?.title || 'Desktop Assistant';
+      document.getElementById('header-title').textContent = `${assistantName} Chat`;
+      document.getElementById('header-subtitle').textContent = assistantTitle;
+      document.title = `${assistantName} Chat`;
+    }
+
+    function updateSettingsSummary() {
+      const assistantName = getAssistantDisplayName();
+      const assistantTitle = settingsSnapshot?.settings?.assistant?.title || 'Desktop Assistant';
+      const theme = (settingsSnapshot?.availableThemes || []).find(entry => entry.id === selectedThemeId)
+        || (settingsSnapshot?.availableThemes || [])[0];
+      const contactCount = settingsSnapshot?.contacts?.length || 0;
+
+      document.getElementById('settings-hero-name').textContent = assistantName;
+      document.getElementById('settings-hero-title').textContent = `${assistantTitle} configured for local automation, profile storage, and contact-aware actions.`;
+      document.getElementById('settings-hero-honorific').textContent = settingsSnapshot?.settings?.assistant?.honorific || 'sir';
+      document.getElementById('settings-hero-theme').textContent = theme?.label || 'Theme';
+      document.getElementById('settings-hero-contacts').textContent = `${contactCount} / ${CONTACT_LIMIT}`;
+    }
+
+    function ensureWelcomeMessage() {
+      if (hasRenderedWelcome) {
+        return;
+      }
+
+      addMessage(
+        `At your service, ${getHonorific()}. How may I assist you?`,
+        'assistant',
+        assistantMeta('ready')
+      );
+      hasRenderedWelcome = true;
+    }
+
+    function setSettingsStatus(message, tone = 'info') {
+      const palette = {
+        info: 'var(--muted-color)',
+        success: 'var(--success-color)',
+        error: 'var(--danger-color)'
+      };
+      settingsStatusEl.textContent = message || '';
+      settingsStatusEl.style.color = palette[tone] || palette.info;
+    }
+
+    function applySnapshot(snapshot) {
+      settingsSnapshot = snapshot;
+      const selectedContact = settingsSnapshot?.contacts?.find(contact => (
+        selectedContactName && contact.name.toLowerCase() === selectedContactName.toLowerCase()
+      ));
+      if (selectedContact) {
+        populateContactForm(selectedContact, { openEditor: isContactEditorOpen });
+      } else if (!isContactEditorOpen) {
+        clearContactForm();
+      }
+      updateBranding();
+      populateSettingsForm();
+      renderContacts();
+      updateSettingsSummary();
+      ensureWelcomeMessage();
+    }
+
+    function openSettingsPanel() {
+      setActiveSettingsSection(null);
+      setContactEditorOpen(false, selectedContactName ? 'edit' : 'create');
+      settingsOverlay.classList.add('open');
+      setSettingsStatus('Settings are stored locally on this machine.', 'info');
+    }
+
+    function closeSettingsPanel() {
+      settingsOverlay.classList.remove('open');
+      inputBox.focus();
+    }
+
+    async function saveSettings() {
+      try {
+        setSettingsStatus('Saving settings...', 'info');
+        const snapshot = await window.jarvis.saveSettings(collectSettingsPayload());
+        applySnapshot(snapshot);
+        setSettingsStatus('Settings saved successfully.', 'success');
+        addMessage(`Settings updated. ${getAssistantDisplayName()} is ready, ${getHonorific()}.`, 'system', assistantMeta('settings'));
+      } catch (err) {
+        setSettingsStatus('Unable to save settings.', 'error');
+      }
+    }
+
+    async function resetSettings() {
+      try {
+        setSettingsStatus('Resetting settings...', 'info');
+        const snapshot = await window.jarvis.resetSettings();
+        selectedContactName = null;
+        setActiveSettingsSection(null);
+        applySnapshot(snapshot);
+        clearContactForm();
+        setSettingsStatus('Settings reset to defaults.', 'success');
+      } catch (err) {
+        setSettingsStatus('Unable to reset settings.', 'error');
+      }
+    }
+
+    async function saveContact() {
+      const payload = collectContactPayload();
+      if (!payload.name) {
+        setSettingsStatus('Contact name is required.', 'error');
+        return;
+      }
+
+      try {
+        setSettingsStatus(`Saving contact ${payload.name}...`, 'info');
+        const contacts = await window.jarvis.saveContact(payload);
+        settingsSnapshot.contacts = contacts;
+        selectedContactName = payload.name;
+        renderContacts();
+        fillContactForm(contacts.find(contact => contact.name.toLowerCase() === payload.name.toLowerCase()) || payload);
+        setSettingsStatus(`Contact ${payload.name} saved.`, 'success');
+      } catch (err) {
+        setSettingsStatus(err?.message || 'Unable to save contact.', 'error');
+      }
+    }
+
+    async function deleteContact() {
+      const name = document.getElementById(fieldIds.contactName).value.trim() || selectedContactName;
+      if (!name) {
+        setSettingsStatus('Select a contact before deleting it.', 'error');
+        return;
+      }
+
+      try {
+        setSettingsStatus(`Deleting contact ${name}...`, 'info');
+        const contacts = await window.jarvis.deleteContact(name);
+        settingsSnapshot.contacts = contacts;
+        clearContactForm();
+        setSettingsStatus(`Contact ${name} deleted.`, 'success');
+      } catch (err) {
+        setSettingsStatus(err?.message || 'Unable to delete contact.', 'error');
+      }
+    }
+
+    inputBox.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        handleSend();
+      }
+    });
+
+    sendBtn.addEventListener('click', handleSend);
+    quickBtns.forEach(button => {
+      button.addEventListener('click', () => {
+        const command = button.dataset.cmd;
+        if (command) {
+          sendCommand(command);
+        }
+      });
+    });
+
+    closeBtn.addEventListener('click', () => window.close());
+    minimizeBtn.addEventListener('click', () => window.blur());
+    settingsBtn.addEventListener('click', openSettingsPanel);
+    settingsCloseBtn.addEventListener('click', closeSettingsPanel);
+    settingsNavButtons.forEach(button => {
+      button.addEventListener('click', () => {
+        const sectionName = button.dataset.sectionTarget;
+        const nextSection = activeSettingsSection === sectionName ? null : sectionName;
+        setActiveSettingsSection(nextSection);
+        if (sectionName !== 'contacts' || nextSection === null) {
+          setContactEditorOpen(false, selectedContactName ? 'edit' : 'create');
+        }
+      });
+    });
+    document.getElementById('settings-save-btn').addEventListener('click', saveSettings);
+    document.getElementById('settings-reset-btn').addEventListener('click', resetSettings);
+    contactAddBtn.addEventListener('click', openNewContactEditor);
+    document.getElementById('contact-save-btn').addEventListener('click', saveContact);
+    document.getElementById('contact-delete-btn').addEventListener('click', deleteContact);
+    document.getElementById('contact-cancel-btn').addEventListener('click', () => clearContactForm());
+
+    settingsOverlay.addEventListener('click', (event) => {
+      if (event.target === settingsOverlay) {
+        closeSettingsPanel();
+      }
+    });
+
+    if (window.jarvis) {
+      window.jarvis.onVoiceResult((data) => {
+        if (data && data.text) {
+          inputBox.value = data.text;
+          sendCommand(data.text);
+        }
+      });
+
+      window.jarvis.onSettingsChanged((snapshot) => {
+        applySnapshot(snapshot);
+      });
+    }
+
+    async function initialize() {
+      const snapshot = await window.jarvis.getSettings();
+      applySnapshot(snapshot);
+      inputBox.focus();
+    }
+
+    initialize();
+  </script>
+</body>
+</html>

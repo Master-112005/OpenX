@@ -1,0 +1,576 @@
+const Logger = require('../../shared/index').Logger;
+const Normalizer = require('../../shared/index').Normalizer;
+const Validator = require('../../shared/index').Validator;
+const { cleanEntityName } = require('../../automation/common/path-utils');
+
+const APP_ALIASES = {
+  'vscode': 'code',
+  'visual studio code': 'code',
+  'vs code': 'code',
+  'chrome': 'chrome',
+  'google chrome': 'chrome',
+  'firefox': 'firefox',
+  'mozilla firefox': 'firefox',
+  'edge': 'msedge',
+  'microsoft edge': 'msedge',
+  'notepad': 'notepad',
+  'word': 'winword',
+  'microsoft word': 'winword',
+  'excel': 'excel',
+  'microsoft excel': 'excel',
+  'outlook': 'outlook',
+  'microsoft outlook': 'outlook',
+  'powershell': 'powershell',
+  'terminal': 'cmd',
+  'command prompt': 'cmd',
+  'cmd': 'cmd',
+  'explorer': 'explorer',
+  'file explorer': 'explorer',
+  'calculator': 'calc',
+  'paint': 'mspaint',
+  'snipping tool': 'snippingtool',
+  'task manager': 'taskmgr',
+  'control panel': 'control',
+  'settings': 'ms-settings',
+  'spotify': 'spotify',
+  'discord': 'discord',
+  'whatsapp': 'whatsapp',
+  'slack': 'slack',
+  'zoom': 'zoom',
+  'teams': 'teams',
+  'microsoft teams': 'teams',
+  'apple music': 'apple music',
+  'apple tv': 'apple tv',
+  'calendar': 'calendar',
+  'clock': 'clock',
+  'alarms': 'clock',
+  'alarms and clock': 'clock',
+  'antigravity': 'antigravity'
+};
+
+const FOLDER_ALIASES = {
+  'downloads': 'downloads',
+  'documents': 'documents',
+  'desktop': 'desktop',
+  'pictures': 'pictures',
+  'music': 'music',
+  'videos': 'videos',
+  'home': 'home'
+};
+
+class EntityExtractor {
+  constructor(config) {
+    this.logger = new Logger({ level: config?.logging?.level || 'info' });
+  }
+
+  extract(intent, text) {
+    if (!intent || !intent.entities) return {};
+
+    const entities = {};
+    const normalized = Normalizer.normalizeText(text);
+
+    intent.entities.forEach(entityDef => {
+      switch (entityDef.name) {
+        case 'value':
+          entities.value = this._extractValue(normalized);
+          break;
+        case 'appName':
+          entities.appName = this._extractAppName(normalized, text);
+          break;
+        case 'filename':
+          entities.filename = this._extractFilename(normalized, text);
+          break;
+        case 'folderName':
+          entities.folderName = this._extractFolderName(normalized, text);
+          break;
+        case 'url':
+          entities.url = this._extractUrl(normalized, text);
+          break;
+        case 'query':
+          entities.query = this._extractQuery(normalized, text);
+          break;
+        case 'contactName':
+          entities.contactName = this._extractContactName(normalized, text);
+          break;
+        case 'messageText':
+          entities.messageText = this._extractMessageText(normalized, text);
+          break;
+        case 'platform':
+          entities.platform = this._extractPlatform(normalized, text);
+          break;
+        case 'source':
+          entities.source = this._extractSource(normalized, text);
+          break;
+        case 'destination':
+          entities.destination = this._extractDestination(normalized, text);
+          break;
+        case 'oldName':
+          entities.oldName = this._extractOldName(normalized, text);
+          break;
+        case 'newName':
+          entities.newName = this._extractNewName(normalized, text);
+          break;
+        case 'windowName':
+          entities.windowName = this._extractWindowName(normalized);
+          break;
+        case 'path':
+          entities.path = this._extractPath(normalized, text);
+          break;
+        case 'duration':
+          entities.duration = this._extractDuration(text);
+          break;
+        case 'timeExpression':
+          entities.timeExpression = this._extractTimeExpression(normalized, text);
+          break;
+        case 'reminderText':
+          entities.reminderText = this._extractReminderText(normalized, text);
+          break;
+        case 'mediaQuery':
+          entities.mediaQuery = this._extractMediaQuery(normalized, text);
+          break;
+        case 'mediaPlatform':
+          entities.mediaPlatform = this._extractMediaPlatform(normalized, text);
+          break;
+        default:
+          break;
+      }
+    });
+
+    return entities;
+  }
+
+  _extractValue(text) {
+    const num = Normalizer.extractNumber(text);
+    if (num === null) return null;
+    if (num > 100) return 100;
+    if (num < 0) return 0;
+    return num;
+  }
+
+  _resolveAlias(candidate, aliases, config = {}) {
+    if (!candidate) return null;
+
+    const normalized = Normalizer.normalizeText(candidate);
+    if (aliases[normalized]) {
+      return aliases[normalized];
+    }
+
+    const match = Normalizer.findClosestOption(normalized, Object.keys(aliases), config);
+    return match ? aliases[match.normalizedMatch] : null;
+  }
+
+  _extractAppName(text, raw) {
+    for (const [alias, app] of Object.entries(APP_ALIASES)) {
+      if (text.includes(alias)) return app;
+    }
+
+    const verbs = ['open', 'launch', 'start', 'close', 'exit', 'quit', 'terminate', 'switch', 'go', 'focus', 'run'];
+    const tokens = Normalizer.tokenize(text);
+    if (tokens.length > 1) {
+      const firstTokenMatch = Normalizer.findClosestOption(tokens[0], verbs, { minSimilarity: 0.6, maxDistance: 2 });
+      if (firstTokenMatch) {
+        const tail = tokens.slice(1).join(' ');
+        const fuzzyAlias = this._resolveAlias(tail, APP_ALIASES, { minSimilarity: 0.62, maxDistance: 2 });
+        if (fuzzyAlias) {
+          return fuzzyAlias;
+        }
+      }
+    }
+
+    const patterns = ['open ', 'launch ', 'start ', 'close ', 'exit ', 'quit ', 'terminate ', 'switch to ', 'go to ', 'focus ', 'run '];
+    for (const p of patterns) {
+      if (text.includes(p)) {
+        const after = text.split(p)[1];
+        if (after && after.trim()) {
+          const exactAlias = this._resolveAlias(after.trim(), APP_ALIASES, { minSimilarity: 0.62, maxDistance: 2 });
+          if (exactAlias) {
+            return exactAlias;
+          }
+          return after.trim().split(/\s+/)[0];
+        }
+      }
+    }
+
+    const fallbackAlias = this._resolveAlias(raw, APP_ALIASES, { minSimilarity: 0.62, maxDistance: 2 });
+    if (fallbackAlias) {
+      return fallbackAlias;
+    }
+
+    return null;
+  }
+
+  _extractFilename(text, raw) {
+    const explicitFile = raw.match(/(?:^|[\s"])([^\s"\\/]+\.[A-Za-z0-9]{1,10})(?=$|[\s"])/);
+    if (explicitFile) {
+      return cleanEntityName(explicitFile[1]);
+    }
+
+    const explicitPath = raw.match(/(?:^|[\s"])([A-Za-z]:\\[^\s"]+\.[A-Za-z0-9]{1,10})(?=$|[\s"])/);
+    if (explicitPath) {
+      return cleanEntityName(explicitPath[1]);
+    }
+
+    const patterns = [
+      /\b(?:create|new|make)\s+file\s+(.+?)(?=\s+(?:on|in|at|to|from)\b|$)/i,
+      /\b(?:delete|remove|erase)\s+file\s+(.+?)(?=\s+(?:on|in|at|to|from)\b|$)/i,
+      /\b(?:delete|remove|erase)\s+(.+?)\s+file(?=\s+(?:on|in|at|to|from)\b|$)/i,
+      /\b(?:rename|copy|move)\s+file\s+(.+?)(?=\s+(?:to|into|in|on|from)\b|$)/i
+    ];
+
+    for (const pattern of patterns) {
+      const match = raw.match(pattern);
+      if (match && match[1]) {
+        return cleanEntityName(match[1]);
+      }
+    }
+
+    return null;
+  }
+
+  _extractFolderName(text, raw) {
+    const patterns = [
+      /\b(?:create|new|make)\s+(?:folder|directory)\s+(.+?)(?=\s+(?:on|in|at|to|from)\b|$)/i,
+      /\b(?:delete|remove|erase)\s+(?:folder|directory)\s+(.+?)(?=\s+(?:on|in|at|to|from)\b|$)/i,
+      /\b(?:open|show|navigate to|go to)\s+(?:folder|directory)\s+(.+?)(?=\s+(?:on|in|at)\b|$)/i,
+      /\bmove\s+(?:folder|directory)\s+(.+?)(?=\s+(?:to|into|in|on|from)\b|$)/i
+    ];
+
+    for (const pattern of patterns) {
+      const match = raw.match(pattern);
+      if (match && match[1]) {
+        return Validator.sanitizePath(cleanEntityName(match[1]) || '');
+      }
+    }
+
+    for (const [alias, folder] of Object.entries(FOLDER_ALIASES)) {
+      if (text.includes(alias)) return folder;
+    }
+
+    const fuzzyFolder = this._resolveAlias(raw, FOLDER_ALIASES, { minSimilarity: 0.65, maxDistance: 2 });
+    if (fuzzyFolder) {
+      return fuzzyFolder;
+    }
+
+    return null;
+  }
+
+  _extractUrl(text, raw) {
+    const urlMatch = raw.match(/(?:https?:\/\/)?(?:www\.)?([a-zA-Z0-9-]+\.[a-zA-Z]{2,})(?:\/\S*)?/);
+    if (urlMatch) return urlMatch[0];
+
+    const patterns = ['open website ', 'go to website ', 'open url ', 'navigate to ', 'browse to ', 'open ', 'go to '];
+    for (const p of patterns) {
+      if (text.includes(p)) {
+        const after = text.split(p)[1];
+        if (after && after.trim()) {
+          const site = after.trim().split(/\s+/)[0];
+          if (!site.includes('.')) return `https://www.google.com/search?q=${encodeURIComponent(site)}`;
+          if (!site.startsWith('http')) return `https://${site}`;
+          return site;
+        }
+      }
+    }
+
+    return null;
+  }
+
+  _extractQuery(text, raw) {
+    const patterns = ['search for ', 'search web ', 'search ', 'look up ', 'google ', 'find file ', 'search file ', 'look for file ', 'find '];
+    for (const p of patterns) {
+      if (text.includes(p)) {
+        const after = raw.split(new RegExp(p, 'i'))[1];
+        if (after && after.trim()) {
+          return after.trim();
+        }
+      }
+    }
+
+    if (/^(what|who|when|where|why|how)\b/i.test(String(raw || '').trim())) {
+      return String(raw || '').trim();
+    }
+
+    return null;
+  }
+
+  _parseMessageCommand(raw) {
+    const source = String(raw || '').trim();
+    if (!source) return null;
+
+    const patterns = [
+      {
+        regex: /^(?:say|send)\s+(.+?)\s+to\s+(.+?)(?:\s+(?:on|via|using)\s+(.+))?$/i,
+        map: match => ({
+          messageText: match[1],
+          contactName: match[2],
+          platform: match[3]
+        })
+      },
+      {
+        regex: /^(?:ask|tell|message|text|msg|massage)\s+(.+?)(?:\s+(?:on|via|using)\s+(.+?))?\s+to\s+(.+)$/i,
+        map: match => ({
+          contactName: match[1],
+          platform: match[2],
+          messageText: match[3]
+        })
+      },
+      {
+        regex: /^(?:send(?:\s+a)?\s+(?:message|text))\s+to\s+(.+?)(?:\s+(?:on|via|using)\s+(.+?))?\s+(?:saying|that)\s+(.+)$/i,
+        map: match => ({
+          contactName: match[1],
+          platform: match[2],
+          messageText: match[3]
+        })
+      },
+      {
+        regex: /^(?:message|text)\s+(.+?)(?:\s+(?:on|via|using)\s+(.+?))?\s+(?:saying|that)\s+(.+)$/i,
+        map: match => ({
+          contactName: match[1],
+          platform: match[2],
+          messageText: match[3]
+        })
+      }
+    ];
+
+    for (const pattern of patterns) {
+      const match = source.match(pattern.regex);
+      if (!match) continue;
+
+      const parsed = pattern.map(match);
+      return {
+        contactName: this._cleanContactName(parsed.contactName),
+        messageText: this._cleanMessageText(parsed.messageText),
+        platform: this._cleanPlatformName(parsed.platform)
+      };
+    }
+
+    return null;
+  }
+
+  _parseCallCommand(raw) {
+    const source = String(raw || '').trim();
+    if (!source) return null;
+
+    const match = source.match(/^(?:call|dial|phone|ring)\s+(.+?)(?:\s+(?:on|via|using)\s+(.+))?$/i);
+    if (!match) {
+      return null;
+    }
+
+    return {
+      contactName: this._cleanContactName(match[1]),
+      platform: this._cleanPlatformName(match[2])
+    };
+  }
+
+  _cleanContactName(value) {
+    return String(value || '')
+      .trim()
+      .replace(/^["']|["']$/g, '')
+      .replace(/^(?:the|my)\s+/i, '')
+      .replace(/\s+(?:please|now)$/i, '')
+      .trim() || null;
+  }
+
+  _cleanMessageText(value) {
+    return String(value || '')
+      .trim()
+      .replace(/^["']|["']$/g, '')
+      .replace(/\s+(?:please|now)$/i, '')
+      .trim() || null;
+  }
+
+  _cleanPlatformName(value) {
+    const source = String(value || '').trim().toLowerCase();
+    if (!source) return null;
+    if (source.includes('whatsapp')) return 'whatsapp';
+    if (source.includes('phone') || source.includes('mobile')) return 'phone';
+    return source.replace(/\s+(?:please|now)$/i, '').trim() || null;
+  }
+
+  _extractContactName(text, raw) {
+    const messageCommand = this._parseMessageCommand(raw);
+    if (messageCommand?.contactName) {
+      return messageCommand.contactName;
+    }
+
+    const callCommand = this._parseCallCommand(raw);
+    if (callCommand?.contactName) {
+      return callCommand.contactName;
+    }
+
+    return null;
+  }
+
+  _extractMessageText(text, raw) {
+    const messageCommand = this._parseMessageCommand(raw);
+    return messageCommand?.messageText || null;
+  }
+
+  _extractPlatform(text, raw) {
+    const messageCommand = this._parseMessageCommand(raw);
+    if (messageCommand?.platform) {
+      return messageCommand.platform;
+    }
+
+    const callCommand = this._parseCallCommand(raw);
+    if (callCommand?.platform) {
+      return callCommand.platform;
+    }
+
+    if (/\bwhatsapp\b/i.test(raw)) return 'whatsapp';
+    if (/\b(?:phone|mobile)\b/i.test(raw)) return 'phone';
+    return null;
+  }
+
+  _extractSource(text, raw) {
+    const match = raw.match(/\b(?:copy|move)(?:\s+(?:file|folder|directory))?\s+(.+?)(?=\s+(?:to|into)\b|$)/i);
+    return match ? cleanEntityName(match[1], { stripTypeWords: true }) : null;
+  }
+
+  _extractDestination(text, raw) {
+    const toMatch = raw.match(/(?:to|into|in)\s+(.+?)$/i);
+    if (toMatch) return cleanEntityName(toMatch[1], { stripTypeWords: true });
+    return null;
+  }
+
+  _extractOldName(text, raw) {
+    const match = raw.match(/rename\s+([^\s]+)/i);
+    return match ? match[1].trim() : null;
+  }
+
+  _extractNewName(text, raw) {
+    const match = raw.match(/rename\s+[^\s]+\s+to\s+(.+)/i);
+    return match ? match[1].trim() : null;
+  }
+
+  _extractWindowName(text) {
+    const source = String(text || '').trim().toLowerCase();
+    if (!source) return null;
+
+    const cleaned = source
+      .replace(/\b(?:please|kindly)\b/g, ' ')
+      .replace(/\b(?:the|this|that)\b/g, ' ')
+      .replace(/\b(?:window|app|application|tab)\b/g, ' ')
+      .replace(/\b(?:minimize|maximize|fullscreen|close|restore)\b/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    return cleaned || null;
+  }
+
+  _extractDuration(raw) {
+    const match = String(raw || '').match(/(\d+)\s*(seconds?|secs?|minutes?|mins?|hours?|hrs?)/i);
+    if (!match) return null;
+
+    const value = parseInt(match[1], 10);
+    const unit = match[2].toLowerCase();
+    if (unit.startsWith('hour') || unit.startsWith('hr')) {
+      return value * 60;
+    }
+    if (unit.startsWith('second') || unit.startsWith('sec')) {
+      return Math.max(1, Math.ceil(value / 60));
+    }
+
+    return value;
+  }
+
+  _extractTimeExpression(text, raw) {
+    const source = String(raw || '');
+
+    const reminderMatch = source.match(/\bremind(?: me)?\s+(?:at|for|in)\s+(.+?)(?:\s+to\s+.+)?$/i);
+    if (reminderMatch && reminderMatch[1]) {
+      return reminderMatch[1].trim();
+    }
+
+    const alarmMatch = source.match(/\b(?:set alarm for|alarm for|wake me at)\s+(.+)$/i);
+    if (alarmMatch && alarmMatch[1]) {
+      return alarmMatch[1].trim();
+    }
+
+    return null;
+  }
+
+  _extractReminderText(text, raw) {
+    const source = String(raw || '');
+    const toMatch = source.match(/\bto\s+(.+)$/i);
+    if (toMatch && toMatch[1]) {
+      return toMatch[1].trim();
+    }
+
+    const forMatch = source.match(/\bset reminder for\s+.+?\s+(.+)$/i);
+    if (forMatch && forMatch[1]) {
+      return forMatch[1].trim();
+    }
+
+    return null;
+  }
+
+  _extractPath(text, raw) {
+    const match = raw.match(/\b(?:on|in|at|from)\s+(.+?)(?=$|\s+(?:called|named)\b)/i);
+    if (!match) return null;
+
+    return match[1]
+      .trim()
+      .replace(/^["']|["']$/g, '')
+      .replace(/^(?:the|my)\s+/i, '')
+      .replace(/\s+(?:folder|directory|path)$/i, '')
+      .trim();
+  }
+
+  /**
+   * Extract the media search query from a play command.
+   * Handles: "play X songs", "play X on youtube", "listen to X", "stream X"
+   * @param {string} text  - Normalised lowercase text
+   * @param {string} raw   - Original casing text
+   * @returns {string|null}
+   */
+  _extractMediaQuery(text, raw) {
+    const source = String(raw || '').trim();
+    const normalized = String(text || '').trim().toLowerCase();
+
+    if (/\b(next|previous|pause|resume|skip|prev|back)\b/i.test(normalized)) {
+      return null;
+    }
+
+    const commandMatch = source.match(
+      /^(?:play|stream|listen\s+to|watch|queue|put\s+on|start\s+playing)\s+(.+)$/i
+    );
+
+    if (!commandMatch || !commandMatch[1]) {
+      return null;
+    }
+
+    const cleaned = commandMatch[1]
+      .replace(/\s+(?:on|in|via)\s+(?:youtube|spotify|soundcloud|gaana|jiosaavn|amazon\s*music|apple\s*music|saavn).*$/i, '')
+      .replace(/^(?:the|a|an)\s+/i, '')
+      .replace(/\b(?:song|songs|music|track|tracks|video|videos)\b/gi, ' ')
+      .replace(/\b(?:called|named)\b/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    return cleaned || null;
+  }
+
+  /**
+   * Extract the streaming platform from a play command.
+   * @param {string} text  - Normalised lowercase text
+   * @param {string} raw   - Original casing text
+   * @returns {string|null}
+   */
+  _extractMediaPlatform(text, raw) {
+    const source = String(raw || '').toLowerCase();
+
+    if (/\byoutube\b/i.test(source) || /\byt\b/i.test(source)) return 'youtube';
+    if (/\bspotify\b/i.test(source)) return 'spotify';
+    if (/\bsoundcloud\b/i.test(source)) return 'soundcloud';
+    if (/\bgaana\b/i.test(source)) return 'gaana';
+    if (/\bjiosaavn\b|\bsaavn\b|\bjio\s*music\b/i.test(source)) return 'jiosaavn';
+    if (/\bamazon\s*music\b|\bamazon\b/i.test(source)) return 'amazon music';
+    if (/\bapple\s*music\b|\bapple\b/i.test(source)) return 'apple music';
+
+    return null;
+  }
+}
+
+module.exports = EntityExtractor;
+module.exports.APP_ALIASES = APP_ALIASES;
+module.exports.FOLDER_ALIASES = FOLDER_ALIASES;
