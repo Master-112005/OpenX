@@ -31,6 +31,66 @@ describe('Action Router', function() {
     assert.ok(result.entities.appName);
   });
 
+  it('should route close app commands through the explicit app resolver', async function() {
+    const config = {
+      permissions: {
+        levels: {
+          low: { requiresConfirmation: false, requiresAuth: false },
+          medium: { requiresConfirmation: false, requiresAuth: false }
+        }
+      }
+    };
+    const stubEngine = {
+      execute(actionId) {
+        return { success: true, data: { actionId } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const result = await router.process('close chrome', 'voice');
+    assert.equal(result.intent, 'app.close');
+    assert.equal(result.entities.appName, 'chrome');
+  });
+
+  it('should tolerate misordered close app phrasing', async function() {
+    const config = {
+      permissions: {
+        levels: {
+          low: { requiresConfirmation: false, requiresAuth: false },
+          medium: { requiresConfirmation: false, requiresAuth: false }
+        }
+      }
+    };
+    const stubEngine = {
+      execute(actionId) {
+        return { success: true, data: { actionId } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const result = await router.process('chrome close please', 'voice');
+    assert.equal(result.intent, 'app.close');
+    assert.equal(result.entities.appName, 'chrome');
+  });
+
+  it('should tolerate close-like speech recognition errors for app closing', async function() {
+    const config = {
+      permissions: {
+        levels: {
+          low: { requiresConfirmation: false, requiresAuth: false },
+          medium: { requiresConfirmation: false, requiresAuth: false }
+        }
+      }
+    };
+    const stubEngine = {
+      execute(actionId) {
+        return { success: true, data: { actionId } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const result = await router.process('rose chrome', 'voice');
+    assert.equal(result.intent, 'app.close');
+    assert.equal(result.entities.appName, 'chrome');
+  });
+
   it('should route system status command', async function() {
     const config = {
       permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
@@ -61,6 +121,21 @@ describe('Action Router', function() {
     const result = await router.process('opne chrmoe', 'chat');
     assert.equal(result.intent, 'app.open');
     assert.equal(result.entities.appName, 'chrome');
+  });
+
+  it('should route repaired polite app openings through the explicit app resolver', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId) {
+        return { success: true, data: { actionId } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const result = await router.process('could you please go ahead and opne notpad', 'chat');
+    assert.equal(result.intent, 'app.open');
+    assert.equal(result.entities.appName, 'notepad');
   });
 
   it('should route explicit file open commands to file.open', async function() {

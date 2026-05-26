@@ -22,6 +22,7 @@ class Assistant extends EventEmitter {
     this.personality = new Personality(config);
     this.responses = new ResponseGenerator(config);
     this.isProcessing = false;
+    this.pendingConfirmation = null;
   }
 
   async processCommand(input, source = 'chat') {
@@ -38,11 +39,27 @@ class Assistant extends EventEmitter {
     this.emit('processing', { input, source });
 
     try {
+      const confirmationResult = await this._handlePendingConfirmation(input, source);
+      if (confirmationResult) {
+        return confirmationResult;
+      }
+
       const result = await this.router.process(input, source);
       this.context.record(input, {}, result);
 
       let response = result.response || '';
       response = this.personality.applyToResponse(response);
+
+      if (result.requiresConfirmation) {
+        this.pendingConfirmation = {
+          commandId: result.commandId,
+          intentId: result.intent,
+          entities: { ...(result.entities || {}) },
+          source
+        };
+      } else if (result.success) {
+        this.pendingConfirmation = null;
+      }
 
       if (result.intent) {
         this.eventBus.publish(EVENTS.INTENT_DETECTED, {
@@ -103,14 +120,35 @@ class Assistant extends EventEmitter {
   }
 
   processVoiceInput(text) {
-    return this.processCommand(text, 'voice');
+    return this.processCommand(this._prepareVoiceInput(text), 'voice');
   }
 
   async confirmAction(commandId, intentId, entities) {
+    if (this.pendingConfirmation && this.pendingConfirmation.commandId === commandId) {
+      this.pendingConfirmation = null;
+    }
     const result = await this.router.confirmAndExecute(commandId, intentId, entities);
     return {
       ...result,
       response: this.personality.applyToResponse(result.response || '')
+    };
+  }
+
+  expirePendingConfirmation(reason = 'timeout', source = 'voice') {
+    if (!this.pendingConfirmation) {
+      return null;
+    }
+
+    this.pendingConfirmation = null;
+    const templateId = reason === 'cancelled' ? 'cancelled' : 'timedOut';
+    return {
+      success: false,
+      expired: reason === 'timeout',
+      cancelled: reason === 'cancelled',
+      source,
+      response: this.personality.applyToResponse(
+        this.responses.generate('confirmation', templateId)
+      )
     };
   }
 
@@ -125,9 +163,81 @@ class Assistant extends EventEmitter {
   getStatus() {
     return {
       isProcessing: this.isProcessing,
+      awaitingConfirmation: Boolean(this.pendingConfirmation),
       recentCommands: this.context.getRecentCommands(),
       conversation: this.context.getConversationSummary()
     };
+  }
+
+  async _handlePendingConfirmation(input, source) {
+    if (!this.pendingConfirmation) {
+      return null;
+    }
+
+    const normalized = String(input || '').trim().toLowerCase();
+    if (this._isConfirmPhrase(normalized)) {
+      const pending = this.pendingConfirmation;
+      this.pendingConfirmation = null;
+      const result = await this.router.confirmAndExecute(
+        pending.commandId,
+        pending.intentId,
+        pending.entities
+      );
+      const response = this.personality.applyToResponse(result.response || '');
+      return {
+        ...result,
+        response,
+        source
+      };
+    }
+
+    if (this._isCancelPhrase(normalized)) {
+      this.pendingConfirmation = null;
+      return {
+        success: true,
+        cancelled: true,
+        source,
+        response: this.personality.applyToResponse(
+          this.responses.generate('confirmation', 'cancelled')
+        )
+      };
+    }
+
+    return {
+      success: false,
+      requiresConfirmation: true,
+      source,
+      commandId: this.pendingConfirmation.commandId,
+      intent: this.pendingConfirmation.intentId,
+      entities: { ...this.pendingConfirmation.entities },
+      response: this.personality.applyToResponse(
+        this.responses.generate('confirmation', 'awaitingDecision')
+      )
+    };
+  }
+
+  _isConfirmPhrase(text) {
+    return /^(?:proceed|yes|confirm|do it|go ahead|yeah|yep|sure|continue|okay|ok)\b/.test(text);
+  }
+
+  _isCancelPhrase(text) {
+    return /^(?:no|cancel|stop|never mind|abort|dont|don't)\b/.test(text);
+  }
+
+  _prepareVoiceInput(text) {
+    const raw = String(text || '').trim();
+    if (!raw || this.pendingConfirmation) {
+      return raw;
+    }
+
+    try {
+      const prepared = this.router?.nlp?.prepare?.(raw);
+      const candidate = String(prepared?.correctedText || prepared?.normalizedText || '').trim();
+      return candidate || raw;
+    } catch (error) {
+      this.logger.warn('Voice NLP preparation failed', error.message);
+      return raw;
+    }
   }
 }
 

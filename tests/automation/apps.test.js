@@ -27,4 +27,30 @@ describe('App Controller', function() {
     assert.equal(resolvedMatches.length, 1);
     assert.equal(resolvedMatches[0].ProcessName, 'WhatsApp.Root');
   });
+
+  it('should escalate from graceful close to forced termination when the process stays alive', function() {
+    const controller = new AppController({});
+    let state = 'running';
+
+    controller._resolveStartApp = () => null;
+    controller._getRunningProcessDetails = () => (
+      state === 'closed'
+        ? []
+        : [{
+            Id: 42,
+            ProcessName: 'chrome',
+            MainWindowTitle: 'Google Chrome',
+            Path: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
+          }]
+    );
+    controller._closeProcessesGracefully = () => true;
+    controller._forceTerminateProcesses = () => {
+      state = 'closed';
+      return true;
+    };
+    controller._sleep = () => {};
+
+    const result = controller.close('chrome');
+    assert.equal(result.success, true);
+  });
 });

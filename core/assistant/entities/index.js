@@ -58,6 +58,23 @@ const FOLDER_ALIASES = {
   'home': 'home'
 };
 
+const APP_COMMAND_VERBS = [
+  'open',
+  'launch',
+  'start',
+  'run',
+  'close',
+  'exit',
+  'quit',
+  'terminate',
+  'stop',
+  'switch',
+  'focus',
+  'go',
+  'goto',
+  'activate'
+];
+
 class EntityExtractor {
   constructor(config) {
     this.logger = new Logger({ level: config?.logging?.level || 'info' });
@@ -159,17 +176,63 @@ class EntityExtractor {
     return match ? aliases[match.normalizedMatch] : null;
   }
 
+  _stripTrailingEntityNoise(value) {
+    return String(value || '')
+      .trim()
+      .replace(/\b(?:please|kindly|now|app|application|window|program)\b/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  _findAliasFromTokenWindows(tokens, aliases, config = {}) {
+    if (!Array.isArray(tokens) || tokens.length === 0) {
+      return null;
+    }
+
+    const aliasKeys = Object.keys(aliases);
+    if (aliasKeys.length === 0) {
+      return null;
+    }
+
+    const maxWindowSize = aliasKeys.reduce((max, alias) => {
+      return Math.max(max, Normalizer.tokenize(alias).length);
+    }, 1);
+
+    for (let windowSize = maxWindowSize; windowSize >= 1; windowSize -= 1) {
+      for (let index = 0; index <= tokens.length - windowSize; index += 1) {
+        const candidate = this._stripTrailingEntityNoise(tokens.slice(index, index + windowSize).join(' '));
+        if (!candidate) {
+          continue;
+        }
+
+        const match = this._resolveAlias(candidate, aliases, config);
+        if (match) {
+          return match;
+        }
+      }
+    }
+
+    return null;
+  }
+
   _extractAppName(text, raw) {
     for (const [alias, app] of Object.entries(APP_ALIASES)) {
       if (text.includes(alias)) return app;
     }
 
-    const verbs = ['open', 'launch', 'start', 'close', 'exit', 'quit', 'terminate', 'switch', 'go', 'focus', 'run'];
-    const tokens = Normalizer.tokenize(text);
+    const tokens = Normalizer.tokenize(raw || text);
+    const fuzzyWindowMatch = this._findAliasFromTokenWindows(tokens, APP_ALIASES, {
+      minSimilarity: 0.62,
+      maxDistance: 3
+    });
+    if (fuzzyWindowMatch) {
+      return fuzzyWindowMatch;
+    }
+
     if (tokens.length > 1) {
-      const firstTokenMatch = Normalizer.findClosestOption(tokens[0], verbs, { minSimilarity: 0.6, maxDistance: 2 });
+      const firstTokenMatch = Normalizer.findClosestOption(tokens[0], APP_COMMAND_VERBS, { minSimilarity: 0.6, maxDistance: 2 });
       if (firstTokenMatch) {
-        const tail = tokens.slice(1).join(' ');
+        const tail = this._stripTrailingEntityNoise(tokens.slice(1).join(' '));
         const fuzzyAlias = this._resolveAlias(tail, APP_ALIASES, { minSimilarity: 0.62, maxDistance: 2 });
         if (fuzzyAlias) {
           return fuzzyAlias;
@@ -180,7 +243,7 @@ class EntityExtractor {
     const patterns = ['open ', 'launch ', 'start ', 'close ', 'exit ', 'quit ', 'terminate ', 'switch to ', 'go to ', 'focus ', 'run '];
     for (const p of patterns) {
       if (text.includes(p)) {
-        const after = text.split(p)[1];
+        const after = this._stripTrailingEntityNoise(text.split(p)[1]);
         if (after && after.trim()) {
           const exactAlias = this._resolveAlias(after.trim(), APP_ALIASES, { minSimilarity: 0.62, maxDistance: 2 });
           if (exactAlias) {

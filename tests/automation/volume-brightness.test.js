@@ -193,33 +193,33 @@ describe('Volume and Brightness Control', function() {
       assert.ok(actions.includes('volume.get'));
     });
 
-    it('should execute volume.set action', function() {
-      const result = engine.execute('volume.set', { value: 50 });
+    it('should execute volume.set action', async function() {
+      const result = await engine.execute('volume.set', { value: 50 });
       assert.ok(result.success);
     });
 
-    it('should execute volume.up action', function() {
-      const result = engine.execute('volume.up', {});
+    it('should execute volume.up action', async function() {
+      const result = await engine.execute('volume.up', {});
       assert.ok(result.success);
     });
 
-    it('should execute volume.down action', function() {
-      const result = engine.execute('volume.down', {});
+    it('should execute volume.down action', async function() {
+      const result = await engine.execute('volume.down', {});
       assert.ok(result.success);
     });
 
-    it('should execute volume.mute action', function() {
-      const result = engine.execute('volume.mute', {});
+    it('should execute volume.mute action', async function() {
+      const result = await engine.execute('volume.mute', {});
       assert.ok(result.success);
     });
 
-    it('should execute volume.unmute action', function() {
-      const result = engine.execute('volume.unmute', {});
+    it('should execute volume.unmute action', async function() {
+      const result = await engine.execute('volume.unmute', {});
       assert.ok(result.success);
     });
 
-    it('should execute volume.get action', function() {
-      const result = engine.execute('volume.get', {});
+    it('should execute volume.get action', async function() {
+      const result = await engine.execute('volume.get', {});
       assert.ok(result.success);
       assert.ok(typeof result.data.value === 'number');
     });
@@ -240,23 +240,23 @@ describe('Volume and Brightness Control', function() {
       assert.ok(actions.includes('brightness.get'));
     });
 
-    it('should execute brightness.set action', function() {
-      const result = engine.execute('brightness.set', { value: 70 });
+    it('should execute brightness.set action', async function() {
+      const result = await engine.execute('brightness.set', { value: 70 });
       assert.ok(result.success);
     });
 
-    it('should execute brightness.up action', function() {
-      const result = engine.execute('brightness.up', {});
+    it('should execute brightness.up action', async function() {
+      const result = await engine.execute('brightness.up', {});
       assert.ok(result.success);
     });
 
-    it('should execute brightness.down action', function() {
-      const result = engine.execute('brightness.down', {});
+    it('should execute brightness.down action', async function() {
+      const result = await engine.execute('brightness.down', {});
       assert.ok(result.success);
     });
 
-    it('should execute brightness.get action', function() {
-      const result = engine.execute('brightness.get', {});
+    it('should execute brightness.get action', async function() {
+      const result = await engine.execute('brightness.get', {});
       // May fail if brightness not supported, but shouldn't crash
       assert.ok(typeof result.success === 'boolean');
     });
@@ -269,38 +269,38 @@ describe('Volume and Brightness Control', function() {
       engine = new AutomationEngine({});
     });
 
-    it('should handle volume sequence: set -> get', function() {
-      engine.execute('volume.set', { value: 45 });
-      const getResult = engine.execute('volume.get', {});
+    it('should handle volume sequence: set -> get', async function() {
+      await engine.execute('volume.set', { value: 45 });
+      const getResult = await engine.execute('volume.get', {});
       assert.ok(getResult.success);
       assert.equal(getResult.data.value, 45);
     });
 
-    it('should handle brightness sequence: set -> get', function() {
-      const setResult = engine.execute('brightness.set', { value: 65 });
+    it('should handle brightness sequence: set -> get', async function() {
+      const setResult = await engine.execute('brightness.set', { value: 65 });
       if (setResult.success) {
-        const getResult = engine.execute('brightness.get', {});
+        const getResult = await engine.execute('brightness.get', {});
         if (getResult.success) {
           assert.equal(getResult.data.value, 65);
         }
       }
     });
 
-    it('should handle volume up -> get sequence', function() {
-      engine.execute('volume.set', { value: 40 });
-      engine.execute('volume.up', {});
-      const getResult = engine.execute('volume.get', {});
+    it('should handle volume up -> get sequence', async function() {
+      await engine.execute('volume.set', { value: 40 });
+      await engine.execute('volume.up', {});
+      const getResult = await engine.execute('volume.get', {});
       assert.ok(getResult.success);
       assert.equal(getResult.data.value, 45); // 40 + 5
     });
 
-    it('should handle volume mute -> unmute sequence', function() {
-      engine.execute('volume.mute', {});
-      let getResult = engine.execute('volume.get', {});
+    it('should handle volume mute -> unmute sequence', async function() {
+      await engine.execute('volume.mute', {});
+      let getResult = await engine.execute('volume.get', {});
       assert.equal(getResult.data.value, 0);
 
-      engine.execute('volume.unmute', {});
-      getResult = engine.execute('volume.get', {});
+      await engine.execute('volume.unmute', {});
+      getResult = await engine.execute('volume.get', {});
       assert.equal(getResult.data.value, 50);
     });
   });

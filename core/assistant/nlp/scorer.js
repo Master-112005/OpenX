@@ -5,7 +5,13 @@ function countOrderedMatches(inputTokens, patternTokens) {
   let cursor = 0;
 
   for (const token of inputTokens) {
-    if (cursor < patternTokens.length && token === patternTokens[cursor]) {
+    if (
+      cursor < patternTokens.length &&
+      (
+        token === patternTokens[cursor] ||
+        Normalizer.similarity(token, patternTokens[cursor]) >= 0.84
+      )
+    ) {
       matches += 1;
       cursor += 1;
     }
@@ -37,7 +43,10 @@ function ratioMatch(left, right) {
     return 0;
   }
 
-  const overlap = right.filter(item => left.includes(item)).length;
+  const overlap = right.filter(item => (
+    left.includes(item) ||
+    left.some(candidate => Normalizer.similarity(candidate, item) >= 0.86)
+  )).length;
   return overlap / right.length;
 }
 
@@ -62,7 +71,10 @@ function scorePreparedPattern(preparedInput, patternPrepared) {
   const inputBigrams = preparedInput.intentBigrams || preparedInput.bigrams || [];
   const patternBigrams = patternPrepared.intentBigrams || patternPrepared.bigrams || [];
   const bigramScore = ratioMatch(inputBigrams, patternBigrams);
-  const leadingVerbMatch = inputTokens[0] && patternTokens[0] && inputTokens[0] === patternTokens[0] ? 1 : 0;
+  const leadingVerbMatch = inputTokens[0] && patternTokens[0] && (
+    inputTokens[0] === patternTokens[0] ||
+    Normalizer.similarity(inputTokens[0], patternTokens[0]) >= 0.84
+  ) ? 1 : 0;
 
   return Math.max(
     0,

@@ -455,7 +455,7 @@
     .hero-stats {
       display: grid;
       gap: 10px;
-      grid-template-columns: repeat(3, 1fr);
+      grid-template-columns: repeat(4, 1fr);
     }
 
     .hero-stat {
@@ -886,13 +886,17 @@
                 <div class="hero-stat-label">Contacts</div>
                 <div class="hero-stat-value" id="settings-hero-contacts">0 saved</div>
               </div>
+              <div class="hero-stat">
+                <div class="hero-stat-label">Access</div>
+                <div class="hero-stat-value" id="settings-hero-permission">Medium</div>
+              </div>
             </div>
           </section>
 
           <div class="settings-nav">
             <button class="settings-nav-chip" data-section-target="identity" type="button">
               <span class="nav-label">Identity</span>
-              <span class="nav-hint">Assistant name, title, honorific, and wake word.</span>
+              <span class="nav-hint">Assistant name, title, honorific, and activation shortcut.</span>
             </button>
             <button class="settings-nav-chip" data-section-target="profile" type="button">
               <span class="nav-label">Profile</span>
@@ -901,6 +905,10 @@
             <button class="settings-nav-chip" data-section-target="theme" type="button">
               <span class="nav-label">Theme</span>
               <span class="nav-hint">Reveal chat themes only when needed.</span>
+            </button>
+            <button class="settings-nav-chip" data-section-target="access" type="button">
+              <span class="nav-label">Access</span>
+              <span class="nav-hint">Choose when automation commands require confirmation.</span>
             </button>
             <button class="settings-nav-chip" data-section-target="contacts" type="button">
               <span class="nav-label">Contacts</span>
@@ -931,10 +939,11 @@
                 </select>
               </label>
               <label class="field-wrap">
-                <span class="field-label">Wake Word</span>
-                <input class="field" id="assistant-wake-word" type="text" placeholder="jarvis">
+                <span class="field-label">Activation Shortcut</span>
+                <input class="field" id="assistant-activation-shortcut" type="text" placeholder="Alt+Space">
               </label>
             </div>
+            <div class="section-note">Use an Electron-style shortcut such as <code>Alt+Space</code> or <code>Control+Shift+J</code>. The assistant starts listening when that shortcut is pressed.</div>
           </section>
 
           <section class="settings-section" data-settings-section="profile" id="settings-section-profile">
@@ -1001,6 +1010,22 @@
           <section class="settings-section" data-settings-section="theme" id="settings-section-theme">
             <div class="section-heading">Theme</div>
             <div class="theme-grid" id="theme-grid"></div>
+          </section>
+
+          <section class="settings-section" data-settings-section="access" id="settings-section-access">
+            <div class="section-heading">Permission Scale</div>
+            <div class="section-note">Lower levels block more risky actions. Critical is full access and skips confirmation for allowed actions.</div>
+            <div class="field-grid single">
+              <label class="field-wrap">
+                <span class="field-label">Automation Permission</span>
+                <select class="field-select" id="system-permission-level">
+                  <option value="low">Low - safe actions only</option>
+                  <option value="medium">Medium - confirm risky actions</option>
+                  <option value="high">High - allow advanced actions with confirmation</option>
+                  <option value="critical">Critical - full access, no confirmation</option>
+                </select>
+              </label>
+            </div>
           </section>
 
           <section class="settings-section" data-settings-section="contacts" id="settings-section-contacts">
@@ -1109,7 +1134,7 @@
     const contactDeleteBtn = document.getElementById('contact-delete-btn');
     const settingsStatusEl = document.getElementById('settings-status');
 
-    const CONFIRM_WORDS = ['proceed', 'yes', 'confirm', 'do it', 'go ahead', 'yeah', 'yep', 'sure', 'continue'];
+    const CONFIRM_WORDS = ['proceed', 'yes', 'confirm', 'do it', 'go ahead', 'yeah', 'yep', 'sure', 'continue', 'okay', 'ok'];
     const CANCEL_WORDS = ['no', 'cancel', 'stop', 'never mind', 'abort', 'dont'];
     const CONTACT_LIMIT = 10;
 
@@ -1126,7 +1151,7 @@
       assistantDisplayName: 'assistant-display-name',
       assistantTitle: 'assistant-title',
       assistantHonorific: 'assistant-honorific',
-      assistantWakeWord: 'assistant-wake-word',
+      assistantActivationShortcut: 'assistant-activation-shortcut',
       profileFullName: 'profile-full-name',
       profileEmail: 'profile-email',
       profilePhone: 'profile-phone',
@@ -1138,6 +1163,7 @@
       profileCompany: 'profile-company',
       profileRole: 'profile-role',
       chatMaxHistory: 'chat-max-history',
+      systemPermissionLevel: 'system-permission-level',
       contactName: 'contact-name',
       contactPhone: 'contact-phone',
       contactAliases: 'contact-aliases',
@@ -1152,6 +1178,10 @@
 
     function getHonorific() {
       return settingsSnapshot?.settings?.assistant?.honorific || 'sir';
+    }
+
+    function getActivationShortcut() {
+      return settingsSnapshot?.settings?.voice?.activationShortcut || 'Alt+Space';
     }
 
     function assistantMeta(label = 'just now') {
@@ -1383,7 +1413,7 @@
       setFieldValue(fieldIds.assistantDisplayName, settings.assistant.displayName);
       setFieldValue(fieldIds.assistantTitle, settings.assistant.title);
       setFieldValue(fieldIds.assistantHonorific, settings.assistant.honorific);
-      setFieldValue(fieldIds.assistantWakeWord, settings.voice.wakeWord);
+      setFieldValue(fieldIds.assistantActivationShortcut, settings.voice.activationShortcut);
       setFieldValue(fieldIds.profileFullName, settings.userProfile.fullName);
       setFieldValue(fieldIds.profileEmail, settings.userProfile.email);
       setFieldValue(fieldIds.profilePhone, settings.userProfile.phone);
@@ -1395,6 +1425,7 @@
       setFieldValue(fieldIds.profileCompany, settings.userProfile.company);
       setFieldValue(fieldIds.profileRole, settings.userProfile.role);
       setFieldValue(fieldIds.chatMaxHistory, String(settings.chat.maxHistory));
+      setFieldValue(fieldIds.systemPermissionLevel, settings.system.permissionLevel);
 
       renderThemeCards();
       applyTheme(settings.chat.themeId);
@@ -1521,7 +1552,7 @@
           honorific: document.getElementById(fieldIds.assistantHonorific).value
         },
         voice: {
-          wakeWord: document.getElementById(fieldIds.assistantWakeWord).value.trim().toLowerCase()
+          activationShortcut: document.getElementById(fieldIds.assistantActivationShortcut).value.trim()
         },
         userProfile: {
           fullName: document.getElementById(fieldIds.profileFullName).value.trim(),
@@ -1538,6 +1569,9 @@
         chat: {
           themeId: selectedThemeId,
           maxHistory: Number(document.getElementById(fieldIds.chatMaxHistory).value || 500)
+        },
+        system: {
+          permissionLevel: document.getElementById(fieldIds.systemPermissionLevel).value
         }
       };
     }
@@ -1569,10 +1603,11 @@
       const contactCount = settingsSnapshot?.contacts?.length || 0;
 
       document.getElementById('settings-hero-name').textContent = assistantName;
-      document.getElementById('settings-hero-title').textContent = `${assistantTitle} configured for local automation, profile storage, and contact-aware actions.`;
+      document.getElementById('settings-hero-title').textContent = `${assistantTitle} configured for local automation, hotkey voice activation (${getActivationShortcut()}), profile storage, and contact-aware actions.`;
       document.getElementById('settings-hero-honorific').textContent = settingsSnapshot?.settings?.assistant?.honorific || 'sir';
       document.getElementById('settings-hero-theme').textContent = theme?.label || 'Theme';
       document.getElementById('settings-hero-contacts').textContent = `${contactCount} / ${CONTACT_LIMIT}`;
+      document.getElementById('settings-hero-permission').textContent = settingsSnapshot?.settings?.system?.permissionLevel || 'medium';
     }
 
     function ensureWelcomeMessage() {
@@ -1581,7 +1616,7 @@
       }
 
       addMessage(
-        `At your service, ${getHonorific()}. How may I assist you?`,
+        `At your service, ${getHonorific()}. Press ${getActivationShortcut()} to speak, or type a command here.`,
         'assistant',
         assistantMeta('ready')
       );
@@ -1738,8 +1773,26 @@
       window.jarvis.onVoiceResult((data) => {
         if (data && data.text) {
           inputBox.value = data.text;
-          sendCommand(data.text);
         }
+      });
+
+      window.jarvis.onVoiceProcessed((payload) => {
+        if (!payload?.transcript || !payload?.result) {
+          return;
+        }
+
+        addMessage(payload.transcript, 'user', 'Voice - just now');
+
+        if (payload.result.requiresConfirmation) {
+          addConfirmationButtons(payload.result);
+          return;
+        }
+
+        addMessage(
+          payload.result.response || `Operation completed, ${getHonorific()}.`,
+          payload.result.success === false ? 'system' : 'assistant',
+          assistantMeta(payload.result.cancelled ? 'cancelled' : 'voice')
+        );
       });
 
       window.jarvis.onSettingsChanged((snapshot) => {

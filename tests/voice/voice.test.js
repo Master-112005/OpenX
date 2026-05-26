@@ -1,86 +1,30 @@
 const assert = require('assert');
 const EventEmitter = require('events');
 
-describe('Voice Manager', function() {
+describe('Voice Manager & Audio Engine Integration', function() {
   this.timeout(10000);
   let VoiceManager;
   let AssistantEventBus;
 
-  class FakeWakeWord extends EventEmitter {
-    constructor(config) {
-      super();
-      this.wakeWord = config?.voice?.wakeWord || 'jarvis';
-      this.isListening = false;
-    }
-
-    async start() {
-      this.isListening = true;
-      this.emit('ready');
-      return true;
-    }
-
-    async pause() {
-      this.isListening = false;
-    }
-
-    async resume() {
-      this.isListening = true;
-    }
-
-    manualActivate() {
-      this.emit('wakeword', {
-        wakeWord: this.wakeWord,
-        confidence: 1,
-        manual: true
-      });
-    }
-
-    destroy() {}
-  }
-
-  class FakeSpeechToText extends EventEmitter {
+  class FakeTextToSpeech extends EventEmitter {
     constructor() {
       super();
-      this.isListening = false;
-      this.backend = 'test';
+      this.isSpeaking = false;
     }
-
     async initialize() {
       return true;
     }
-
-    startListening() {
-      this.isListening = true;
-      this.emit('listening');
-    }
-
-    stopListening() {
-      if (!this.isListening) {
-        return;
-      }
-
-      this.isListening = false;
-      this.emit('stopped');
-    }
-
-    destroy() {}
-  }
-
-  class FakeTextToSpeech extends EventEmitter {
-    async initialize() {
-      return true;
-    }
-
     speak(text) {
+      this.isSpeaking = true;
       this.emit('speaking', text);
-      this.emit('completed', text);
+      setTimeout(() => {
+        this.isSpeaking = false;
+        this.emit('completed', text);
+      }, 20);
     }
-
     async speakAsync(text) {
-      this.emit('speaking', text);
-      this.emit('completed', text);
+      this.speak(text);
     }
-
     destroy() {}
   }
 
@@ -88,26 +32,35 @@ describe('Voice Manager', function() {
     const mergedConfig = {
       ...config,
       voice: {
+        activationShortcut: 'Alt+Space',
         allowManualActivation: true,
         ...(config.voice || {})
       }
     };
     const eventBus = new AssistantEventBus();
-    const wakeWord = new FakeWakeWord(mergedConfig);
-    const stt = new FakeSpeechToText();
     const tts = new FakeTextToSpeech();
+
     const vm = new VoiceManager(mergedConfig, {
       eventBus,
-      wakeWord,
-      stt,
       tts
     });
+
+    vm._startAudioEngine = function() {
+      this.workerReady = true;
+      this.workerProcess = {
+        stdin: {
+          write: (data) => {
+            this.emit('test:stdin', JSON.parse(data.trim()));
+          }
+        },
+        kill: () => {}
+      };
+      return Promise.resolve();
+    };
 
     return {
       vm,
       eventBus,
-      wakeWord,
-      stt,
       tts
     };
   }
@@ -117,201 +70,209 @@ describe('Voice Manager', function() {
     AssistantEventBus = require('../../core/shared/index').AssistantEventBus;
   });
 
-  it('should initialize without errors', async function() {
-    const { vm } = createVoiceManager({ voice: { wakeWord: 'jarvis' } });
+  it('should initialize and spawn the persistent subprocess', async function() {
+    const { vm } = createVoiceManager();
     await vm.initialize();
+    assert.equal(vm.workerReady, true);
+    assert.ok(vm.workerProcess);
     vm.destroy();
   });
 
-  it('should have wake word detector', function() {
-    const { vm } = createVoiceManager({ voice: { wakeWord: 'jarvis' } });
-    assert.ok(vm.wakeWord);
-    assert.equal(vm.wakeWord.wakeWord, 'jarvis');
-    vm.destroy();
-  });
+  it('should activate listening when the hotkey is triggered', function(done) {
+    const { vm } = createVoiceManager();
 
-  it('should have speech-to-text module', function() {
-    const { vm } = createVoiceManager({});
-    assert.ok(vm.stt);
-    vm.destroy();
-  });
+    vm.initialize().then(() => {
+      const seen = {
+        activated: false,
+        listenCommand: false
+      };
 
-  it('should have text-to-speech module', function() {
-    const { vm } = createVoiceManager({});
-    assert.ok(vm.tts);
-    vm.destroy();
-  });
-
-  it('should emit events on manual activation', function(done) {
-    const { vm } = createVoiceManager({});
-    vm.on('activated', () => {
-      vm.destroy();
-      done();
-    });
-    vm.manualActivate();
-  });
-
-  it('should acknowledge activation before starting speech capture', function(done) {
-    const { vm, stt } = createVoiceManager({});
-
-    stt.startListening = () => {
-      stt.isListening = true;
-      assert.equal(vm.getStatus().state, 'LISTENING');
-      vm.destroy();
-      done();
-    };
-
-    vm.manualActivate();
-  });
-
-  it('should resume wake-word listening after speech capture stops', function(done) {
-    const { vm, wakeWord, stt, tts } = createVoiceManager({});
-    let resumed = false;
-
-    wakeWord.pause = async () => {};
-    wakeWord.resume = async () => {
-      resumed = true;
-    };
-    tts.speakAsync = async () => {};
-    stt.startListening = () => {
-      stt.isListening = false;
-      stt.emit('stopped');
-      setTimeout(() => {
-        assert.equal(resumed, true);
-        vm.destroy();
-        done();
-      }, 20);
-    };
-
-    vm.manualActivate();
-  });
-
-  it('should publish voice lifecycle events through the shared event bus', function(done) {
-    const { vm, eventBus, stt } = createVoiceManager({});
-    const observed = [];
-
-    eventBus.subscribe('*', ({ event }) => {
-      observed.push(event);
-    });
-
-    vm.manualActivate();
-    setImmediate(() => {
-      stt.emit('result', {
-        text: 'open chrome',
-        confidence: 0.98,
-        backend: 'test'
+      vm.on('activated', (payload) => {
+        seen.activated = true;
+        assert.equal(payload.trigger, 'Alt+Space');
       });
 
-      assert.ok(observed.includes('wakeword.detected'));
-      assert.ok(observed.includes('listener.started'));
-      assert.ok(observed.includes('utterance.finalized'));
-    assert.ok(observed.includes('stt.completed'));
-    assert.equal(vm.getStatus().state, 'PROCESSING');
-    vm.destroy();
-    done();
+      vm.on('test:stdin', (payload) => {
+        if (payload.command === 'listen') {
+          assert.equal(payload.mode, 'conversation');
+          assert.equal(payload.startSpeechTimeoutMs, 20000);
+          assert.equal(payload.resetSpeakerLock, true);
+          seen.listenCommand = true;
+        }
+      });
+
+      vm.on('listening', () => {
+        assert.equal(seen.activated, true);
+        assert.equal(seen.listenCommand, true);
+        assert.equal(vm.getStatus().state, 'LISTENING');
+        vm.destroy();
+        done();
+      });
+
+      const result = vm.manualActivate();
+      assert.equal(result, true);
     });
   });
 
-  it('should ignore manual activation when wake-word-only mode is enabled', function() {
-    const eventBus = new AssistantEventBus();
-    const config = {
-      voice: {
-        wakeWord: 'jarvis',
-        allowManualActivation: false
-      }
-    };
-    const vm = new VoiceManager(config, {
-      eventBus,
-      wakeWord: new FakeWakeWord(config),
-      stt: new FakeSpeechToText(),
-      tts: new FakeTextToSpeech()
+  it('should keep a hotkey conversation active after a recognized command', async function() {
+    const { vm } = createVoiceManager();
+    let deactivated = false;
+
+    await vm.initialize();
+    vm.on('deactivated', () => {
+      deactivated = true;
     });
 
-    const activated = vm.manualActivate();
+    assert.equal(vm.manualActivate(), true);
 
-    assert.equal(activated, false);
+    const result = await new Promise((resolve) => {
+      vm.on('speechResult', (data) => resolve(data));
+      vm._handleEngineEvent({
+        event: 'result',
+        text: 'open chrome',
+        confidence: 0.91,
+        mode: 'conversation'
+      });
+    });
+
+    assert.equal(result.text, 'open chrome');
+    assert.equal(deactivated, false);
+    assert.equal(vm.getStatus().active, true);
+    assert.equal(vm.getStatus().conversationActive, true);
+    vm.destroy();
+  });
+
+  it('should end a hotkey conversation after the 20 second silence timeout', async function() {
+    const { vm } = createVoiceManager();
+
+    await vm.initialize();
+    assert.equal(vm.manualActivate(), true);
+
+    const timeout = await new Promise((resolve) => {
+      vm.on('listeningTimeout', (data) => resolve(data));
+      vm._handleEngineEvent({
+        event: 'session_timeout',
+        mode: 'conversation',
+        timeoutMs: 20000,
+        reason: 'no-speech-detected'
+      });
+    });
+
+    assert.equal(timeout.mode, 'conversation');
+    assert.equal(timeout.timeoutMs, 20000);
+    assert.equal(vm.getStatus().active, false);
+    assert.equal(vm.getStatus().conversationActive, false);
+    vm.destroy();
+  });
+
+  it('should reject manual activation when disabled', async function() {
+    const { vm } = createVoiceManager({
+      voice: {
+        allowManualActivation: false
+      }
+    });
+
+    await vm.initialize();
+    assert.equal(vm.manualActivate(), false);
     assert.equal(vm.getStatus().state, 'IDLE');
     vm.destroy();
   });
 
-  it('should start speech capture immediately without waiting for activation acknowledgement', function(done) {
-    const { vm, stt, tts } = createVoiceManager({
-      voice: {
-        allowManualActivation: true,
-        speakActivationAcknowledgement: true,
-        activationAcknowledgement: 'Yes, sir. I am listening.'
-      }
-    });
-    let listeningStarted = false;
-    let ttsFinished = false;
+  it('should suppress capture stream during TTS speaking and resume it upon completion', function(done) {
+    const { vm } = createVoiceManager();
 
-    tts.speakAsync = async () => {
-      await new Promise(resolve => setTimeout(resolve, 30));
-      ttsFinished = true;
-    };
+    vm.initialize().then(() => {
+      let pauseCommand = false;
+      let resumeCommand = false;
 
-    stt.startListening = () => {
-      listeningStarted = true;
-      stt.isListening = true;
-      setTimeout(() => {
-        assert.equal(listeningStarted, true);
-        assert.equal(ttsFinished, false);
+      vm.on('test:stdin', (payload) => {
+        if (payload.command === 'pause') pauseCommand = true;
+        if (payload.command === 'resume') resumeCommand = true;
+      });
+
+      vm.on('speechCompleted', () => {
+        assert.equal(pauseCommand, true);
+        assert.equal(resumeCommand, true);
+        assert.equal(vm.getStatus().state, 'IDLE');
         vm.destroy();
         done();
-      }, 5);
-    };
+      });
 
-    vm.manualActivate();
-  });
-
-  it('should execute an inline wake-word command without opening a second listening turn', function(done) {
-    const { vm, wakeWord, stt } = createVoiceManager({
-      voice: {
-        allowManualActivation: true
-      }
-    });
-    let startedListening = false;
-
-    stt.startListening = () => {
-      startedListening = true;
-    };
-
-    vm.on('speechResult', (data) => {
-      assert.equal(data.text, 'open chrome');
-      assert.equal(data.backend, 'wakeword-inline');
-      assert.equal(startedListening, false);
-      vm.destroy();
-      done();
-    });
-
-    wakeWord.emit('wakeword', {
-      wakeWord: 'jarvis',
-      transcript: 'hey jarvis open chrome',
-      confidence: 1,
-      manual: false,
-      inlineCommand: true
+      vm.speak('Now testing SAPI suppression laws');
     });
   });
 
-  it('should open a listening turn for wake-word activation without forcing an inline command', function(done) {
-    const { vm, wakeWord, stt } = createVoiceManager({
+  it('should automatically start a confirmation listening session after speaking a permission prompt', function(done) {
+    const { vm } = createVoiceManager();
+
+    vm.initialize().then(() => {
+      let listenPayload = null;
+
+      vm.on('test:stdin', (payload) => {
+        if (payload.command === 'resume') {
+          setImmediate(() => {
+            vm._handleEngineEvent({ event: 'resumed' });
+          });
+        }
+        if (payload.command === 'listen') {
+          listenPayload = payload;
+        }
+      });
+
+      vm.on('listening', (data) => {
+        if (data?.mode !== 'confirmation') {
+          return;
+        }
+
+        assert.ok(listenPayload);
+        assert.equal(listenPayload.mode, 'confirmation');
+        assert.equal(listenPayload.startSpeechTimeoutMs, 10000);
+        assert.equal(listenPayload.maxDurationMs, 10000);
+        vm.destroy();
+        done();
+      });
+
+      vm.queueFollowUpListening({
+        mode: 'confirmation',
+        startSpeechTimeoutMs: 10000,
+        maxDurationMs: 10000
+      });
+      vm.speak('Please confirm that I should proceed.');
+    });
+  });
+
+  it('should keep assistant TTS at an audible volume even when settings are too low', function() {
+    const TextToSpeech = require('../../core/voice/tts/index');
+    const tts = new TextToSpeech({
       voice: {
-        allowManualActivation: true
+        tts: {
+          volume: 20
+        }
       }
     });
 
-    stt.startListening = () => {
-      stt.isListening = true;
-      vm.destroy();
-      done();
-    };
+    assert.equal(tts.volume, 85);
+    tts.destroy();
+  });
 
-    wakeWord.emit('wakeword', {
-      wakeWord: 'jarvis',
-      transcript: 'jarvis',
-      confidence: 1,
-      manual: false,
-      inlineCommand: false
+  it('should emit a listening timeout when the confirmation window expires', async function() {
+    const { vm } = createVoiceManager();
+
+    await vm.initialize();
+
+    const result = await new Promise((resolve) => {
+      vm.on('listeningTimeout', (data) => resolve(data));
+      vm._handleEngineEvent({
+        event: 'session_timeout',
+        mode: 'confirmation',
+        timeoutMs: 10000,
+        reason: 'no-speech-detected'
+      });
     });
+
+    assert.equal(result.mode, 'confirmation');
+    assert.equal(result.timeoutMs, 10000);
+    assert.equal(vm.getStatus().state, 'IDLE');
+    vm.destroy();
   });
 });

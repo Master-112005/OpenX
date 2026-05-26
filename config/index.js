@@ -33,20 +33,26 @@ const CONFIG = {
   },
 
   voice: {
-    wakeWord: 'jarvis',
-    allowManualActivation: false,
+    activationMode: 'hotkey',
+    activationShortcut: 'Alt+Space',
+    allowManualActivation: true,
+    conversationSilenceTimeoutMs: 20000,
+    confirmationListenTimeoutMs: 10000,
+    speakerLock: {
+      enabled: true,
+      similarityThreshold: 0.68
+    },
     activationAcknowledgement: '',
     speakActivationAcknowledgement: false,
-    silenceTimeout: 900,
+    silenceTimeout: 700,
     frameDurationMs: 20,
     preRollDurationMs: 400,
     maxUtteranceMs: 12000,
     vadThreshold: 0.015,
-    wakeword: {
+    recognition: {
       provider: 'whisper-local',
       pythonCommand: 'python',
       modelName: 'tiny.en',
-      aliases: [],
       language: 'en',
       device: 'cpu',
       computeType: 'int8',
@@ -55,25 +61,25 @@ const CONFIG = {
       chunkDurationMs: 1200,
       cooldownMs: 2500,
       energyThreshold: 0.003,
-      speechStartFrames: 2,
-      vadAggressiveness: 2,
+      speechStartFrames: 3,
+      vadAggressiveness: 3,
       modelCacheDir: path.join(os.homedir(), '.jarvis', 'models', 'whisper')
     },
     stt: {
       provider: 'whisper-local',
       pythonCommand: 'python',
-      modelName: 'small.en',
+      modelName: 'tiny.en',
       language: 'en',
       device: 'cpu',
       computeType: 'int8',
       sampleRate: 16000,
       frameDurationMs: 20,
       maxDurationMs: 12000,
-      startSpeechTimeoutMs: 7000,
+      startSpeechTimeoutMs: 3500,
       energyThreshold: 0.003,
       minUtteranceMs: 250,
-      speechStartFrames: 2,
-      vadAggressiveness: 2,
+      speechStartFrames: 3,
+      vadAggressiveness: 3,
       modelCacheDir: path.join(os.homedir(), '.jarvis', 'models', 'whisper')
     },
     tts: {

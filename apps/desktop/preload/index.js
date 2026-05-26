@@ -80,6 +80,12 @@ contextBridge.exposeInMainWorld('jarvis', {
     return () => ipcRenderer.removeListener('voice:result', handler);
   },
 
+  onVoiceProcessed: (callback) => {
+    const handler = (_event, data) => callback(data);
+    ipcRenderer.on('voice:processed', handler);
+    return () => ipcRenderer.removeListener('voice:processed', handler);
+  },
+
   onSettingsChanged: (callback) => {
     const handler = (_event, data) => callback(data);
     ipcRenderer.on('settings:changed', handler);

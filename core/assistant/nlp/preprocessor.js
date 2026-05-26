@@ -1,7 +1,8 @@
 const Normalizer = require('../../shared/index').Normalizer;
 const {
   LEAD_IN_PATTERNS,
-  PHRASE_REPLACEMENTS
+  PHRASE_REPLACEMENTS,
+  TOKEN_SEQUENCE_REPLACEMENTS
 } = require('./constants');
 
 function applyPhraseReplacements(text) {
@@ -40,6 +41,41 @@ function collapseRepeatedTokens(tokens) {
   return collapsed;
 }
 
+function applyTokenSequenceReplacements(tokens) {
+  if (!Array.isArray(tokens) || tokens.length === 0) {
+    return [];
+  }
+
+  const result = [];
+
+  for (let index = 0; index < tokens.length; index += 1) {
+    let matched = false;
+
+    for (const replacement of TOKEN_SEQUENCE_REPLACEMENTS) {
+      const source = replacement.from || [];
+      if (source.length === 0 || index + source.length > tokens.length) {
+        continue;
+      }
+
+      const isMatch = source.every((token, offset) => tokens[index + offset] === token);
+      if (!isMatch) {
+        continue;
+      }
+
+      result.push(...replacement.to);
+      index += source.length - 1;
+      matched = true;
+      break;
+    }
+
+    if (!matched) {
+      result.push(tokens[index]);
+    }
+  }
+
+  return result;
+}
+
 function buildBigrams(tokens) {
   const result = [];
   for (let index = 0; index < tokens.length - 1; index += 1) {
@@ -53,7 +89,8 @@ function preprocessCommand(text) {
   const normalized = Normalizer.normalizeText(expanded);
   const stripped = stripLeadIns(normalized);
   const replaced = applyPhraseReplacements(stripped);
-  const tokens = collapseRepeatedTokens(Normalizer.tokenize(replaced));
+  const sequenceRepaired = applyTokenSequenceReplacements(Normalizer.tokenize(replaced));
+  const tokens = collapseRepeatedTokens(sequenceRepaired);
 
   return {
     normalizedText: tokens.join(' ').trim(),
@@ -63,6 +100,7 @@ function preprocessCommand(text) {
 
 module.exports = {
   applyPhraseReplacements,
+  applyTokenSequenceReplacements,
   buildBigrams,
   collapseRepeatedTokens,
   preprocessCommand,

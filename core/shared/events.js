@@ -2,7 +2,7 @@ const EventEmitter = require('events');
 
 const EVENTS = Object.freeze({
   COMMAND_RECEIVED: 'command.received',
-  WAKEWORD_DETECTED: 'wakeword.detected',
+  VOICE_ACTIVATED: 'voice.activated',
   LISTENER_STARTED: 'listener.started',
   LISTENER_STOPPED: 'listener.stopped',
   SPEECH_DETECTED: 'speech.detected',

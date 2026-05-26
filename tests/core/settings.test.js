@@ -25,7 +25,7 @@ describe('Settings Service', function() {
         userProfile: {}
       },
       voice: {
-        wakeWord: 'jarvis',
+        activationShortcut: 'Alt+Space',
         tts: {
           rate: 0,
           volume: 100
@@ -69,6 +69,9 @@ describe('Settings Service', function() {
         title: 'Form Assistant',
         honorific: 'commander'
       },
+      voice: {
+        activationShortcut: 'control + shift + j'
+      },
       userProfile: {
         fullName: 'Rakesh',
         email: 'rakesh@example.com',
@@ -77,20 +80,38 @@ describe('Settings Service', function() {
       chat: {
         themeId: 'forest',
         maxHistory: 900
+      },
+      system: {
+        permissionLevel: 'critical'
       }
     });
 
     assert.equal(saved.assistant.displayName, 'Athena');
     assert.equal(saved.assistant.honorific, 'commander');
+    assert.equal(saved.voice.activationShortcut, 'Control+Shift+J');
     assert.equal(saved.userProfile.fullName, 'Rakesh');
     assert.equal(saved.userProfile.phone, '+919876543210');
     assert.equal(saved.chat.themeId, 'forest');
     assert.equal(saved.chat.maxHistory, 900);
+    assert.equal(saved.system.permissionLevel, 'critical');
 
     const runtimeConfig = service.buildRuntimeConfig();
     assert.equal(runtimeConfig.assistant.displayName, 'Athena');
+    assert.equal(runtimeConfig.voice.activationShortcut, 'Control+Shift+J');
     assert.equal(runtimeConfig.assistant.userProfile.email, 'rakesh@example.com');
     assert.equal(runtimeConfig.chat.activeTheme, 'forest');
+    assert.equal(runtimeConfig.system.permissionLevel, 'critical');
+  });
+
+  it('should fall back to the default shortcut when the activation shortcut is invalid', function() {
+    const { service } = createService();
+    const saved = service.saveSettings({
+      voice: {
+        activationShortcut: 'space'
+      }
+    });
+
+    assert.equal(saved.voice.activationShortcut, 'Alt+Space');
   });
 
   it('should create, list, and delete contacts through the service', function() {

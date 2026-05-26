@@ -91,16 +91,25 @@ class AppController {
     const name = appName.toLowerCase().trim();
     try {
       const processNames = this._resolveProcessCandidates(name);
-      const runningProcesses = this._findRunningProcesses(name, processNames);
+      let runningProcesses = this._findRunningProcesses(name, processNames);
 
       if (runningProcesses.length > 0) {
-        const closed = this._closeProcesses(runningProcesses);
-        if (closed) {
+        this._closeProcessesGracefully(runningProcesses);
+        this._sleep(900);
+        runningProcesses = this._findRunningProcesses(name, processNames);
+
+        if (runningProcesses.length > 0) {
+          this._forceTerminateProcesses(runningProcesses);
+          this._sleep(700);
+          runningProcesses = this._findRunningProcesses(name, processNames);
+        }
+
+        if (runningProcesses.length === 0) {
           return {
             success: true,
             data: {
               app: name,
-              processName: runningProcesses[0].ProcessName
+              closedCount: processNames.length
             }
           };
         }
@@ -237,33 +246,44 @@ class AppController {
         .filter(candidate => candidate && !['app', 'application'].includes(candidate))
     );
 
-    return processes.filter(process => {
+    const rankedMatches = processes.map(process => {
       const processName = String(process.ProcessName || '').toLowerCase();
       const windowTitle = String(process.MainWindowTitle || '').toLowerCase();
       const processPath = String(process.Path || '').toLowerCase();
+      let score = 0;
 
-      return Array.from(searchTerms).some(term => (
-        processName === term ||
-        processName.startsWith(`${term}.`) ||
-        processName.includes(term) ||
-        windowTitle === term ||
-        windowTitle.includes(term) ||
-        processPath.includes(`\\${term}`) ||
-        processPath.includes(term)
-      ));
+      Array.from(searchTerms).forEach(term => {
+        if (processName === term) score += 160;
+        else if (processName.startsWith(`${term}.`)) score += 135;
+        else if (processName.includes(term)) score += 90;
+
+        if (windowTitle === term) score += 120;
+        else if (windowTitle.includes(term)) score += 70;
+
+        if (processPath.includes(`\\${term}`) || processPath.includes(term)) {
+          score += 65;
+        }
+      });
+
+      return { process, score };
     });
+
+    return rankedMatches
+      .filter(item => item.score > 0)
+      .sort((left, right) => right.score - left.score)
+      .map(item => item.process);
   }
 
   _getRunningProcessDetails() {
     try {
       const output = execFileSync('powershell.exe', [
-        '-NoProfile',
-        '-Command',
-        'Get-Process | Select-Object ProcessName,MainWindowTitle,Path | ConvertTo-Json -Compress'
-      ], {
-        encoding: 'utf8',
-        timeout: 10000
-      });
+          '-NoProfile',
+          '-Command',
+          'Get-Process | Select-Object Id,ProcessName,MainWindowTitle,MainWindowHandle,Path | ConvertTo-Json -Compress'
+        ], {
+          encoding: 'utf8',
+          timeout: 10000
+        });
 
       const parsed = JSON.parse(output || '[]');
       return Array.isArray(parsed) ? parsed : (parsed ? [parsed] : []);
@@ -274,36 +294,117 @@ class AppController {
   }
 
   _closeProcesses(processes) {
-    for (const process of processes) {
-      const processName = String(process?.ProcessName || '').trim();
-      if (!processName) continue;
+    return this._closeProcessesGracefully(processes);
+  }
 
-      const gracefulScript = [
-        '$target = Get-Process | Where-Object { $_.ProcessName -eq \'' + processName.replace(/'/g, "''") + '\' }',
-        'if (-not $target) { exit 1 }',
-        '$target | ForEach-Object { try { $_.CloseMainWindow() | Out-Null } catch {} }',
-        'Start-Sleep -Milliseconds 800',
-        '$target = Get-Process | Where-Object { $_.ProcessName -eq \'' + processName.replace(/'/g, "''") + '\' }',
-        'if ($target) { $target | Stop-Process -Force }'
-      ].join('; ');
+  _closeProcessesGracefully(processes) {
+    const ids = Array.from(new Set(
+      processes
+        .map(process => Number(process?.Id))
+        .filter(id => Number.isFinite(id) && id > 0)
+    ));
 
+    if (ids.length === 0) {
+      return false;
+    }
+
+    const gracefulScript = [
+      '$ids = @(' + ids.join(',') + ')',
+      'foreach ($id in $ids) {',
+      '  $target = Get-Process -Id $id -ErrorAction SilentlyContinue | Select-Object -First 1',
+      '  if (-not $target) { continue }',
+      '  try { if ($target.MainWindowHandle -ne 0) { $target.CloseMainWindow() | Out-Null } } catch {}',
+      '}',
+      'Start-Sleep -Milliseconds 1200'
+    ].join('; ');
+
+    try {
+      execFileSync('powershell.exe', [
+        '-NoProfile',
+        '-Command',
+        gracefulScript
+      ], {
+        timeout: 8000,
+        stdio: 'ignore'
+      });
+      return true;
+    } catch (err) {
+      return false;
+    }
+  }
+
+  _forceTerminateProcesses(processes) {
+    const ids = Array.from(new Set(
+      processes
+        .map(process => Number(process?.Id))
+        .filter(id => Number.isFinite(id) && id > 0)
+    ));
+    const names = Array.from(new Set(
+      processes
+        .map(process => String(process?.ProcessName || '').trim())
+        .filter(Boolean)
+    ));
+    let terminated = false;
+
+    if (ids.length > 0) {
       try {
         execFileSync('powershell.exe', [
           '-NoProfile',
           '-Command',
-          gracefulScript
+          `Stop-Process -Id ${ids.join(',')} -Force -ErrorAction SilentlyContinue`
         ], {
           timeout: 8000,
           stdio: 'ignore'
         });
+        terminated = true;
+      } catch (err) {}
+    }
+
+    for (const process of processes) {
+      const processId = Number(process?.Id);
+      try {
+        if (Number.isFinite(processId) && processId > 0) {
+          execFileSync('taskkill.exe', ['/PID', String(processId), '/T', '/F'], {
+            timeout: 8000,
+            stdio: 'ignore'
+          });
+          terminated = true;
+          continue;
+        }
+      } catch (err) {}
+    }
+
+    for (const processName of names) {
+      try {
+        execFileSync('taskkill.exe', ['/IM', `${processName}.exe`, '/T', '/F'], {
+          timeout: 8000,
+          stdio: 'ignore'
+        });
+        terminated = true;
       } catch (err) {
         continue;
       }
-
-      return true;
     }
 
-    return false;
+    return terminated;
+  }
+
+  _sleep(milliseconds) {
+    const duration = Math.max(0, Number(milliseconds) || 0);
+    if (duration === 0) {
+      return;
+    }
+
+    try {
+      execFileSync('powershell.exe', [
+        '-NoProfile',
+        '-Command',
+        `Start-Sleep -Milliseconds ${duration}`
+      ], {
+        timeout: duration + 1000,
+        stdio: 'ignore'
+      });
+    } catch (err) {}
   }
 
   switchTo(appName) {

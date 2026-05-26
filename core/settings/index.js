@@ -92,6 +92,90 @@ function clampNumber(value, min, max, fallback) {
   return Math.max(min, Math.min(max, number));
 }
 
+function normalizeActivationShortcut(value, fallback = 'Alt+Space') {
+  const normalizedFallback = String(fallback || 'Alt+Space').trim() || 'Alt+Space';
+  const raw = String(value || '').trim();
+  if (!raw) {
+    return normalizedFallback;
+  }
+
+  const modifierMap = {
+    alt: 'Alt',
+    option: 'Alt',
+    ctrl: 'Control',
+    control: 'Control',
+    cmd: 'Command',
+    command: 'Command',
+    cmdorctrl: 'CommandOrControl',
+    commandorcontrol: 'CommandOrControl',
+    shift: 'Shift',
+    super: 'Super',
+    meta: 'Super',
+    win: 'Super',
+    windows: 'Super'
+  };
+  const validKeys = new Set([
+    'Space',
+    'Tab',
+    'Enter',
+    'Escape',
+    'Esc',
+    'Backspace',
+    'Delete',
+    'Insert',
+    'Home',
+    'End',
+    'PageUp',
+    'PageDown',
+    'Up',
+    'Down',
+    'Left',
+    'Right',
+    'Plus',
+    'Minus'
+  ]);
+  const parts = raw
+    .split(/\s*\+\s*/)
+    .map(part => part.trim())
+    .filter(Boolean);
+
+  if (parts.length < 2) {
+    return normalizedFallback;
+  }
+
+  const modifiers = [];
+  for (const part of parts.slice(0, -1)) {
+    const modifier = modifierMap[part.toLowerCase()];
+    if (!modifier || modifiers.includes(modifier)) {
+      return normalizedFallback;
+    }
+    modifiers.push(modifier);
+  }
+
+  const rawKey = parts[parts.length - 1];
+  let key = '';
+  if (/^[a-z]$/i.test(rawKey)) {
+    key = rawKey.toUpperCase();
+  } else if (/^[0-9]$/.test(rawKey)) {
+    key = rawKey;
+  } else if (/^f([1-9]|1[0-9]|2[0-4])$/i.test(rawKey)) {
+    key = rawKey.toUpperCase();
+  } else if (rawKey.toLowerCase() === 'spacebar') {
+    key = 'Space';
+  } else {
+    key = rawKey
+      .split(/[\s_-]+/)
+      .map(token => token ? token.charAt(0).toUpperCase() + token.slice(1).toLowerCase() : '')
+      .join('');
+  }
+
+  if (!key || modifierMap[key.toLowerCase()] || !validKeys.has(key) && !/^[A-Z0-9]$/.test(key) && !/^F([1-9]|1[0-9]|2[0-4])$/.test(key)) {
+    return normalizedFallback;
+  }
+
+  return `${modifiers.join('+')}+${key}`;
+}
+
 class SettingsService {
   constructor(baseConfig) {
     this.baseConfig = deepClone(baseConfig || {});
@@ -119,7 +203,7 @@ class SettingsService {
         role: String(baseConfig?.assistant?.userProfile?.role || '').trim()
       },
       voice: {
-        wakeWord: String(baseConfig?.voice?.wakeWord || 'jarvis').trim().toLowerCase(),
+        activationShortcut: normalizeActivationShortcut(baseConfig?.voice?.activationShortcut, 'Alt+Space'),
         tts: {
           rate: clampNumber(baseConfig?.voice?.tts?.rate, -10, 10, 0),
           volume: clampNumber(baseConfig?.voice?.tts?.volume, 0, 100, 100)
@@ -215,7 +299,9 @@ class SettingsService {
     runtimeConfig.assistant.userProfile = deepClone(settings.userProfile);
 
     runtimeConfig.voice = runtimeConfig.voice || {};
-    runtimeConfig.voice.wakeWord = settings.voice.wakeWord;
+    runtimeConfig.voice.activationMode = 'hotkey';
+    runtimeConfig.voice.activationShortcut = settings.voice.activationShortcut;
+    runtimeConfig.voice.allowManualActivation = true;
     runtimeConfig.voice.tts = runtimeConfig.voice.tts || {};
     runtimeConfig.voice.tts.rate = settings.voice.tts.rate;
     runtimeConfig.voice.tts.volume = settings.voice.tts.volume;
@@ -227,6 +313,7 @@ class SettingsService {
 
     runtimeConfig.system = runtimeConfig.system || {};
     runtimeConfig.system.volumeStep = settings.system.volumeStep;
+    runtimeConfig.system.permissionLevel = settings.system.permissionLevel;
 
     runtimeConfig.chat = runtimeConfig.chat || {};
     runtimeConfig.chat.maxHistory = settings.chat.maxHistory;
@@ -261,7 +348,10 @@ class SettingsService {
         role: String(source.userProfile?.role || '').trim()
       },
       voice: {
-        wakeWord: String(source.voice?.wakeWord || this.defaults.voice.wakeWord).trim().toLowerCase() || this.defaults.voice.wakeWord,
+        activationShortcut: normalizeActivationShortcut(
+          source.voice?.activationShortcut,
+          this.defaults.voice.activationShortcut
+        ),
         tts: {
           rate: clampNumber(source.voice?.tts?.rate, -10, 10, this.defaults.voice.tts.rate),
           volume: clampNumber(source.voice?.tts?.volume, 0, 100, this.defaults.voice.tts.volume)

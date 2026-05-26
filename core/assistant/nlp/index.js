@@ -2,7 +2,8 @@ const Normalizer = require('../../shared/index').Normalizer;
 const EntityExtractor = require('../entities/index');
 const {
   DOMAIN_VOCABULARY,
-  FILLER_WORDS
+  FILLER_WORDS,
+  TOKEN_CORRECTIONS
 } = require('./constants');
 const {
   buildBigrams,
@@ -43,10 +44,17 @@ class NlpProcessor {
         });
     });
 
+    Object.keys(TOKEN_CORRECTIONS).forEach(token => tokens.add(token));
+    Object.values(TOKEN_CORRECTIONS).forEach(token => tokens.add(token));
+
     return Array.from(tokens);
   }
 
   _correctToken(token) {
+    if (TOKEN_CORRECTIONS[token]) {
+      return TOKEN_CORRECTIONS[token];
+    }
+
     if (!token || token.length <= 2 || /^\d+$/.test(token)) {
       return token;
     }

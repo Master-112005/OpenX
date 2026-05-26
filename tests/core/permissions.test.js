@@ -66,4 +66,22 @@ describe('Permission Validator', function() {
     const result = validator.validate(intent, { filename: 'test.txt' });
     assert.ok(result.confirmationMessage.includes('Delete file'));
   });
+
+  it('should skip confirmations when user chooses critical full access', function() {
+    const validator = new PermissionValidator({
+      permissions: {
+        levels: {
+          medium: { requiresConfirmation: true, requiresAuth: false },
+          critical: { requiresConfirmation: true, requiresAuth: true }
+        }
+      }
+    });
+    validator.setUserLevel('critical');
+
+    const intent = { id: 'app.close', permissionLevel: 'medium', description: 'Close app' };
+    const result = validator.validate(intent, { appName: 'chrome' });
+
+    assert.ok(result.allowed);
+    assert.equal(result.requiresConfirmation, false);
+  });
 });

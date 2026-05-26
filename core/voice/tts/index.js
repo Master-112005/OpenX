@@ -1,6 +1,9 @@
 const EventEmitter = require('events');
-const { execFileSync, execSync } = require('child_process');
+const { execSync, spawn, spawnSync } = require('child_process');
 const Logger = require('../../shared/index').Logger;
+
+const DEFAULT_TTS_VOLUME = 100;
+const MIN_AUDIBLE_TTS_VOLUME = 85;
 
 class TextToSpeech extends EventEmitter {
   constructor(config) {
@@ -8,9 +11,10 @@ class TextToSpeech extends EventEmitter {
     this.logger = new Logger({ level: config?.logging?.level || 'info' });
     this.isSpeaking = false;
     this.rate = config?.voice?.tts?.rate || 0;
-    this.volume = config?.voice?.tts?.volume || 100;
+    this.volume = this._normalizeVolume(config?.voice?.tts?.volume);
     this.voiceName = 'Microsoft David Desktop';
     this.availableVoices = [];
+    this.activeProcess = null;
   }
 
   async initialize() {
@@ -26,7 +30,8 @@ class TextToSpeech extends EventEmitter {
         .filter(Boolean);
 
       if (this.availableVoices.length > 0) {
-        const preferred = this.availableVoices.find(v => v.toLowerCase().includes('david'))
+        const preferred = this.availableVoices.find(v => v.toLowerCase().includes('zira'))
+          || this.availableVoices.find(v => v.toLowerCase().includes('david'))
           || this.availableVoices.find(v => v.toLowerCase().includes('microsoft'))
           || this.availableVoices[0];
         this.voiceName = preferred.trim();
@@ -42,6 +47,10 @@ class TextToSpeech extends EventEmitter {
 
   speak(text) {
     if (!text || typeof text !== 'string' || text.trim().length === 0) return;
+
+    if (this.isSpeaking && this.activeProcess) {
+      this.stop();
+    }
 
     this.isSpeaking = true;
     this.emit('speaking', text);
@@ -61,20 +70,37 @@ class TextToSpeech extends EventEmitter {
             $synth.SelectVoice($desiredVoice)
           }
         }
+        $synth.SetOutputToDefaultAudioDevice()
         $synth.Volume = ${this.volume}
         $synth.Rate = ${rate}
         $synth.Speak('${safeText}')
         $synth.Dispose()
       `;
 
-      execFileSync('powershell.exe', ['-NoProfile', '-Command', psScript], {
-        timeout: 30000
+      this.activeProcess = spawn('powershell.exe', ['-NoProfile', '-Command', psScript], {
+        stdio: 'ignore'
       });
 
-      this.isSpeaking = false;
-      this.emit('completed', text);
+      this.activeProcess.once('exit', (code, signal) => {
+        this.activeProcess = null;
+        this.isSpeaking = false;
+        
+        if (signal === 'SIGTERM' || signal === 'SIGKILL' || signal === 'SIGINT') {
+          this.emit('stopped');
+        } else {
+          this.emit('completed', text);
+        }
+      });
+
+      this.activeProcess.once('error', (err) => {
+        this.logger.error('TTS process error', err);
+        this.activeProcess = null;
+        this.isSpeaking = false;
+        this.emit('error', err);
+      });
+
     } catch (err) {
-      this.logger.error('TTS speech failed', err);
+      this.logger.error('TTS speech spawn failed', err);
       this.isSpeaking = false;
       this.emit('error', err);
     }
@@ -84,20 +110,23 @@ class TextToSpeech extends EventEmitter {
     return new Promise((resolve) => {
       this.once('completed', resolve);
       this.once('error', resolve);
+      this.once('stopped', resolve);
       this.speak(text);
     });
   }
 
   stop() {
-    try {
-      execFileSync('powershell.exe', [
-        '-NoProfile',
-        '-Command',
-        'Add-Type -AssemblyName System.Speech; $synth = New-Object System.Speech.Synthesis.SpeechSynthesizer; $synth.SpeakAsyncCancelAll(); $synth.Dispose()'
-      ], {
-        timeout: 3000
-      });
-    } catch (e) {}
+    if (this.activeProcess) {
+      try {
+        const pid = this.activeProcess.pid;
+        if (pid) {
+          spawnSync('taskkill', ['/pid', String(pid), '/f', '/t'], { stdio: 'ignore' });
+        }
+      } catch (err) {
+        this.logger.warn('Failed to kill TTS active process', err.message);
+      }
+      this.activeProcess = null;
+    }
     this.isSpeaking = false;
     this.emit('stopped');
   }
@@ -121,6 +150,16 @@ class TextToSpeech extends EventEmitter {
 
   _escapePowerShellString(value) {
     return String(value || '').replace(/'/g, "''");
+  }
+
+  _normalizeVolume(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) {
+      return DEFAULT_TTS_VOLUME;
+    }
+
+    const clamped = Math.max(0, Math.min(DEFAULT_TTS_VOLUME, Math.round(number)));
+    return clamped === 0 ? DEFAULT_TTS_VOLUME : Math.max(MIN_AUDIBLE_TTS_VOLUME, clamped);
   }
 }
 

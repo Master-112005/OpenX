@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, screen, globalShortcut } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -19,6 +19,7 @@ let settingsService = null;
 let runtimeConfig = null;
 let eventBus = null;
 let uiState = null;
+let registeredActivationShortcut = null;
 
 function ensureDataDir() {
   const dirs = [
@@ -175,7 +176,7 @@ function setupIPC() {
 
     return {
       success: false,
-      error: 'Manual activation is disabled. Use the wake word.'
+      error: 'Voice activation is unavailable right now.'
     };
   });
 
@@ -272,10 +273,12 @@ function bindEventPipeline() {
 
   const stateToOrb = {
     IDLE: 'idle',
-    WAKE_DETECTED: 'listening',
+    ACTIVATING: 'listening',
     LISTENING: 'listening',
     HEARING_SPEECH: 'listening',
-    PROCESSING: 'processing',
+    TRANSCRIBING: 'processing',
+    THINKING: 'processing',
+    RESPONDING: 'processing',
     ERROR: 'error'
   };
 
@@ -306,7 +309,7 @@ function bindEventPipeline() {
   eventBus.subscribe(EVENTS.RESPONSE_COMPLETED, () => {
     uiState.setSpeaking(false);
     setTimeout(() => {
-      if (!voiceManager?.stt?.isListening) {
+      if (!voiceManager?.getStatus?.().listening) {
         uiState.setOrbState('idle');
       }
     }, 900);
@@ -315,6 +318,47 @@ function bindEventPipeline() {
   eventBus.subscribe(EVENTS.VOICE_ERROR, () => {
     uiState.setOrbState('error');
   });
+}
+
+function unregisterActivationShortcut() {
+  if (!registeredActivationShortcut) {
+    return;
+  }
+
+  try {
+    globalShortcut.unregister(registeredActivationShortcut);
+  } catch (error) {
+    console.error(`Failed to unregister activation shortcut ${registeredActivationShortcut}:`, error.message);
+  } finally {
+    registeredActivationShortcut = null;
+  }
+}
+
+function registerActivationShortcut() {
+  unregisterActivationShortcut();
+
+  const shortcut = runtimeConfig?.voice?.activationShortcut || BASE_CONFIG.voice.activationShortcut || 'Alt+Space';
+  if (!shortcut) {
+    return;
+  }
+
+  try {
+    const registered = globalShortcut.register(shortcut, () => {
+      if (voiceManager) {
+        voiceManager.manualActivate();
+      }
+    });
+
+    if (!registered) {
+      console.error(`Failed to register activation shortcut: ${shortcut}`);
+      return;
+    }
+
+    registeredActivationShortcut = shortcut;
+    console.log(`Registered activation shortcut: ${shortcut}`);
+  } catch (error) {
+    console.error(`Invalid activation shortcut ${shortcut}:`, error.message);
+  }
 }
 
 async function initializeAssistant() {
@@ -331,6 +375,11 @@ async function initializeAssistant() {
   } catch (err) {
     console.error('Voice initialization failed (non-fatal):', err.message);
   }
+  if (voiceManager?.workerReady) {
+    registerActivationShortcut();
+  } else {
+    unregisterActivationShortcut();
+  }
 
   voiceManager.on('activated', () => {
     uiState.update('voice', { active: true, listening: false });
@@ -346,12 +395,50 @@ async function initializeAssistant() {
     }
   });
 
+  voiceManager.on('listeningTimeout', (data) => {
+    if (data?.mode !== 'confirmation' || !assistant?.getStatus().awaitingConfirmation) {
+      return;
+    }
+
+    const result = assistant.expirePendingConfirmation('timeout', 'voice');
+    if (!result?.response) {
+      return;
+    }
+
+    if (chatWindow && chatWindow.webContents) {
+      chatWindow.webContents.send('voice:processed', {
+        transcript: '',
+        result
+      });
+    }
+
+    voiceManager.speak(result.response);
+  });
+
   voiceManager.on('speechResult', async (data) => {
     if (chatWindow && chatWindow.webContents) {
       chatWindow.webContents.send('voice:result', data);
     }
     if (assistant && data.text) {
       const result = await assistant.processVoiceInput(data.text);
+      if (chatWindow && chatWindow.webContents) {
+        chatWindow.webContents.send('voice:processed', {
+          transcript: data.text,
+          result
+        });
+      }
+      if (result.requiresConfirmation) {
+        const timeoutMs = runtimeConfig?.voice?.conversationSilenceTimeoutMs
+          || runtimeConfig?.voice?.confirmationListenTimeoutMs
+          || 20000;
+        voiceManager.queueFollowUpListening({
+          mode: 'confirmation',
+          startSpeechTimeoutMs: timeoutMs,
+          maxDurationMs: timeoutMs
+        });
+      } else if (voiceManager.shouldContinueConversation()) {
+        voiceManager.queueFollowUpListening(voiceManager.getConversationListenOptions());
+      }
       if (voiceManager && result.response) {
         voiceManager.speak(result.response);
       }
@@ -421,6 +508,8 @@ app.on('activate', () => {
 });
 
 app.on('before-quit', () => {
+  unregisterActivationShortcut();
+  globalShortcut.unregisterAll();
   if (voiceManager) voiceManager.destroy();
   if (tray) tray.destroy();
 });

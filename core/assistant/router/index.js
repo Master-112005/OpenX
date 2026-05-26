@@ -1,5 +1,6 @@
 const Logger = require('../../shared/index').Logger;
 const IdGenerator = require('../../shared/index').IdGenerator;
+const Normalizer = require('../../shared/index').Normalizer;
 const IntentRegistry = require('../intents/index').IntentRegistry;
 const InputParser = require('../parser/index');
 const EntityExtractor = require('../entities/index');
@@ -39,10 +40,12 @@ class ActionRouter {
     const intentResult = (
       this._resolveExplicitMediaControlIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitMediaIntent(rawCommandText, preparedInput) ||
+      this._resolveExplicitAppIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitWindowIntent(rawCommandText, preparedInput) ||
-      this._resolveExplicitCommunicationIntent(rawCommandText) ||
-      this._resolveExplicitOpenIntent(rawCommandText) ||
-      this._resolveExplicitSearchIntent(rawCommandText) ||
+      this._resolveExplicitCommunicationIntent(rawCommandText, preparedInput) ||
+      this._resolveExplicitOpenIntent(rawCommandText, preparedInput) ||
+      this._resolveExplicitAppOpenIntent(rawCommandText, preparedInput) ||
+      this._resolveExplicitSearchIntent(rawCommandText, preparedInput) ||
       this._resolveGeneralQuestionSearchIntent(rawCommandText, preparedInput) ||
       this._matchIntent(preparedInput)
     );
@@ -306,8 +309,49 @@ class ActionRouter {
     return null;
   }
 
-  _resolveExplicitOpenIntent(rawText) {
-    const input = String(rawText || '').trim();
+  _resolveExplicitAppIntent(rawText, preparedInput) {
+    const correctedText = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
+    if (!correctedText) {
+      return null;
+    }
+
+    const appIntentConfigs = [
+      {
+        intentId: 'app.close',
+        verbs: ['close', 'quit', 'exit', 'terminate', 'stop']
+      },
+      {
+        intentId: 'app.switch',
+        verbs: ['switch', 'focus', 'goto', 'go', 'activate']
+      }
+    ];
+
+    for (const config of appIntentConfigs) {
+      if (!this._containsActionVerb(correctedText, config.verbs)) {
+        continue;
+      }
+
+      const intent = this.intentRegistry.get(config.intentId);
+      if (!intent) {
+        continue;
+      }
+
+      const extractedFromRaw = this.entityExtractor.extract(intent, rawText);
+      const extractedFromCorrected = this.entityExtractor.extract(intent, correctedText);
+      const appName = extractedFromRaw.appName || extractedFromCorrected.appName;
+
+      if (!appName) {
+        continue;
+      }
+
+      return { intent, confidence: 0.99 };
+    }
+
+    return null;
+  }
+
+  _resolveExplicitOpenIntent(rawText, preparedInput) {
+    const input = String(preparedInput?.correctedText || rawText || '').trim();
     if (!input) return null;
 
     const lower = input.toLowerCase();
@@ -317,21 +361,21 @@ class ActionRouter {
     }
 
     const browserIntent = this.intentRegistry.get('browser.open');
-    if (browserIntent && this._looksLikeUrlRequest(input)) {
+    if (browserIntent && this._looksLikeUrlRequest(rawText)) {
       return { intent: browserIntent, confidence: 1 };
     }
 
     const fileIntent = this.intentRegistry.get('file.open');
     if (fileIntent) {
-      const fileEntities = this.entityExtractor.extract(fileIntent, input);
+      const fileEntities = this.entityExtractor.extract(fileIntent, rawText);
       if (fileEntities.filename) {
         return { intent: fileIntent, confidence: 1 };
       }
     }
 
     const folderIntent = this.intentRegistry.get('folder.open');
-    if (folderIntent && this._looksLikeFolderOpenRequest(input)) {
-      const folderEntities = this.entityExtractor.extract(folderIntent, input);
+    if (folderIntent && this._looksLikeFolderOpenRequest(rawText)) {
+      const folderEntities = this.entityExtractor.extract(folderIntent, rawText);
       if (folderEntities.folderName) {
         return { intent: folderIntent, confidence: 0.98 };
       }
@@ -340,14 +384,14 @@ class ActionRouter {
     return null;
   }
 
-  _resolveExplicitCommunicationIntent(rawText) {
-    const input = String(rawText || '').trim();
+  _resolveExplicitCommunicationIntent(rawText, preparedInput) {
+    const input = String(preparedInput?.correctedText || rawText || '').trim();
     if (!input) return null;
 
     const lower = input.toLowerCase();
     const messageIntent = this.intentRegistry.get('message.send');
     if (messageIntent && /^(?:say|send|message|text|ask|tell|msg|massage)\b/i.test(lower)) {
-      const entities = this.entityExtractor.extract(messageIntent, input);
+      const entities = this.entityExtractor.extract(messageIntent, rawText);
       if (entities.contactName && entities.messageText) {
         return { intent: messageIntent, confidence: 1 };
       }
@@ -355,13 +399,55 @@ class ActionRouter {
 
     const callIntent = this.intentRegistry.get('call.start');
     if (callIntent && /^(?:call|dial|phone|ring)\b/i.test(lower)) {
-      const entities = this.entityExtractor.extract(callIntent, input);
+      const entities = this.entityExtractor.extract(callIntent, rawText);
       if (entities.contactName) {
         return { intent: callIntent, confidence: 1 };
       }
     }
 
     return null;
+  }
+
+  _resolveExplicitAppOpenIntent(rawText, preparedInput) {
+    const correctedText = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
+    if (!correctedText || !this._containsActionVerb(correctedText, ['open', 'launch', 'start', 'run'])) {
+      return null;
+    }
+
+    if (this._looksLikeUrlRequest(rawText)) {
+      return null;
+    }
+
+    const fileIntent = this.intentRegistry.get('file.open');
+    if (fileIntent) {
+      const fileEntities = this.entityExtractor.extract(fileIntent, rawText);
+      if (fileEntities.filename) {
+        return null;
+      }
+    }
+
+    const folderIntent = this.intentRegistry.get('folder.open');
+    if (folderIntent && this._looksLikeFolderOpenRequest(rawText)) {
+      const folderEntities = this.entityExtractor.extract(folderIntent, rawText);
+      if (folderEntities.folderName) {
+        return null;
+      }
+    }
+
+    const intent = this.intentRegistry.get('app.open');
+    if (!intent) {
+      return null;
+    }
+
+    const extractedFromRaw = this.entityExtractor.extract(intent, rawText);
+    const extractedFromCorrected = this.entityExtractor.extract(intent, correctedText);
+    const appName = extractedFromRaw.appName || extractedFromCorrected.appName;
+
+    if (!appName) {
+      return null;
+    }
+
+    return { intent, confidence: 0.99 };
   }
 
   _looksLikeUrlRequest(input) {
@@ -388,8 +474,8 @@ class ActionRouter {
     return tokenCount === 1;
   }
 
-  _resolveExplicitSearchIntent(rawText) {
-    const input = String(rawText || '').trim();
+  _resolveExplicitSearchIntent(rawText, preparedInput) {
+    const input = String(preparedInput?.correctedText || rawText || '').trim();
     if (!input) return null;
 
     const lower = input.toLowerCase();
@@ -445,6 +531,35 @@ class ActionRouter {
       .filter(candidate => candidate.confidence >= 0.25)
       .slice(0, 3)
       .map(candidate => candidate.pattern);
+  }
+
+  _containsActionVerb(text, verbs) {
+    const normalizedText = String(text || '').trim().toLowerCase();
+    if (!normalizedText) {
+      return false;
+    }
+
+    const tokens = normalizedText.split(/\s+/).filter(Boolean);
+    const candidates = new Set();
+
+    tokens.forEach((token, index) => {
+      candidates.add(token);
+      if (index < tokens.length - 1) {
+        candidates.add(`${token} ${tokens[index + 1]}`);
+      }
+    });
+
+    return Array.from(candidates).some(candidate => {
+      if (verbs.includes(candidate)) {
+        return true;
+      }
+
+      const match = Normalizer.findClosestOption(candidate, verbs, {
+        minSimilarity: 0.58,
+        maxDistance: candidate.length >= 5 ? 2 : 1
+      });
+      return Boolean(match);
+    });
   }
 
   _checkRequiredEntities(intent, entities) {
