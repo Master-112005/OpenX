@@ -453,12 +453,51 @@ class VoiceManager extends EventEmitter {
       return false;
     }
 
+    if (this._canInterruptAssistantSpeech()) {
+      return this._interruptAssistantSpeech();
+    }
+
     if (this.stateMachine.currentState !== SPEECH_STATES.IDLE) {
       return false;
     }
 
     const payload = {
       manual: true,
+      source: 'hotkey',
+      trigger: this.config?.voice?.activationShortcut || 'Alt+Space'
+    };
+
+    this.conversationActive = true;
+    this.eventBus.publish(EVENTS.VOICE_ACTIVATED, payload);
+    this.emit('activated', payload);
+    return this.startListening({
+      ...this._getConversationListenOptions(),
+      resetSpeakerLock: true
+    });
+  }
+
+  _canInterruptAssistantSpeech() {
+    return this.tts?.isSpeaking === true || this.stateMachine.currentState === SPEECH_STATES.RESPONDING;
+  }
+
+  _interruptAssistantSpeech() {
+    this.pendingFollowUpListen = null;
+    this.pendingListenAfterResume = null;
+    if (this.resumeListenFallbackTimer) {
+      clearTimeout(this.resumeListenFallbackTimer);
+      this.resumeListenFallbackTimer = null;
+    }
+
+    if (typeof this.tts?.stop === 'function') {
+      this.tts.stop();
+    }
+
+    this._resumeCaptureStream();
+    this._transitionTo(SPEECH_STATES.IDLE, { reason: 'barge-in' });
+
+    const payload = {
+      manual: true,
+      interrupted: true,
       source: 'hotkey',
       trigger: this.config?.voice?.activationShortcut || 'Alt+Space'
     };

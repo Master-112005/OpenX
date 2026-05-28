@@ -2,6 +2,7 @@ const { execFileSync, execSync } = require('child_process');
 const Logger = require('../../shared/index').Logger;
 const Normalizer = require('../../shared/index').Normalizer;
 const { launchTarget } = require('../common/launcher');
+const WindowsSessionController = require('../common/windows-session');
 
 const KNOWN_APPS = {
   'code': { path: null, cmd: 'code', processName: 'Code' },
@@ -20,6 +21,7 @@ const KNOWN_APPS = {
   'snippingtool': { path: 'C:\\Windows\\System32\\SnippingTool.exe', cmd: 'SnippingTool' },
   'winword': { cmd: 'winword' },
   'excel': { cmd: 'excel' },
+  'powerpoint': { cmd: 'powerpnt', processName: 'POWERPNT' },
   'outlook': { cmd: 'outlook' },
   'spotify': { cmd: 'spotify' },
   'discord': { cmd: 'discord', processName: 'Discord' },
@@ -31,12 +33,19 @@ const KNOWN_APPS = {
   'apple tv': { processName: 'AppleTV' },
   'calendar': { processName: 'HxCalendarAppImm' },
   'clock': { processName: 'WindowsAlarms' },
+  'youtube': {
+    closeStrategy: 'window',
+    windowQuery: 'youtube',
+    preferredProcessNames: ['chrome', 'msedge', 'firefox'],
+    preferredTitleTokens: ['youtube']
+  },
   'antigravity': { processName: 'Antigravity IDE' }
 };
 
 class AppController {
   constructor(config) {
     this.logger = new Logger({ level: config?.logging?.level || 'info' });
+    this.windowSession = new WindowsSessionController(config);
     this._startAppsCache = null;
     this._startAppsCacheExpiresAt = 0;
   }
@@ -89,7 +98,15 @@ class AppController {
     }
 
     const name = appName.toLowerCase().trim();
+    const app = KNOWN_APPS[name];
     try {
+      if (app?.closeStrategy === 'window') {
+        const windowClose = this._closeAppWindow(name, app);
+        if (windowClose.success) {
+          return windowClose;
+        }
+      }
+
       const processNames = this._resolveProcessCandidates(name);
       let runningProcesses = this._findRunningProcesses(name, processNames);
 
@@ -109,16 +126,59 @@ class AppController {
             success: true,
             data: {
               app: name,
-              closedCount: processNames.length
+              closedCount: processNames.length,
+              closeMethod: 'process'
             }
           };
         }
+      }
+
+      const windowClose = this._closeAppWindow(name, app);
+      if (windowClose.success) {
+        return windowClose;
       }
 
       return { success: false, error: `Could not close: ${name}` };
     } catch (err) {
       return { success: false, error: `Could not close: ${name}` };
     }
+  }
+
+  _closeAppWindow(name, app = KNOWN_APPS[name]) {
+    const windowQuery = app?.windowQuery || name;
+    const preferredTitleTokens = Array.from(new Set(
+      [name, ...(Array.isArray(app?.preferredTitleTokens) ? app.preferredTitleTokens : [])]
+        .map(value => String(value || '').trim().toLowerCase())
+        .filter(Boolean)
+    ));
+    const preferredProcessNames = Array.from(new Set(
+      [
+        app?.processName,
+        app?.cmd,
+        ...(Array.isArray(app?.preferredProcessNames) ? app.preferredProcessNames : [])
+      ]
+        .map(value => String(value || '').trim())
+        .filter(Boolean)
+    ));
+
+    const closeResult = this.windowSession.closeWindow(windowQuery, {
+      preferredTitleTokens,
+      preferredProcessNames
+    });
+
+    if (!closeResult.success) {
+      return { success: false, error: closeResult.error };
+    }
+
+    return {
+      success: true,
+      data: {
+        app: name,
+        closeMethod: 'window',
+        matchedWindow: closeResult.data?.matchedWindow || null,
+        processName: closeResult.data?.processName || null
+      }
+    };
   }
 
   _getStartApps() {
@@ -225,10 +285,6 @@ class AppController {
       if (exeMatch && exeMatch[1]) {
         candidates.add(exeMatch[1]);
       }
-
-      tokens
-        .filter(token => token.length >= 4 && !/^\d+$/.test(token) && !['app', 'application'].includes(token.toLowerCase()))
-        .forEach(token => candidates.add(token));
     }
 
     return Array.from(candidates);
@@ -250,26 +306,28 @@ class AppController {
       const processName = String(process.ProcessName || '').toLowerCase();
       const windowTitle = String(process.MainWindowTitle || '').toLowerCase();
       const processPath = String(process.Path || '').toLowerCase();
+      const processBaseName = processPath
+        ? processPath.split(/[\\/]/).pop().replace(/\.exe$/i, '')
+        : '';
       let score = 0;
 
       Array.from(searchTerms).forEach(term => {
         if (processName === term) score += 160;
         else if (processName.startsWith(`${term}.`)) score += 135;
-        else if (processName.includes(term)) score += 90;
+        else if (processName.includes(term) && term.length >= 4) score += 90;
 
         if (windowTitle === term) score += 120;
         else if (windowTitle.includes(term)) score += 70;
 
-        if (processPath.includes(`\\${term}`) || processPath.includes(term)) {
-          score += 65;
-        }
+        if (processBaseName === term) score += 120;
+        else if (processBaseName.includes(term) && term.length >= 4) score += 90;
       });
 
       return { process, score };
     });
 
     return rankedMatches
-      .filter(item => item.score > 0)
+      .filter(item => item.score >= 100)
       .sort((left, right) => right.score - left.score)
       .map(item => item.process);
   }

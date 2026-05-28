@@ -101,6 +101,62 @@ describe('Assistant Confirmation Flow', function() {
     assert.equal(assistant.getStatus().awaitingConfirmation, false);
   });
 
+  it('should cancel a pending confirmation when speech recognition misspells cancel', async function() {
+    const router = {
+      process: async () => ({
+        commandId: 'cmd-3b',
+        success: true,
+        requiresConfirmation: true,
+        intent: 'app.close',
+        entities: { appName: 'notepad' },
+        response: 'Please confirm that I should proceed with: Close an application'
+      }),
+      confirmAndExecute: async () => {
+        throw new Error('should not execute');
+      }
+    };
+
+    const assistant = new Assistant({}, {
+      router,
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    await assistant.processVoiceInput('close notepad');
+    const cancel = await assistant.processVoiceInput('canle it');
+
+    assert.equal(cancel.cancelled, true);
+    assert.equal(assistant.getStatus().awaitingConfirmation, false);
+  });
+
+  it('should treat negative natural language as cancellation before confirmation', async function() {
+    const router = {
+      process: async () => ({
+        commandId: 'cmd-3c',
+        success: true,
+        requiresConfirmation: true,
+        intent: 'app.close',
+        entities: { appName: 'notepad' },
+        response: 'Please confirm that I should proceed with: Close an application'
+      }),
+      confirmAndExecute: async () => {
+        throw new Error('should not execute');
+      }
+    };
+
+    const assistant = new Assistant({}, {
+      router,
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    await assistant.processVoiceInput('close notepad');
+    const cancel = await assistant.processVoiceInput("no don't do it");
+
+    assert.equal(cancel.cancelled, true);
+    assert.equal(assistant.getStatus().awaitingConfirmation, false);
+  });
+
   it('should expire a pending confirmation after a timeout', async function() {
     const router = {
       process: async () => ({

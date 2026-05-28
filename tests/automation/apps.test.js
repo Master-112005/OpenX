@@ -53,4 +53,56 @@ describe('App Controller', function() {
     const result = controller.close('chrome');
     assert.equal(result.success, true);
   });
+
+  it('should not close unrelated apps from broad Start menu publisher tokens', function() {
+    const controller = new AppController({});
+    const processes = [
+      {
+        Id: 100,
+        ProcessName: 'Code',
+        MainWindowTitle: 'Visual Studio Code',
+        Path: 'C:\\Users\\user\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe'
+      },
+      {
+        Id: 101,
+        ProcessName: 'notepad',
+        MainWindowTitle: 'Untitled - Notepad',
+        Path: 'C:\\Windows\\System32\\notepad.exe'
+      }
+    ];
+
+    controller._getRunningProcessDetails = () => processes;
+
+    const matches = controller._findRunningProcesses('notepad', [
+      'notepad',
+      'Microsoft',
+      'WindowsNotepad'
+    ]);
+
+    assert.equal(matches.length, 1);
+    assert.equal(matches[0].ProcessName, 'notepad');
+  });
+
+  it('should close browser-hosted apps by window title when process matching is not usable', function() {
+    const controller = new AppController({});
+
+    controller.windowSession.closeWindow = (windowQuery, options) => {
+      assert.equal(windowQuery, 'youtube');
+      assert.ok(options.preferredTitleTokens.includes('youtube'));
+      return {
+        success: true,
+        data: {
+          matchedWindow: 'Playdate - YouTube',
+          processName: 'chrome'
+        }
+      };
+    };
+    controller._getRunningProcessDetails = () => [];
+
+    const result = controller.close('youtube');
+
+    assert.equal(result.success, true);
+    assert.equal(result.data.closeMethod, 'window');
+    assert.equal(result.data.processName, 'chrome');
+  });
 });

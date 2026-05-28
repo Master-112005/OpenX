@@ -49,6 +49,20 @@ describe('Entity Extractor', function() {
     assert.equal(entities.appName, 'apple music');
   });
 
+  it('should resolve common PowerPoint speech variations', function() {
+    const extractor = new EntityExtractor({});
+    const intent = { entities: [{ name: 'appName', type: 'string', required: true }] };
+    const entities = extractor.extract(intent, 'close power paint');
+    assert.equal(entities.appName, 'powerpoint');
+  });
+
+  it('should not extract an app name from prepositional close phrases', function() {
+    const extractor = new EntityExtractor({});
+    const intent = { entities: [{ name: 'appName', type: 'string', required: true }] };
+    const entities = extractor.extract(intent, 'close to terminal');
+    assert.equal(entities.appName, null);
+  });
+
   it('should extract filename', function() {
     const extractor = new EntityExtractor({});
     const intent = { entities: [{ name: 'filename', type: 'string', required: true }] };

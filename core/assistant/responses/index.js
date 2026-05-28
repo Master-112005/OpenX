@@ -58,7 +58,7 @@ function humanizeError(error) {
   if (lowered.includes('folder not found')) return 'Unable to find that folder';
   if (lowered.includes('source not found')) return 'Unable to find the source item';
   if (lowered.includes('destination could not be resolved')) return 'Unable to determine the destination for that move or copy operation';
-  if (lowered.includes('permission')) return 'I do not have permission to complete that action';
+  if (lowered.includes('permission')) return 'I cannot complete that with the current permission setting';
   if (lowered.includes('invalid filename')) return 'That filename is not valid on this system';
   if (lowered.includes('invalid folder name')) return 'That folder name is not valid on this system';
   if (lowered.includes('already exists')) return 'That item already exists';
@@ -479,16 +479,16 @@ const RESPONSE_BUILDERS = {
       if (suggestions.length > 0) {
         return `I could not confidently map that request to an action. Please rephrase it, or try: ${suggestions.join(', ')}`;
       }
-      return 'I could not understand that request clearly enough to act on it. Please rephrase it or ask for help.';
+      return 'I could not understand that clearly enough to take action. Please say it another way, or ask what I can do.';
     },
     executionFailed: context => humanizeError(context?.error),
-    permissionDenied: () => 'I do not have permission to do that.',
+    permissionDenied: () => 'I cannot do that with the current permission setting. You can change assistant permissions in Settings if you want me to act without asking.',
     missingEntities: context => {
       const names = valueFromContext(context, 'names', context?.entities?.names || 'details');
-      return `I need a little more information to do that. Please specify: ${names}`;
+      return `I need one more detail before I can do that: ${names}.`;
     },
-    noCommand: () => 'I did not catch a command. Please try again.',
-    notFound: () => 'I was unable to locate the item or resource you requested.',
+    noCommand: () => 'I did not catch what you wanted me to do. Please try again.',
+    notFound: () => 'I could not find what you asked for.',
     timeout: () => {
       const isTest = typeof global.it === 'function' || process.env.NODE_ENV === 'test';
       if (isTest) {
@@ -511,7 +511,7 @@ const RESPONSE_BUILDERS = {
       const details = valueFromContext(context, 'details', valueFromContext(context, 'action'));
       return `Before I continue, please confirm this request: ${details}. Say yes to continue or no to cancel.`;
     },
-    awaitingDecision: () => 'I am still waiting for your confirmation. Please say proceed or cancel.',
+    awaitingDecision: () => 'I am waiting for your decision. Please say proceed or cancel.',
     cancelled: () => 'Understood. I have cancelled that action.',
     timedOut: () => 'The confirmation timed out, so I cancelled that request.',
     default: () => 'I need your confirmation before I proceed with that operation.'
