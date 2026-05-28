@@ -10,14 +10,17 @@ describe('Voice Manager & Audio Engine Integration', function() {
     constructor() {
       super();
       this.isSpeaking = false;
+      this.timer = null;
+      this.stopped = false;
     }
     async initialize() {
       return true;
     }
     speak(text) {
       this.isSpeaking = true;
+      this.stopped = false;
       this.emit('speaking', text);
-      setTimeout(() => {
+      this.timer = setTimeout(() => {
         this.isSpeaking = false;
         this.emit('completed', text);
       }, 20);
@@ -25,7 +28,20 @@ describe('Voice Manager & Audio Engine Integration', function() {
     async speakAsync(text) {
       this.speak(text);
     }
-    destroy() {}
+    stop() {
+      if (this.timer) {
+        clearTimeout(this.timer);
+        this.timer = null;
+      }
+      this.stopped = true;
+      this.isSpeaking = false;
+      this.emit('stopped');
+    }
+    destroy() {
+      if (this.timer) {
+        clearTimeout(this.timer);
+      }
+    }
   }
 
   function createVoiceManager(config = {}) {
@@ -200,6 +216,37 @@ describe('Voice Manager & Audio Engine Integration', function() {
 
       vm.speak('Now testing SAPI suppression laws');
     });
+  });
+
+  it('should interrupt assistant speech and listen again when the hotkey is pressed', async function() {
+    const { vm, tts } = createVoiceManager();
+    const listenCommands = [];
+    let interruptedPayload = null;
+
+    await vm.initialize();
+    vm.on('test:stdin', (payload) => {
+      if (payload.command === 'listen') {
+        listenCommands.push(payload);
+      }
+    });
+    vm.on('activated', (payload) => {
+      if (payload.interrupted) {
+        interruptedPayload = payload;
+      }
+    });
+
+    vm.speak('This response is still being spoken.');
+    assert.equal(tts.isSpeaking, true);
+
+    const activated = vm.manualActivate();
+
+    assert.equal(activated, true);
+    assert.equal(tts.stopped, true);
+    assert.ok(interruptedPayload);
+    assert.equal(listenCommands.length, 1);
+    assert.equal(listenCommands[0].mode, 'conversation');
+    assert.equal(listenCommands[0].resetSpeakerLock, true);
+    vm.destroy();
   });
 
   it('should automatically start a confirmation listening session after speaking a permission prompt', function(done) {

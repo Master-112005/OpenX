@@ -91,6 +91,48 @@ describe('Action Router', function() {
     assert.equal(result.entities.appName, 'chrome');
   });
 
+  it('should not infer terminal from "close to terminal"', async function() {
+    const config = {
+      permissions: {
+        levels: {
+          low: { requiresConfirmation: false, requiresAuth: false },
+          medium: { requiresConfirmation: false, requiresAuth: false }
+        }
+      }
+    };
+    const stubEngine = {
+      execute() {
+        throw new Error('should not execute');
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const result = await router.process('close to terminal', 'voice');
+
+    assert.equal(result.success, false);
+    assert.notEqual(result.entities?.appName, 'cmd');
+  });
+
+  it('should route close power paint to PowerPoint closing', async function() {
+    const config = {
+      permissions: {
+        levels: {
+          low: { requiresConfirmation: false, requiresAuth: false },
+          medium: { requiresConfirmation: false, requiresAuth: false }
+        }
+      }
+    };
+    const stubEngine = {
+      execute(actionId) {
+        return { success: true, data: { actionId } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const result = await router.process('close power paint', 'voice');
+
+    assert.equal(result.intent, 'app.close');
+    assert.equal(result.entities.appName, 'powerpoint');
+  });
+
   it('should route system status command', async function() {
     const config = {
       permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }

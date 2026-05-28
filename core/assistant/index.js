@@ -2,13 +2,71 @@ const EventEmitter = require('events');
 const {
   AssistantEventBus,
   EVENTS,
-  Logger
+  Logger,
+  Normalizer
 } = require('../shared/index');
 const ActionRouter = require('./router/index');
 const AutomationEngine = require('../automation/index');
 const ContextManager = require('./context/index');
 const Personality = require('./personality/index');
 const ResponseGenerator = require('./responses/index');
+
+const CONFIRM_PHRASES = [
+  'approve',
+  'carry on',
+  'confirm',
+  'continue',
+  'do it',
+  'execute it',
+  'go ahead',
+  'ok',
+  'okay',
+  'please continue',
+  'proceed',
+  'run it',
+  'sure',
+  'yes',
+  'yeah',
+  'yep'
+];
+
+const CANCEL_PHRASES = [
+  'abort',
+  'canle',
+  'cancle',
+  'cancel',
+  'cancel it',
+  'cancel that',
+  'do not continue',
+  'do not do it',
+  'do not proceed',
+  'do not run it',
+  'dont',
+  'dont continue',
+  'dont do it',
+  'dont proceed',
+  'forget it',
+  'leave it',
+  'nah',
+  'never mind',
+  'nevermind',
+  'no',
+  'nope',
+  'stop',
+  'stop it'
+];
+
+const CANCEL_PATTERNS = [
+  /\b(?:abort|canle|cancle|cancel|nevermind|no|nope|stop)\b/,
+  /\bnever\s+mind\b/,
+  /\b(?:forget|leave)\s+(?:it|that)\b/,
+  /\b(?:do\s+not|dont)\s+(?:continue|do|proceed|run|execute|close|delete|shutdown|restart)\b/
+];
+
+const CONFIRM_PATTERNS = [
+  /\b(?:approve|confirm|continue|proceed|yes|yeah|yep|sure|ok|okay)\b/,
+  /\b(?:carry\s+on|do\s+it|execute\s+it|go\s+ahead|run\s+it)\b/
+];
 
 class Assistant extends EventEmitter {
   constructor(config, dependencies = {}) {
@@ -174,7 +232,19 @@ class Assistant extends EventEmitter {
       return null;
     }
 
-    const normalized = String(input || '').trim().toLowerCase();
+    const normalized = this._normalizeConfirmationText(input);
+    if (this._isCancelPhrase(normalized)) {
+      this.pendingConfirmation = null;
+      return {
+        success: true,
+        cancelled: true,
+        source,
+        response: this.personality.applyToResponse(
+          this.responses.generate('confirmation', 'cancelled')
+        )
+      };
+    }
+
     if (this._isConfirmPhrase(normalized)) {
       const pending = this.pendingConfirmation;
       this.pendingConfirmation = null;
@@ -188,18 +258,6 @@ class Assistant extends EventEmitter {
         ...result,
         response,
         source
-      };
-    }
-
-    if (this._isCancelPhrase(normalized)) {
-      this.pendingConfirmation = null;
-      return {
-        success: true,
-        cancelled: true,
-        source,
-        response: this.personality.applyToResponse(
-          this.responses.generate('confirmation', 'cancelled')
-        )
       };
     }
 
@@ -217,11 +275,48 @@ class Assistant extends EventEmitter {
   }
 
   _isConfirmPhrase(text) {
-    return /^(?:proceed|yes|confirm|do it|go ahead|yeah|yep|sure|continue|okay|ok)\b/.test(text);
+    return this._matchesConfirmationIntent(text, CONFIRM_PHRASES, CONFIRM_PATTERNS);
   }
 
   _isCancelPhrase(text) {
-    return /^(?:no|cancel|stop|never mind|abort|dont|don't)\b/.test(text);
+    return this._matchesConfirmationIntent(text, CANCEL_PHRASES, CANCEL_PATTERNS);
+  }
+
+  _normalizeConfirmationText(text) {
+    const expanded = Normalizer.expandContractions(String(text || '').trim());
+    return Normalizer.normalizeText(expanded)
+      .replace(/\bplease\b/g, ' ')
+      .replace(/\b(?:assistant|jarvis|hey)\b/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  _matchesConfirmationIntent(text, phrases, patterns) {
+    const normalized = this._normalizeConfirmationText(text);
+    if (!normalized) {
+      return false;
+    }
+
+    if (patterns.some(pattern => pattern.test(normalized))) {
+      return true;
+    }
+
+    if (phrases.some(phrase => normalized === phrase || normalized.startsWith(`${phrase} `))) {
+      return true;
+    }
+
+    const tokens = normalized.split(/\s+/).filter(Boolean);
+    const candidates = [
+      tokens[0],
+      tokens.slice(0, 2).join(' '),
+      tokens.slice(0, 3).join(' '),
+      tokens.slice(0, 4).join(' ')
+    ].filter(Boolean);
+
+    return candidates.some(candidate => Boolean(Normalizer.findClosestOption(candidate, phrases, {
+      maxDistance: candidate.length >= 7 ? 2 : 1,
+      minSimilarity: candidate.length >= 7 ? 0.78 : 0.84
+    })));
   }
 
   _prepareVoiceInput(text) {
