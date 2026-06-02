@@ -239,6 +239,29 @@ def detect_from_transcripts(wake_word, transcripts, aliases=None):
     return None
 
 
+def should_accept_transcript(text, confidence, no_speech_probability, compression_ratio, args):
+    normalized_text = normalize_text(text)
+    if not normalized_text:
+        return False, "empty-transcript"
+
+    command_like_text = looks_like_command(normalized_text)
+    min_confidence = max(0.0, min(1.0, float(getattr(args, "min_transcript_confidence", 0.55))))
+    recovery_min_confidence = max(0.0, min(1.0, float(getattr(args, "command_recovery_min_confidence", 0.25))))
+    max_no_speech = max(0.0, min(1.0, float(getattr(args, "max_no_speech_probability", 0.55))))
+    max_compression = max(0.0, float(getattr(args, "max_compression_ratio", 2.4)))
+
+    if confidence < min_confidence and (confidence < recovery_min_confidence or not command_like_text):
+        return False, "low-transcript-confidence"
+
+    if no_speech_probability > max_no_speech and (no_speech_probability > 0.85 or not command_like_text):
+        return False, "transcript-marked-no-speech"
+
+    if compression_ratio > max_compression:
+        return False, "repetitive-transcript"
+
+    return True, "accepted"
+
+
 class BoundedAudioQueue:
     def __init__(self, maxsize=20):
         self.queue = queue.Queue(maxsize=maxsize)
@@ -369,6 +392,11 @@ class AudioEngine:
         self.silence_run = 0
         self.speech_run = 0
         self.min_utterance_ms = max(0, int(getattr(args, "min_utterance_ms", 250)))
+        self.min_transcript_confidence = max(0.0, min(1.0, float(getattr(args, "min_transcript_confidence", 0.55))))
+        self.command_recovery_min_confidence = max(0.0, min(1.0, float(getattr(args, "command_recovery_min_confidence", 0.25))))
+        self.max_no_speech_probability = max(0.0, min(1.0, float(getattr(args, "max_no_speech_probability", 0.55))))
+        self.max_compression_ratio = max(0.0, float(getattr(args, "max_compression_ratio", 2.4)))
+        self.min_rms = max(0.0, float(getattr(args, "min_rms", 0.004)))
         self.speaker_lock_enabled = bool(getattr(args, "speaker_lock_enabled", False))
         self.speaker_similarity_threshold = float(getattr(args, "speaker_similarity_threshold", 0.68))
         self.speaker_profile = None
@@ -656,9 +684,14 @@ class AudioEngine:
         audio = np.concatenate(self.speech_frames).astype(np.float32, copy=False)
         duration_ms = int((len(audio) / float(self.sample_rate)) * 1000.0)
         mode = self.session_mode
+        rms = float(np.sqrt(np.mean(np.square(audio)))) if audio.size else 0.0
 
         if duration_ms < self.min_utterance_ms:
             self._emit_ignored_speech("utterance-too-short", mode=mode, durationMs=duration_ms)
+            return
+
+        if rms < self.min_rms:
+            self._emit_ignored_speech("audio-below-rms-threshold", mode=mode, durationMs=duration_ms, rms=rms, threshold=self.min_rms)
             return
 
         # Execute transcription sharing the pre-loaded Whisper model cleanly
@@ -677,14 +710,42 @@ class AudioEngine:
             
             # Compute confidence
             scores = []
+            no_speech_probs = []
+            compression_ratios = []
             for segment in segments:
                 avg_logprob = getattr(segment, "avg_logprob", None)
                 if avg_logprob is not None:
                     scores.append(max(0.0, min(1.0, float(np.exp(avg_logprob)))))
+                no_speech_prob = getattr(segment, "no_speech_prob", None)
+                if no_speech_prob is not None:
+                    no_speech_probs.append(max(0.0, min(1.0, float(no_speech_prob))))
+                compression_ratio = getattr(segment, "compression_ratio", None)
+                if compression_ratio is not None:
+                    compression_ratios.append(max(0.0, float(compression_ratio)))
             confidence = float(sum(scores) / len(scores)) if scores else 0.8
+            no_speech_probability = float(max(no_speech_probs)) if no_speech_probs else 0.0
+            compression_ratio = float(max(compression_ratios)) if compression_ratios else 0.0
 
             if not text:
                 self._emit_ignored_speech("empty-transcript", mode=mode, durationMs=duration_ms)
+                return
+
+            accepted, reason = should_accept_transcript(
+                text,
+                confidence,
+                no_speech_probability,
+                compression_ratio,
+                self.args
+            )
+            if not accepted:
+                self._emit_ignored_speech(
+                    reason,
+                    mode=mode,
+                    durationMs=duration_ms,
+                    confidence=confidence,
+                    noSpeechProbability=no_speech_probability,
+                    compressionRatio=compression_ratio
+                )
                 return
 
             speaker_allowed, speaker_similarity, speaker_locked = self._evaluate_speaker_lock(audio)
@@ -707,6 +768,9 @@ class AudioEngine:
                 "mode": mode,
                 "durationMs": duration_ms,
                 "language": getattr(info, "language", self.args.language),
+                "rms": rms,
+                "noSpeechProbability": no_speech_probability,
+                "compressionRatio": compression_ratio,
                 "speakerLocked": speaker_locked,
                 "speakerSimilarity": speaker_similarity,
             })
@@ -861,11 +925,20 @@ def parse_args():
     parser.add_argument("--max-duration-ms", type=int, default=12000)
     parser.add_argument("--start-speech-timeout-ms", type=int, default=3500)
     parser.add_argument("--min-utterance-ms", type=int, default=250)
+    parser.add_argument("--min-rms", type=float, default=0.004)
+    parser.add_argument("--min-transcript-confidence", type=float, default=0.55)
+    parser.add_argument("--command-recovery-min-confidence", type=float, default=0.25)
+    parser.add_argument("--max-no-speech-probability", type=float, default=0.55)
+    parser.add_argument("--max-compression-ratio", type=float, default=2.4)
     parser.add_argument("--speaker-lock-enabled", action="store_true", default=False)
     parser.add_argument("--speaker-similarity-threshold", type=float, default=0.68)
     
     # Selftest arguments
     parser.add_argument("--selftest-transcript", action="append", default=[])
+    parser.add_argument("--selftest-filter-text", default="")
+    parser.add_argument("--selftest-filter-confidence", type=float, default=0.8)
+    parser.add_argument("--selftest-filter-no-speech", type=float, default=0.0)
+    parser.add_argument("--selftest-filter-compression", type=float, default=0.0)
     
     return parser.parse_args()
 
@@ -881,6 +954,21 @@ def main():
             "event": "selftest",
             "matched": bool(command),
             "command": command or "",
+        })
+        return
+
+    if args.selftest_filter_text:
+        accepted, reason = should_accept_transcript(
+            args.selftest_filter_text,
+            args.selftest_filter_confidence,
+            args.selftest_filter_no_speech,
+            args.selftest_filter_compression,
+            args
+        )
+        emit({
+            "event": "selftest_filter",
+            "accepted": accepted,
+            "reason": reason,
         })
         return
 

@@ -69,6 +69,8 @@ class AutomationEngine {
       'media.previous': () => this.media.previous(),
       'media.pause': () => this.media.pause(),
       'media.resume': () => this.media.resume(),
+      'media.stop': () => this.media.stop(),
+      'media.search': (entities) => this.media.search(entities.mediaQuery, entities.mediaPlatform),
       'message.compose': (entities) => this.communications.composeMessage(
         entities.contactName,
         entities.messageText,

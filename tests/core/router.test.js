@@ -470,6 +470,61 @@ describe('Action Router', function() {
     assert.equal(result.entities.mediaPlatform, 'youtube');
   });
 
+  it('should route STT-corrupted artist playback through media understanding', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const result = await router.process('play dulander songs', 'voice');
+
+    assert.equal(result.intent, 'media.play');
+    assert.equal(result.entities.mediaQuery, 'Daler Mehndi songs');
+    assert.equal(result.entities.mediaPlatform, 'youtube');
+    assert.equal(result.entities.artist, 'Daler Mehndi');
+  });
+
+  it('should route open youtube and play genre requests through media understanding', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const result = await router.process('open youtube and play punjabi songs', 'voice');
+
+    assert.equal(result.intent, 'media.play');
+    assert.equal(result.entities.mediaQuery, 'punjabi songs');
+    assert.equal(result.entities.mediaPlatform, 'youtube');
+    assert.equal(result.entities.genre, 'punjabi');
+  });
+
+  it('should route media stop and search intents', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const stopResult = await router.process('stop music', 'chat');
+    assert.equal(stopResult.intent, 'media.stop');
+
+    const searchResult = await router.process('search music arijit', 'chat');
+    assert.equal(searchResult.intent, 'media.search');
+    assert.equal(searchResult.entities.mediaPlatform, 'youtube');
+  });
+
   it('should route window commands with word misplacement to window.maximize', async function() {
     const config = {
       permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }

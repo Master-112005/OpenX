@@ -42,4 +42,30 @@ describe('Audio worker activation mode', function() {
     assert.equal(output.matched, true);
     assert.equal(output.command, 'nova play music');
   });
+
+  it('should recover low-confidence command-shaped transcripts before Node NLP', function() {
+    const output = runSelftest([
+      '--selftest-filter-text', 'open chrome',
+      '--selftest-filter-confidence', '0.34',
+      '--selftest-filter-no-speech', '0.6',
+      '--min-transcript-confidence', '0.55',
+      '--command-recovery-min-confidence', '0.25',
+      '--max-no-speech-probability', '0.55'
+    ]);
+
+    assert.equal(output.accepted, true);
+    assert.equal(output.reason, 'accepted');
+  });
+
+  it('should still reject low-confidence non-command transcripts before Node NLP', function() {
+    const output = runSelftest([
+      '--selftest-filter-text', 'random background words',
+      '--selftest-filter-confidence', '0.34',
+      '--min-transcript-confidence', '0.55',
+      '--command-recovery-min-confidence', '0.25'
+    ]);
+
+    assert.equal(output.accepted, false);
+    assert.equal(output.reason, 'low-transcript-confidence');
+  });
 });

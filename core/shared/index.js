@@ -1,4 +1,3 @@
-const os = require('os');
 const crypto = require('crypto');
 const { AssistantEventBus, EVENTS } = require('./events');
 

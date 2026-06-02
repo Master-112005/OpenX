@@ -10,7 +10,7 @@
     "test:core": "mocha tests/core/**/*.test.js --recursive",
     "test:automation": "mocha tests/automation/**/*.test.js --recursive",
     "test:voice": "mocha tests/voice/**/*.test.js --recursive",
-    "lint": "eslint . --ext .js",
+    "lint": "eslint .",
     "package": "electron-builder --win"
   },
   "keywords": [
@@ -24,18 +24,23 @@
   "author": "",
   "license": "MIT",
   "dependencies": {
+    "active-win": "^8.2.1",
+    "double-metaphone": "^2.0.1",
     "electron-store": "^8.1.0",
+    "fuse.js": "^7.4.1",
     "uuid": "^9.0.0"
   },
   "optionalDependencies": {
-    "vosk": "^0.3.45",
-    "node-windows": "^1.0.0-beta.8"
+    "node-windows": "^1.0.0-beta.8",
+    "vosk": "^0.3.45"
   },
   "devDependencies": {
+    "@eslint/js": "^8.57.0",
+    "chai": "^4.3.10",
     "electron": "^28.0.0",
     "electron-builder": "^24.9.1",
-    "mocha": "^10.2.0",
-    "chai": "^4.3.10",
-    "eslint": "^8.56.0"
+    "eslint": "^8.57.1",
+    "globals": "^17.6.0",
+    "mocha": "^10.2.0"
   }
 }

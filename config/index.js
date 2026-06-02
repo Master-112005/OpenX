@@ -37,6 +37,7 @@ const CONFIG = {
     activationShortcut: 'Alt+Space',
     allowManualActivation: true,
     conversationSilenceTimeoutMs: 20000,
+    conversationIgnoredSpeechLimit: 1,
     confirmationListenTimeoutMs: 10000,
     speakerLock: {
       enabled: true,
@@ -78,13 +79,21 @@ const CONFIG = {
       startSpeechTimeoutMs: 3500,
       energyThreshold: 0.003,
       minUtteranceMs: 250,
+      minRms: 0.004,
+      minConfidence: 0.55,
+      commandRecoveryMinConfidence: 0.25,
+      confirmationMinConfidence: 0.45,
+      maxNoSpeechProbability: 0.55,
+      maxCompressionRatio: 2.4,
       speechStartFrames: 3,
       vadAggressiveness: 3,
       modelCacheDir: path.join(os.homedir(), '.jarvis', 'models', 'whisper')
     },
     tts: {
-      rate: 0,
-      volume: 100
+      rate: -1,
+      volume: 100,
+      voiceName: '',
+      naturalize: true
     }
   },
 

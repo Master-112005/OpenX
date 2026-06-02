@@ -462,6 +462,25 @@ const INTENT_DEFINITIONS = [
     action: 'media.resume',
     entities: [],
     description: 'Resume media playback'
+  },
+  {
+    id: 'media.stop',
+    patterns: ['stop music', 'stop song', 'stop playback', 'stop media'],
+    permissionLevel: 'low',
+    action: 'media.stop',
+    entities: [],
+    description: 'Stop media playback'
+  },
+  {
+    id: 'media.search',
+    patterns: ['search music', 'search song', 'find music', 'find song'],
+    permissionLevel: 'low',
+    action: 'media.search',
+    entities: [
+      { name: 'mediaQuery', type: 'string', required: true },
+      { name: 'mediaPlatform', type: 'string', required: false }
+    ],
+    description: 'Search for music or media on a streaming platform'
   }
 ];
 

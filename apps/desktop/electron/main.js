@@ -37,7 +37,7 @@ function ensureDataDir() {
 
 function createOrbWindow() {
   const display = screen.getPrimaryDisplay();
-  const { width, height } = display.workAreaSize;
+  const { width } = display.workAreaSize;
   const orbConfig = runtimeConfig?.orb || BASE_CONFIG.orb;
 
   mainWindow = new BrowserWindow({
@@ -130,7 +130,6 @@ function createSettingsWindow() {
 }
 
 function createTray() {
-  const iconSize = 16;
   const icon = nativeImage.createEmpty();
   tray = new Tray(icon);
 

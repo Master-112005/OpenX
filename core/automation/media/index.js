@@ -182,6 +182,10 @@ class MediaController {
     };
   }
 
+  async search(query, platform) {
+    return this.play(query, platform);
+  }
+
   getSupportedPlatforms() {
     return Object.keys(PLATFORM_REGISTRY);
   }
@@ -464,6 +468,15 @@ class MediaController {
       return { success: true, data: { action: 'resume' } };
     } catch (err) {
       return { success: false, error: `Failed to resume playback: ${err.message}` };
+    }
+  }
+
+  stop() {
+    try {
+      this._sendMediaControl('k', 179);
+      return { success: true, data: { action: 'stop' } };
+    } catch (err) {
+      return { success: false, error: `Failed to stop playback: ${err.message}` };
     }
   }
 

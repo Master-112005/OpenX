@@ -206,7 +206,9 @@ class SettingsService {
         activationShortcut: normalizeActivationShortcut(baseConfig?.voice?.activationShortcut, 'Alt+Space'),
         tts: {
           rate: clampNumber(baseConfig?.voice?.tts?.rate, -10, 10, 0),
-          volume: clampNumber(baseConfig?.voice?.tts?.volume, 0, 100, 100)
+          volume: clampNumber(baseConfig?.voice?.tts?.volume, 0, 100, 100),
+          voiceName: String(baseConfig?.voice?.tts?.voiceName || '').trim(),
+          naturalize: baseConfig?.voice?.tts?.naturalize !== false
         }
       },
       orb: {
@@ -305,6 +307,8 @@ class SettingsService {
     runtimeConfig.voice.tts = runtimeConfig.voice.tts || {};
     runtimeConfig.voice.tts.rate = settings.voice.tts.rate;
     runtimeConfig.voice.tts.volume = settings.voice.tts.volume;
+    runtimeConfig.voice.tts.voiceName = settings.voice.tts.voiceName;
+    runtimeConfig.voice.tts.naturalize = settings.voice.tts.naturalize;
 
     runtimeConfig.orb = runtimeConfig.orb || {};
     runtimeConfig.orb.defaultSize = settings.orb.defaultSize;
@@ -354,7 +358,9 @@ class SettingsService {
         ),
         tts: {
           rate: clampNumber(source.voice?.tts?.rate, -10, 10, this.defaults.voice.tts.rate),
-          volume: clampNumber(source.voice?.tts?.volume, 0, 100, this.defaults.voice.tts.volume)
+          volume: clampNumber(source.voice?.tts?.volume, 0, 100, this.defaults.voice.tts.volume),
+          voiceName: String(source.voice?.tts?.voiceName || '').trim(),
+          naturalize: source.voice?.tts?.naturalize !== false
         }
       },
       orb: {

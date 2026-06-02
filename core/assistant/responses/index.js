@@ -319,6 +319,13 @@ const RESPONSE_BUILDERS = {
     'media.previous': () => 'Moved back to the previous track.',
     'media.pause': () => 'Playback is paused.',
     'media.resume': () => 'Playback has resumed.',
+    'media.stop': () => 'Playback is stopped.',
+    'media.search': context => {
+      const query = valueFromContext(context, 'query', valueFromContext(context, 'mediaQuery', 'music'));
+      const rawPlatform = valueFromContext(context, 'platform', valueFromContext(context, 'mediaPlatform', 'YouTube'));
+      const displayName = String(rawPlatform).charAt(0).toUpperCase() + String(rawPlatform).slice(1);
+      return `Searching ${displayName} for "${query}".`;
+    },
     'message.send': context => {
       const contactName = valueFromContext(context, 'contactName');
       const platform = valueFromContext(context, 'platform', 'message');

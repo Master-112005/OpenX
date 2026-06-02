@@ -4,15 +4,26 @@ const Logger = require('../../shared/index').Logger;
 
 const DEFAULT_TTS_VOLUME = 100;
 const MIN_AUDIBLE_TTS_VOLUME = 85;
+const DEFAULT_PREFERRED_VOICES = [
+  'Microsoft Zira Desktop',
+  'Microsoft Aria Online',
+  'Microsoft Jenny Online',
+  'Microsoft David Desktop'
+];
 
 class TextToSpeech extends EventEmitter {
   constructor(config) {
     super();
     this.logger = new Logger({ level: config?.logging?.level || 'info' });
     this.isSpeaking = false;
-    this.rate = config?.voice?.tts?.rate || 0;
+    this.rate = this._normalizeRate(config?.voice?.tts?.rate);
     this.volume = this._normalizeVolume(config?.voice?.tts?.volume);
-    this.voiceName = 'Microsoft David Desktop';
+    this.configuredVoiceName = String(config?.voice?.tts?.voiceName || '').trim();
+    this.preferredVoices = Array.isArray(config?.voice?.tts?.preferredVoices)
+      ? config.voice.tts.preferredVoices.map(voice => String(voice || '').trim()).filter(Boolean)
+      : DEFAULT_PREFERRED_VOICES;
+    this.naturalize = config?.voice?.tts?.naturalize !== false;
+    this.voiceName = this.configuredVoiceName || 'Microsoft Zira Desktop';
     this.availableVoices = [];
     this.activeProcess = null;
   }
@@ -30,8 +41,8 @@ class TextToSpeech extends EventEmitter {
         .filter(Boolean);
 
       if (this.availableVoices.length > 0) {
-        const preferred = this.availableVoices.find(v => v.toLowerCase().includes('zira'))
-          || this.availableVoices.find(v => v.toLowerCase().includes('david'))
+        const preferred = this._selectPreferredVoice()
+          || this.availableVoices.find(v => v.toLowerCase().includes('zira'))
           || this.availableVoices.find(v => v.toLowerCase().includes('microsoft'))
           || this.availableVoices[0];
         this.voiceName = preferred.trim();
@@ -58,6 +69,8 @@ class TextToSpeech extends EventEmitter {
     const safeText = this._escapePowerShellString(text.trim());
     const desiredVoice = this._escapePowerShellString(this.voiceName.trim());
     const rate = this.rate;
+    const useSsml = this.naturalize;
+    const ssmlText = this._escapePowerShellString(this._buildSsml(text.trim()));
 
     try {
       const psScript = `
@@ -73,7 +86,11 @@ class TextToSpeech extends EventEmitter {
         $synth.SetOutputToDefaultAudioDevice()
         $synth.Volume = ${this.volume}
         $synth.Rate = ${rate}
-        $synth.Speak('${safeText}')
+        if (${useSsml ? '$true' : '$false'}) {
+          $synth.SpeakSsml('${ssmlText}')
+        } else {
+          $synth.Speak('${safeText}')
+        }
         $synth.Dispose()
       `;
 
@@ -160,6 +177,53 @@ class TextToSpeech extends EventEmitter {
 
     const clamped = Math.max(0, Math.min(DEFAULT_TTS_VOLUME, Math.round(number)));
     return clamped === 0 ? DEFAULT_TTS_VOLUME : Math.max(MIN_AUDIBLE_TTS_VOLUME, clamped);
+  }
+
+  _normalizeRate(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) {
+      return -1;
+    }
+    return Math.max(-10, Math.min(10, Math.round(number)));
+  }
+
+  _selectPreferredVoice() {
+    if (this.configuredVoiceName) {
+      const configured = this.availableVoices.find(voice => voice.toLowerCase() === this.configuredVoiceName.toLowerCase());
+      if (configured) {
+        return configured;
+      }
+    }
+
+    for (const preferred of this.preferredVoices) {
+      const exact = this.availableVoices.find(voice => voice.toLowerCase() === preferred.toLowerCase());
+      if (exact) {
+        return exact;
+      }
+
+      const partial = this.availableVoices.find(voice => voice.toLowerCase().includes(preferred.toLowerCase()));
+      if (partial) {
+        return partial;
+      }
+    }
+
+    return null;
+  }
+
+  _buildSsml(text) {
+    const escaped = this._escapeXml(text)
+      .replace(/([.!?])\s+/g, '$1<break time="180ms"/> ')
+      .replace(/,\s+/g, ',<break time="90ms"/> ');
+    return `<speak version="1.0" xml:lang="en-US"><prosody rate="medium" pitch="+1st">${escaped}</prosody></speak>`;
+  }
+
+  _escapeXml(value) {
+    return String(value || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&apos;');
   }
 }
 

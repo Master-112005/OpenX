@@ -270,7 +270,8 @@ class AppController {
     }
     candidates.add(name);
 
-    const startApp = this._resolveStartApp(name);
+    const needsStartMenuResolution = !app?.processName && !app?.cmd && !app?.path && !app?.closeStrategy;
+    const startApp = needsStartMenuResolution ? this._resolveStartApp(name) : null;
     if (startApp?.name) {
       candidates.add(startApp.name);
     }
@@ -372,8 +373,7 @@ class AppController {
       '  $target = Get-Process -Id $id -ErrorAction SilentlyContinue | Select-Object -First 1',
       '  if (-not $target) { continue }',
       '  try { if ($target.MainWindowHandle -ne 0) { $target.CloseMainWindow() | Out-Null } } catch {}',
-      '}',
-      'Start-Sleep -Milliseconds 1200'
+      '}'
     ].join('; ');
 
     try {

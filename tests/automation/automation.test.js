@@ -31,17 +31,17 @@ describe('Automation Engine', function() {
     assert.ok(actions.includes('thanks'));
   });
 
-  it('should allow registering custom actions', function() {
+  it('should allow registering custom actions', async function() {
     const engine = new AutomationEngine({});
     engine.registerAction('test.action', () => ({ success: true, data: { value: 42 } }));
-    const result = engine.execute('test.action', {});
+    const result = await engine.execute('test.action', {});
     assert.ok(result.success);
     assert.equal(result.data.value, 42);
   });
 
-  it('should return error for unknown action', function() {
+  it('should return error for unknown action', async function() {
     const engine = new AutomationEngine({});
-    const result = engine.execute('nonexistent.action', {});
+    const result = await engine.execute('nonexistent.action', {});
     assert.equal(result.success, false);
   });
 

@@ -158,6 +158,142 @@ describe('Voice Manager & Audio Engine Integration', function() {
     vm.destroy();
   });
 
+  it('should ignore low-confidence or no-speech transcripts before routing', async function() {
+    const { vm } = createVoiceManager({
+      voice: {
+        stt: {
+          minConfidence: 0.55,
+          maxNoSpeechProbability: 0.55
+        }
+      }
+    });
+    let speechResult = false;
+
+    await vm.initialize();
+    vm.on('speechResult', () => {
+      speechResult = true;
+    });
+
+    vm._handleEngineEvent({
+      event: 'result',
+      text: 'thanks for watching',
+      confidence: 0.3,
+      noSpeechProbability: 0.92,
+      mode: 'command'
+    });
+
+    assert.equal(speechResult, false);
+    assert.equal(vm.getStatus().state, 'IDLE');
+    vm.destroy();
+  });
+
+  it('should allow low-confidence actionable commands into NLP routing', async function() {
+    const { vm } = createVoiceManager({
+      voice: {
+        stt: {
+          minConfidence: 0.55,
+          commandRecoveryMinConfidence: 0.25
+        }
+      }
+    });
+    const results = [];
+
+    await vm.initialize();
+    vm.on('speechResult', (data) => {
+      results.push(data);
+    });
+
+    assert.equal(vm.manualActivate(), true);
+
+    vm._handleEngineEvent({
+      event: 'result',
+      text: 'open chrome',
+      confidence: 0.34,
+      noSpeechProbability: 0.6,
+      mode: 'conversation'
+    });
+    vm._handleEngineEvent({
+      event: 'result',
+      text: 'open youtube',
+      confidence: 0.31,
+      noSpeechProbability: 0.5,
+      mode: 'conversation'
+    });
+
+    assert.deepEqual(results.map(result => result.text), ['open chrome', 'open youtube']);
+    assert.equal(vm.getStatus().conversationActive, true);
+    vm.destroy();
+  });
+
+  it('should ignore common Whisper hallucination phrases from background noise', async function() {
+    const { vm } = createVoiceManager();
+    let speechResult = false;
+
+    await vm.initialize();
+    vm.on('speechResult', () => {
+      speechResult = true;
+    });
+
+    vm._handleEngineEvent({
+      event: 'result',
+      text: 'thank you',
+      confidence: 0.91,
+      noSpeechProbability: 0.2,
+      mode: 'command'
+    });
+
+    assert.equal(speechResult, false);
+    assert.equal(vm.getStatus().state, 'IDLE');
+    vm.destroy();
+  });
+
+  it('should stop re-arming conversation listening after repeated ignored noise', async function() {
+    const { vm } = createVoiceManager({
+      voice: {
+        conversationIgnoredSpeechLimit: 1,
+        stt: {
+          minConfidence: 0.55
+        }
+      }
+    });
+    const listenCommands = [];
+    let timeout = null;
+
+    await vm.initialize();
+    vm.on('test:stdin', (payload) => {
+      if (payload.command === 'listen') {
+        listenCommands.push(payload);
+      }
+    });
+    vm.on('listeningTimeout', (data) => {
+      timeout = data;
+    });
+
+    assert.equal(vm.manualActivate(), true);
+
+    vm._handleEngineEvent({
+      event: 'result',
+      text: 'background noise',
+      confidence: 0.2,
+      mode: 'conversation'
+    });
+    assert.equal(vm.getStatus().conversationActive, true);
+
+    vm._handleEngineEvent({
+      event: 'result',
+      text: 'background noise again',
+      confidence: 0.2,
+      mode: 'conversation'
+    });
+
+    assert.equal(vm.getStatus().conversationActive, false);
+    assert.equal(vm.getStatus().active, false);
+    assert.ok(timeout);
+    assert.equal(timeout.reason, 'low-transcript-confidence');
+    assert.equal(listenCommands.length, 2);
+    vm.destroy();
+  });
+
   it('should end a hotkey conversation after the 20 second silence timeout', async function() {
     const { vm } = createVoiceManager();
 
@@ -299,6 +435,19 @@ describe('Voice Manager & Audio Engine Integration', function() {
     });
 
     assert.equal(tts.volume, 85);
+    tts.destroy();
+  });
+
+  it('should default TTS to a slower natural rate and SSML output', function() {
+    const TextToSpeech = require('../../core/voice/tts/index');
+    const tts = new TextToSpeech({});
+    const ssml = tts._buildSsml('Done, sir. Awaiting command.');
+
+    assert.equal(tts.rate, -1);
+    assert.equal(tts.naturalize, true);
+    assert.ok(ssml.includes('<prosody'));
+    assert.ok(ssml.includes('<break time="90ms"/>'));
+    assert.ok(ssml.includes('<break time="180ms"/>'));
     tts.destroy();
   });
 

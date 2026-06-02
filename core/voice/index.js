@@ -1,7 +1,7 @@
 const EventEmitter = require('events');
 const path = require('path');
 const readline = require('readline');
-const { spawn, spawnSync } = require('child_process');
+const { spawn } = require('child_process');
 const {
   AssistantEventBus,
   EVENTS,
@@ -31,6 +31,10 @@ class VoiceManager extends EventEmitter {
     this.conversationSilenceTimeoutMs = Number(config?.voice?.conversationSilenceTimeoutMs) > 0
       ? Number(config.voice.conversationSilenceTimeoutMs)
       : 20000;
+    this.conversationIgnoredSpeechLimit = Number(config?.voice?.conversationIgnoredSpeechLimit) >= 0
+      ? Number(config.voice.conversationIgnoredSpeechLimit)
+      : 1;
+    this.conversationIgnoredSpeechCount = 0;
     
     // Persistent Python subprocess properties
     this.engineScriptPath = path.join(__dirname, 'engine', 'audio_engine.py');
@@ -150,6 +154,11 @@ class VoiceManager extends EventEmitter {
         '--max-duration-ms', String(this.config?.voice?.stt?.maxDurationMs || 12000),
         '--start-speech-timeout-ms', String(this.config?.voice?.stt?.startSpeechTimeoutMs || 3500),
         '--min-utterance-ms', String(this.config?.voice?.stt?.minUtteranceMs || 250),
+        '--min-rms', String(this.config?.voice?.stt?.minRms || 0.004),
+        '--min-transcript-confidence', String(this.config?.voice?.stt?.minConfidence || 0.55),
+        '--command-recovery-min-confidence', String(this.config?.voice?.stt?.commandRecoveryMinConfidence || 0.25),
+        '--max-no-speech-probability', String(this.config?.voice?.stt?.maxNoSpeechProbability || 0.55),
+        '--max-compression-ratio', String(this.config?.voice?.stt?.maxCompressionRatio || 2.4),
         '--speaker-similarity-threshold', String(this.config?.voice?.speakerLock?.similarityThreshold || 0.68)
       ];
 
@@ -348,24 +357,35 @@ class VoiceManager extends EventEmitter {
   }
 
   _handleSpeechResult(data) {
+    const normalizedText = this._normalizeTranscript(data.text);
+    const reliability = this._assessTranscriptReliability(normalizedText, data);
+    if (!reliability.accepted) {
+      this._handleIgnoredSpeech({
+        mode: data?.mode || 'command',
+        reason: reliability.reason,
+        confidence: data?.confidence ?? null
+      });
+      return;
+    }
+
     this._transitionTo(SPEECH_STATES.TRANSCRIBING);
     this._transitionTo(SPEECH_STATES.THINKING);
     
     this.eventBus.publish(EVENTS.STT_COMPLETED, {
-      text: data.text,
+      text: normalizedText,
       confidence: data.confidence || 0.8,
       backend: 'whisper-local'
     });
     
     const utterance = {
       id: 'stt-' + Date.now(),
-      text: data.text,
+      text: normalizedText,
       confidence: data.confidence || 0.8,
       backend: 'whisper-local'
     };
 
     this.emit('speechResult', {
-      text: this._normalizeTranscript(data.text),
+      text: normalizedText,
       confidence: data.confidence || 0.8,
       isFinal: true,
       backend: 'whisper-local',
@@ -376,6 +396,8 @@ class VoiceManager extends EventEmitter {
     if (!this.conversationActive) {
       this.isActive = false;
       this.emit('deactivated');
+    } else {
+      this.conversationIgnoredSpeechCount = 0;
     }
   }
 
@@ -383,6 +405,7 @@ class VoiceManager extends EventEmitter {
     this.isActive = false;
     if (data?.mode === 'conversation' || data?.mode === 'confirmation') {
       this.conversationActive = false;
+      this.conversationIgnoredSpeechCount = 0;
     }
     this._transitionTo(SPEECH_STATES.IDLE, {
       reason: 'session-timeout',
@@ -408,6 +431,20 @@ class VoiceManager extends EventEmitter {
     });
 
     if (this.conversationActive && !this.isDestroyed) {
+      this.conversationIgnoredSpeechCount += 1;
+      if (this.conversationIgnoredSpeechCount > this.conversationIgnoredSpeechLimit) {
+        this.conversationActive = false;
+        this.conversationIgnoredSpeechCount = 0;
+        this.isActive = false;
+        this.emit('deactivated');
+        this.emit('listeningTimeout', {
+          mode: data?.mode || 'conversation',
+          timeoutMs: 0,
+          reason: data?.reason || 'ignored-speech'
+        });
+        return;
+      }
+
       this.startListening(this._getConversationListenOptions());
     }
   }
@@ -468,6 +505,7 @@ class VoiceManager extends EventEmitter {
     };
 
     this.conversationActive = true;
+    this.conversationIgnoredSpeechCount = 0;
     this.eventBus.publish(EVENTS.VOICE_ACTIVATED, payload);
     this.emit('activated', payload);
     return this.startListening({
@@ -503,6 +541,7 @@ class VoiceManager extends EventEmitter {
     };
 
     this.conversationActive = true;
+    this.conversationIgnoredSpeechCount = 0;
     this.eventBus.publish(EVENTS.VOICE_ACTIVATED, payload);
     this.emit('activated', payload);
     return this.startListening({
@@ -583,6 +622,90 @@ class VoiceManager extends EventEmitter {
       .trim();
   }
 
+  _assessTranscriptReliability(text, data = {}) {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+      return { accepted: false, reason: 'empty-transcript' };
+    }
+
+    const mode = String(data?.mode || 'command');
+    const confidence = Number(data?.confidence);
+    const commandLike = this._looksLikeActionableTranscript(normalized);
+    const defaultMinConfidence = mode === 'confirmation'
+      ? Number(this.config?.voice?.stt?.confirmationMinConfidence ?? 0.45)
+      : Number(this.config?.voice?.stt?.minConfidence ?? 0.55);
+    const commandRecoveryMinConfidence = Number(this.config?.voice?.stt?.commandRecoveryMinConfidence ?? 0.25);
+    if (
+      Number.isFinite(confidence)
+      && confidence < defaultMinConfidence
+      && (confidence < commandRecoveryMinConfidence || !commandLike)
+    ) {
+      return { accepted: false, reason: 'low-transcript-confidence' };
+    }
+
+    const noSpeechProbability = Number(data?.noSpeechProbability);
+    const maxNoSpeechProbability = Number(this.config?.voice?.stt?.maxNoSpeechProbability ?? 0.55);
+    if (
+      Number.isFinite(noSpeechProbability)
+      && noSpeechProbability > maxNoSpeechProbability
+      && (noSpeechProbability > 0.85 || !commandLike)
+    ) {
+      return { accepted: false, reason: 'transcript-marked-no-speech' };
+    }
+
+    const tokens = normalized.split(/\s+/).filter(Boolean);
+    const noisePhrases = new Set([
+      'thank you',
+      'thanks for watching',
+      'subscribe',
+      'music',
+      'background music',
+      'silence'
+    ]);
+    if (noisePhrases.has(normalized)) {
+      return { accepted: false, reason: 'known-hallucination-phrase' };
+    }
+
+    const uniqueTokens = new Set(tokens);
+    if (tokens.length >= 5 && uniqueTokens.size <= 2) {
+      return { accepted: false, reason: 'repetitive-transcript' };
+    }
+
+    return { accepted: true };
+  }
+
+  _looksLikeActionableTranscript(text) {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+      return false;
+    }
+
+    const tokens = normalized.split(/\s+/).filter(Boolean);
+    if (tokens.length === 0) {
+      return false;
+    }
+
+    const actionTokens = new Set([
+      'open', 'close', 'launch', 'start', 'run', 'search', 'find', 'play', 'pause',
+      'resume', 'stop', 'mute', 'unmute', 'increase', 'decrease', 'set', 'turn',
+      'switch', 'show', 'create', 'delete', 'move', 'copy', 'rename', 'call', 'message',
+      'maximize', 'minimize', 'fullscreen'
+    ]);
+    const targetTokens = new Set([
+      'chrome', 'youtube', 'edge', 'firefox', 'spotify', 'notepad', 'calculator',
+      'downloads', 'documents', 'desktop', 'volume', 'brightness', 'timer', 'alarm',
+      'reminder', 'whatsapp', 'teams', 'word', 'excel', 'powerpoint', 'music', 'window',
+      'folder', 'file', 'browser'
+    ]);
+
+    if (actionTokens.has(tokens[0])) {
+      return true;
+    }
+
+    return tokens.some(token => actionTokens.has(token))
+      && tokens.some(token => targetTokens.has(token));
+  }
+
   _sendEngineCommand(payload) {
     if (!this.workerProcess || this.workerProcess.killed) {
       return;
@@ -640,6 +763,7 @@ class VoiceManager extends EventEmitter {
     this.pendingFollowUpListen = null;
     this.pendingListenAfterResume = null;
     this.conversationActive = false;
+    this.conversationIgnoredSpeechCount = 0;
     this.tts.destroy();
     this.removeAllListeners();
   }

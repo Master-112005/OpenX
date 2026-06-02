@@ -6,6 +6,7 @@ const InputParser = require('../parser/index');
 const EntityExtractor = require('../entities/index');
 const PermissionValidator = require('../../permissions/index');
 const NlpProcessor = require('../nlp/index');
+const { MediaUnderstandingRouter } = require('../../media-understanding/media-router');
 
 const CONFIDENCE_THRESHOLD = 0.5;
 
@@ -19,6 +20,10 @@ class ActionRouter {
     this.permissionValidator = new PermissionValidator(config);
     this.automationEngine = automationEngine;
     this.nlp = new NlpProcessor(this.intentRegistry);
+    this.mediaUnderstanding = new MediaUnderstandingRouter({
+      logging: config?.logging,
+      contextProvider: config?.contextEngine || config?.contextProvider || null
+    });
   }
 
   async process(inputText, source = 'chat') {
@@ -39,7 +44,9 @@ class ActionRouter {
     const rawCommandText = parseResult.rawCommandText || parseResult.commandText;
     const intentResult = (
       this._resolveExplicitMediaControlIntent(rawCommandText, preparedInput) ||
+      this._resolveMediaUnderstandingIntent(rawCommandText, source) ||
       this._resolveExplicitMediaIntent(rawCommandText, preparedInput) ||
+      this._resolveExplicitFolderMoveIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitAppIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitWindowIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitCommunicationIntent(rawCommandText, preparedInput) ||
@@ -62,7 +69,7 @@ class ActionRouter {
       };
     }
 
-    const entities = this.entityExtractor.extract(
+    const entities = intentResult.entities || this.entityExtractor.extract(
       intentResult.intent,
       rawCommandText
     );
@@ -286,6 +293,33 @@ class ActionRouter {
     return { intent: mediaIntent, confidence: 0.99 };
   }
 
+  _resolveMediaUnderstandingIntent(rawText, source) {
+    const routed = this.mediaUnderstanding.route(rawText, { source });
+    if (!routed.success) {
+      return null;
+    }
+
+    const intent = this.intentRegistry.get(routed.payload.action);
+    if (!intent) {
+      return null;
+    }
+
+    return {
+      intent,
+      confidence: routed.payload.confidence,
+      entities: {
+        mediaQuery: routed.payload.mediaQuery,
+        mediaPlatform: routed.payload.mediaPlatform,
+        query: routed.payload.query,
+        platform: routed.payload.platform,
+        artist: routed.payload.artist,
+        song: routed.payload.song,
+        genre: routed.payload.genre,
+        source: routed.payload.source
+      }
+    };
+  }
+
   _resolveExplicitWindowIntent(rawText, preparedInput) {
     const correctedText = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
     if (!correctedText) {
@@ -307,6 +341,29 @@ class ActionRouter {
     }
 
     return null;
+  }
+
+  _resolveExplicitFolderMoveIntent(rawText, preparedInput) {
+    const correctedText = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
+    if (!correctedText) {
+      return null;
+    }
+
+    if (!/\bmove\s+(?:the\s+)?(?:folder|directory)\b/.test(correctedText)) {
+      return null;
+    }
+
+    const intent = this.intentRegistry.get('folder.move');
+    if (!intent) {
+      return null;
+    }
+
+    const entities = this.entityExtractor.extract(intent, rawText);
+    if (!entities.source || !entities.destination) {
+      return null;
+    }
+
+    return { intent, confidence: 1 };
   }
 
   _resolveExplicitAppIntent(rawText, preparedInput) {

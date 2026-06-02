@@ -54,6 +54,37 @@ describe('App Controller', function() {
     assert.equal(result.success, true);
   });
 
+  it('should not query Start menu metadata when closing known apps', function() {
+    const controller = new AppController({});
+    let startMenuQueried = false;
+    let state = 'running';
+
+    controller._resolveStartApp = () => {
+      startMenuQueried = true;
+      return null;
+    };
+    controller._getRunningProcessDetails = () => (
+      state === 'closed'
+        ? []
+        : [{
+            Id: 42,
+            ProcessName: 'chrome',
+            MainWindowTitle: 'Google Chrome',
+            Path: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
+          }]
+    );
+    controller._closeProcessesGracefully = () => {
+      state = 'closed';
+      return true;
+    };
+    controller._sleep = () => {};
+
+    const result = controller.close('chrome');
+
+    assert.equal(result.success, true);
+    assert.equal(startMenuQueried, false);
+  });
+
   it('should not close unrelated apps from broad Start menu publisher tokens', function() {
     const controller = new AppController({});
     const processes = [
