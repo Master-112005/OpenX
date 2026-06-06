@@ -38,6 +38,7 @@ const APP_ALIASES = {
   'settings': 'ms-settings',
   'spotify': 'spotify',
   'discord': 'discord',
+  'google chat': 'google chat',
   'whatsapp': 'whatsapp',
   'slack': 'slack',
   'zoom': 'zoom',
@@ -46,12 +47,19 @@ const APP_ALIASES = {
   'apple music': 'apple music',
   'apple tv': 'apple tv',
   'youtube': 'youtube',
+  'recycle bin': 'recycle bin',
+  'microsoft store': 'microsoft store',
+  'store': 'microsoft store',
+  'photos': 'photos',
+  'microsoft photos': 'photos',
   'calendar': 'calendar',
   'clock': 'clock',
   'alarms': 'clock',
   'alarms and clock': 'clock',
   'antigravity': 'antigravity'
 };
+
+const EXACT_ONLY_APP_ALIASES = new Set(['store']);
 
 const FOLDER_ALIASES = {
   'downloads': 'downloads',
@@ -205,7 +213,18 @@ class EntityExtractor {
     }
 
     const match = Normalizer.findClosestOption(normalized, Object.keys(aliases), config);
-    return match ? aliases[match.normalizedMatch] : null;
+    if (!match) {
+      return null;
+    }
+
+    const exactOnlyAliases = config.exactOnlyAliases instanceof Set
+      ? config.exactOnlyAliases
+      : new Set();
+    if (exactOnlyAliases.has(match.normalizedMatch)) {
+      return null;
+    }
+
+    return aliases[match.normalizedMatch];
   }
 
   _stripTrailingEntityNoise(value) {
@@ -230,7 +249,7 @@ class EntityExtractor {
     return withoutLeadingNoise.trim();
   }
 
-  _extractAppNameFromSegmentTokens(tokens) {
+  _extractAppNameFromSegmentTokens(tokens, options = {}) {
     if (!Array.isArray(tokens) || tokens.length === 0) {
       return null;
     }
@@ -251,16 +270,40 @@ class EntityExtractor {
 
     const directAlias = this._resolveAlias(normalizedSegment, APP_ALIASES, {
       minSimilarity: 0.64,
-      maxDistance: 2
+      maxDistance: 2,
+      exactOnlyAliases: EXACT_ONLY_APP_ALIASES
     });
     if (directAlias) {
       return directAlias;
     }
 
-    return this._findAliasFromTokenWindows(normalizedTokens, APP_ALIASES, {
-      minSimilarity: 0.64,
-      maxDistance: 2
+    const fuzzyAlias = this._findAliasFromTokenWindows(normalizedTokens, APP_ALIASES, {
+      minSimilarity: 0.74,
+      maxDistance: 1
     });
+    if (fuzzyAlias) {
+      return fuzzyAlias;
+    }
+
+    return options.allowUnknown ? normalizedSegment : null;
+  }
+
+  _extractRawAppNameFromCommand(tokens, verbSpan) {
+    const tail = this._normalizeAppSegment(tokens.slice(verbSpan.end).join(' '));
+    if (tail) {
+      const tailTokens = Normalizer.tokenize(tail);
+      if (!APP_ENTITY_BLOCKED_PREFIXES.has(tailTokens[0])) {
+        return tail;
+      }
+    }
+
+    const head = this._normalizeAppSegment(tokens.slice(0, verbSpan.start).join(' '));
+    const headTokens = Normalizer.tokenize(head);
+    if (head && !APP_ENTITY_BLOCKED_PREFIXES.has(headTokens[0])) {
+      return head;
+    }
+
+    return null;
   }
 
   _findCommandVerbSpan(tokens) {
@@ -287,7 +330,7 @@ class EntityExtractor {
         }
 
         const width = candidate.includes(' ') ? 2 : 1;
-        return { start: index, end: index + width };
+        return { start: index, end: index + width, verb: candidate, isExact };
       }
     }
 
@@ -329,17 +372,18 @@ class EntityExtractor {
     const tokens = Normalizer.tokenize(raw || text);
     const verbSpan = this._findCommandVerbSpan(tokens);
     if (verbSpan) {
-      const tailMatch = this._extractAppNameFromSegmentTokens(tokens.slice(verbSpan.end));
+      const allowUnknown = verbSpan.isExact;
+      const tailMatch = this._extractAppNameFromSegmentTokens(tokens.slice(verbSpan.end), { allowUnknown });
       if (tailMatch) {
         return tailMatch;
       }
 
-      const headMatch = this._extractAppNameFromSegmentTokens(tokens.slice(0, verbSpan.start));
+      const headMatch = this._extractAppNameFromSegmentTokens(tokens.slice(0, verbSpan.start), { allowUnknown });
       if (headMatch) {
         return headMatch;
       }
 
-      return null;
+      return allowUnknown ? this._extractRawAppNameFromCommand(tokens, verbSpan) : null;
     }
 
     const patterns = ['open ', 'launch ', 'start ', 'close ', 'exit ', 'quit ', 'terminate ', 'switch to ', 'go to ', 'focus ', 'run '];
@@ -356,14 +400,18 @@ class EntityExtractor {
     }
 
     const fuzzyWindowMatch = this._findAliasFromTokenWindows(tokens, APP_ALIASES, {
-      minSimilarity: 0.64,
-      maxDistance: 2
+      minSimilarity: 0.74,
+      maxDistance: 1
     });
     if (fuzzyWindowMatch) {
       return fuzzyWindowMatch;
     }
 
-    const fallbackAlias = this._resolveAlias(raw, APP_ALIASES, { minSimilarity: 0.62, maxDistance: 2 });
+    const fallbackAlias = this._resolveAlias(raw, APP_ALIASES, {
+      minSimilarity: 0.62,
+      maxDistance: 2,
+      exactOnlyAliases: EXACT_ONLY_APP_ALIASES
+    });
     if (fallbackAlias) {
       return fallbackAlias;
     }
@@ -404,6 +452,7 @@ class EntityExtractor {
       /\b(?:create|new|make)\s+(?:folder|directory)\s+(.+?)(?=\s+(?:on|in|at|to|from)\b|$)/i,
       /\b(?:delete|remove|erase)\s+(?:folder|directory)\s+(.+?)(?=\s+(?:on|in|at|to|from)\b|$)/i,
       /\b(?:open|show|navigate to|go to)\s+(?:folder|directory)\s+(.+?)(?=\s+(?:on|in|at)\b|$)/i,
+      /\b(?:open|show|navigate to|go to)\s+(.+?)\s+(?:folder|directory)(?=\s+(?:on|in|at)\b|$)/i,
       /\bmove\s+(?:folder|directory)\s+(.+?)(?=\s+(?:to|into|in|on|from)\b|$)/i
     ];
 

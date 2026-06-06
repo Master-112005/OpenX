@@ -5,7 +5,7 @@ Project path: `C:\Users\rakes\Documents\OpenX`
 
 ## 1. Project Overview
 
-OpenX is an offline-first intelligent Windows desktop assistant platform. It is built as a Node.js and Electron desktop application with Python-powered voice/audio support and Windows-native automation through PowerShell, Win32 APIs, WMI, COM/ActiveX, and Windows SAPI.
+OpenX is an offline-first intelligent Windows desktop assistant platform. It is built as a Node.js and Electron desktop application with Node-owned Windows SAPI voice support and Windows-native automation through PowerShell, Win32 APIs, WMI, COM/ActiveX, and Windows SAPI.
 
 The project is designed to provide deterministic voice-controlled automation without depending on cloud LLM services. Voice input and chat input both enter the same assistant command pipeline, which handles parsing, NLP normalization, intent matching, entity extraction, permission validation, action routing, automation execution, and response generation.
 
@@ -22,13 +22,13 @@ The project is designed to provide deterministic voice-controlled automation wit
 | Main entry point | `apps/desktop/electron/main.js` |
 | License | MIT |
 | Main language | JavaScript |
-| Supporting language | Python |
+| Supporting language | Windows PowerShell scripts invoked from Node |
 
 ## 3. Main Purpose
 
 OpenX acts as a local desktop assistant that can:
 
-- Listen for wake words and voice commands.
+- Listen for hotkey-activated voice commands.
 - Accept typed commands through the desktop UI.
 - Match natural language commands to deterministic intents.
 - Extract command entities such as app names, paths, files, folders, URLs, media targets, contacts, and numeric values.
@@ -41,7 +41,7 @@ OpenX acts as a local desktop assistant that can:
 
 - Offline-first assistant behavior.
 - Deterministic NLP pipeline with no required LLM dependency.
-- Wake word detection and speech-to-text workflow.
+- Hotkey activation and Node-owned speech-to-text workflow.
 - Naturalized text-to-speech responses.
 - Windows-native automation engine.
 - Modular automation controllers.
@@ -57,7 +57,6 @@ OpenX acts as a local desktop assistant that can:
 
 - Node.js 18+
 - Electron 28
-- Python 3.8+
 - PowerShell
 - Win32 API
 - WMI
@@ -76,7 +75,6 @@ OpenX acts as a local desktop assistant that can:
 
 | Package | Purpose |
 | --- | --- |
-| `vosk` | Optional offline speech recognition |
 | `node-windows` | Windows service integration |
 
 ### Development Dependencies
@@ -215,14 +213,11 @@ This layer contains deterministic mode scoring and behavior profiles.
 
 This layer handles voice interaction:
 
-- Wake word detection
+- Hotkey activation
 - Speech lifecycle state machine
-- Audio engine
-- Speech-to-text
-- Speech-to-text reliability gates
+- Node Windows SAPI speech-to-text
+- Transcript reliability and contextual NLU
 - Naturalized text-to-speech
-- Voice activity detection concepts
-- Audio buffering concepts
 
 ### `core/permissions`
 
@@ -301,16 +296,16 @@ User says wake word
   -> Wake word detected
   -> Orb changes to listening state
   -> Assistant captures audio
-  -> Audio reliability gates check VAD, RMS, duration, confidence, no-speech probability, and repetition
+  -> Node-owned Windows SAPI recognition listens for one utterance
   -> Speech-to-text converts audio into text
-  -> Transcript reliability filter rejects background-noise hallucinations
+  -> Transcript reliability and contextual NLU normalize the request
   -> Text enters shared assistant pipeline
   -> Automation executes
   -> Response is generated
   -> Naturalized SAPI text-to-speech speaks response
 ```
 
-Voice reliability was improved so background noise and Whisper hallucinations are ignored before they can become commands without blocking valid command-shaped speech. The Python audio engine now rejects weak audio, short utterances, non-command low confidence, high no-speech probability, and repetitive transcript artifacts. The Python engine and Node voice manager both support command-aware recovery through `voice.stt.commandRecoveryMinConfidence`, allowing actionable phrases such as "open chrome" and "open youtube" to reach NLP/NLU routing even when Whisper confidence is imperfect. The Node voice manager adds a second defensive filter for known noise phrases such as "thank you" or "thanks for watching", repeated token loops, and non-command low confidence. Ignored speech returns the voice state machine to idle or, in conversation mode, re-arms only up to `voice.conversationIgnoredSpeechLimit` before ending the conversation without publishing `speechResult`.
+Voice reliability was redesigned around a Node-owned Windows SAPI STT engine instead of the previous Python worker. `core/voice/stt/windows-sapi.js` runs one recognition session per hotkey/follow-up listen request and emits the same voice events consumed by `VoiceManager`. It writes each recognition script to a temporary PowerShell file and launches it with `-File`, avoiding Windows `spawn ENAMETOOLONG` crashes when the command grammar grows. Electron now registers the primary `voice.activationShortcut` plus fallback shortcuts and exposes tray > Start Listening, then prints activation/listening console events so startup clearly shows whether activation fired and whether SAPI armed a recognition session. It loads an OpenX command grammar for common verbs, targets, aliases, and polite variants, then returns SAPI alternates so `VoiceManager` can recover an actionable phrase when the primary transcript is wrong. `core/voice/index.js` applies command-aware recovery through `voice.stt.commandRecoveryMinConfidence`, allowing actionable phrases such as "open chrome", "open youtube", and "please open youtube" to reach NLP/NLU routing even when recognition confidence is imperfect. It also blocks one-word non-actions and short filler phrases such as "the know of" or "the tool" before they reach the command router. `core/assistant/nlp/index.js` now performs command-frame extraction and noisy command repair, reducing transcripts such as "ope chrome", "sglkn open lsg chrome", and "sglkn increse lsg volum" to executable commands while preserving file names and multi-action media requests. It also extracts safe actions from conversational speech such as "I was just talking but please open Chrome now", "I was saying search for Java tutorial", "background speech set timer for 5 minutes", and "I was saying stop music", while leaving pure conversation unexecuted. `core/assistant/index.js` resolves contextual follow-ups such as "open it" from recent command entities before routing. Ignored speech returns the voice state machine to idle or, in conversation mode, re-arms only up to `voice.conversationIgnoredSpeechLimit` before ending the conversation without publishing `speechResult`.
 
 TTS now prefers configurable natural Windows voices, defaults to a slightly slower rate, keeps volume audible, and can speak SSML with short punctuation pauses through `voice.tts.naturalize`.
 
@@ -784,13 +779,11 @@ OpenX/
 |   |   `-- state/
 |   |       `-- index.js
 |   `-- voice/
-|       |-- engine/
-|       |   |-- __pycache__/
-|       |   |   `-- audio_engine.cpython-313.pyc
-|       |   `-- audio_engine.py
 |       |-- index.js
 |       |-- state/
 |       |   `-- index.js
+|       |-- stt/
+|       |   `-- windows-sapi.js
 |       `-- tts/
 |           `-- index.js
 |-- docs/
@@ -842,8 +835,8 @@ OpenX/
     |   `-- device-detection.test.js
     `-- voice/
         |-- pipeline.test.js
+        |-- stt-engine.test.js
         |-- voice.test.js
-        `-- wakeword.test.js
 ```
 
 ## 22. Important Entry Points
@@ -876,7 +869,7 @@ OpenX/
 - Deterministic command matching is easier to test and reason about than LLM-based routing.
 - Permission validation is part of the command path.
 - Tests exist across core, automation, and voice areas.
-- Voice reliability tests cover low-confidence/no-speech transcripts, low-confidence command recovery, common background hallucination phrases, and repeated ignored-noise conversation re-arming.
+- Voice reliability and NLU tests cover Node SAPI engine behavior, temp-file SAPI script launching, expanded command grammar generation, alternate transcript recovery, low-confidence/no-speech transcripts, low-confidence fuzzy command recovery, command-frame extraction from conversational speech, noisy STT command repair, pure-conversation rejection, contextual pronoun resolution, one-word and short-phrase non-action filtering, common background hallucination phrases, and repeated ignored-noise conversation re-arming.
 - Documentation exists for architecture, setup, modules, workflows, and plugins.
 - Graphify knowledge graph exists and gives useful insight into central abstractions.
 - Context sensing is modular, local-only, event-driven, and covered by tests.
@@ -888,8 +881,7 @@ OpenX/
 - `emit()` is a major cross-community bridge, so event contracts should be documented and tested carefully.
 - `EntityExtractor` is highly connected and likely carries significant behavioral risk when changed.
 - Voice/audio lifecycle concepts appear as weakly connected nodes in the graph report, which may indicate missing documentation or incomplete graph extraction.
-- STT thresholds are command-aware defaults and may need microphone-specific tuning through `voice.conversationIgnoredSpeechLimit`, `voice.stt.minRms`, `voice.stt.minConfidence`, `voice.stt.commandRecoveryMinConfidence`, and `voice.stt.maxNoSpeechProbability`.
-- Generated Python cache files are present under `core/voice/engine/__pycache__`; these are usually better excluded from source control.
+- STT thresholds are command-aware defaults and may need microphone-specific tuning through `voice.conversationIgnoredSpeechLimit`, `voice.stt.minConfidence`, and `voice.stt.commandRecoveryMinConfidence`.
 - The README and package name differ: README calls the project OpenX, while `package.json` uses `jarvis-assistant`.
 - Audio endpoint detection depends on Windows PowerShell and MMDevice interop, so runtime failures should remain logged and non-fatal.
 - Mode scoring is deterministic and rule-based; future changes should tune weights with tests to avoid accidental mode flapping.

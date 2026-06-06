@@ -19,14 +19,12 @@ let settingsService = null;
 let runtimeConfig = null;
 let eventBus = null;
 let uiState = null;
-let registeredActivationShortcut = null;
+let registeredActivationShortcuts = [];
 
 function ensureDataDir() {
   const dirs = [
     BASE_CONFIG.app.dataDir,
-    BASE_CONFIG.logging.directory,
-    path.join(BASE_CONFIG.app.dataDir, 'models'),
-    path.join(BASE_CONFIG.app.dataDir, 'models', 'whisper')
+    BASE_CONFIG.logging.directory
   ];
   dirs.forEach(dir => {
     if (!fs.existsSync(dir)) {
@@ -137,6 +135,15 @@ function createTray() {
 
   const contextMenu = Menu.buildFromTemplate([
     { label: 'Open Assistant', click: () => { if (mainWindow) mainWindow.show(); } },
+    {
+      label: 'Start Listening',
+      click: () => {
+        console.log('Tray voice activation requested');
+        if (voiceManager) {
+          voiceManager.manualActivate({ trigger: 'tray' });
+        }
+      }
+    },
     { label: 'Chat', click: () => createChatWindow() },
     { label: 'Settings', click: () => createSettingsWindow() },
     { type: 'separator' },
@@ -169,7 +176,7 @@ function setupIPC() {
   });
 
   ipcMain.handle('voice:activate', async () => {
-    if (voiceManager && voiceManager.manualActivate()) {
+    if (voiceManager && voiceManager.manualActivate({ trigger: 'ui' })) {
       return { success: true };
     }
 
@@ -320,43 +327,65 @@ function bindEventPipeline() {
 }
 
 function unregisterActivationShortcut() {
-  if (!registeredActivationShortcut) {
+  if (registeredActivationShortcuts.length === 0) {
     return;
   }
 
-  try {
-    globalShortcut.unregister(registeredActivationShortcut);
-  } catch (error) {
-    console.error(`Failed to unregister activation shortcut ${registeredActivationShortcut}:`, error.message);
-  } finally {
-    registeredActivationShortcut = null;
+  for (const shortcut of registeredActivationShortcuts) {
+    try {
+      globalShortcut.unregister(shortcut);
+    } catch (error) {
+      console.error(`Failed to unregister activation shortcut ${shortcut}:`, error.message);
+    }
   }
+  registeredActivationShortcuts = [];
+}
+
+function getActivationShortcuts() {
+  const primary = runtimeConfig?.voice?.activationShortcut || BASE_CONFIG.voice.activationShortcut || 'Alt+Space';
+  const fallbacks = runtimeConfig?.voice?.activationFallbackShortcuts
+    || BASE_CONFIG.voice.activationFallbackShortcuts
+    || ['Control+Alt+Space', 'Control+Space'];
+
+  return [...new Set([primary, ...fallbacks].filter(Boolean))];
 }
 
 function registerActivationShortcut() {
   unregisterActivationShortcut();
 
-  const shortcut = runtimeConfig?.voice?.activationShortcut || BASE_CONFIG.voice.activationShortcut || 'Alt+Space';
-  if (!shortcut) {
+  const shortcuts = getActivationShortcuts();
+  if (shortcuts.length === 0) {
     return;
   }
 
-  try {
-    const registered = globalShortcut.register(shortcut, () => {
-      if (voiceManager) {
-        voiceManager.manualActivate();
+  for (const shortcut of shortcuts) {
+    try {
+      const registered = globalShortcut.register(shortcut, () => {
+        console.log(`Activation shortcut pressed: ${shortcut}`);
+        if (voiceManager) {
+          const activated = voiceManager.manualActivate({ trigger: shortcut });
+          if (!activated) {
+            console.log('Voice activation ignored', voiceManager.getStatus?.() || {});
+          }
+        }
+      });
+
+      if (!registered) {
+        console.error(`Failed to register activation shortcut: ${shortcut}`);
+        continue;
       }
-    });
 
-    if (!registered) {
-      console.error(`Failed to register activation shortcut: ${shortcut}`);
-      return;
+      registeredActivationShortcuts.push(shortcut);
+      console.log(`Registered activation shortcut: ${shortcut}`);
+    } catch (error) {
+      console.error(`Invalid activation shortcut ${shortcut}:`, error.message);
     }
+  }
 
-    registeredActivationShortcut = shortcut;
-    console.log(`Registered activation shortcut: ${shortcut}`);
-  } catch (error) {
-    console.error(`Invalid activation shortcut ${shortcut}:`, error.message);
+  if (registeredActivationShortcuts.length > 0) {
+    console.log(`Voice activation ready. Press ${registeredActivationShortcuts.join(' or ')} to start listening, or use tray > Start Listening.`);
+  } else {
+    console.error('No voice activation shortcuts were registered. Use tray > Start Listening or the orb voice control.');
   }
 }
 

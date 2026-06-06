@@ -7,6 +7,43 @@ class SystemController {
     this.logger = new Logger({ level: config?.logging?.level || 'info' });
   }
 
+  getTime(now = new Date()) {
+    try {
+      return {
+        success: true,
+        data: {
+          time: now.toLocaleTimeString(undefined, {
+            hour: 'numeric',
+            minute: '2-digit'
+          }),
+          iso: now.toISOString()
+        }
+      };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  getDate(now = new Date()) {
+    try {
+      return {
+        success: true,
+        data: {
+          date: now.toLocaleDateString(undefined, {
+            weekday: 'long',
+            year: 'numeric',
+            month: 'long',
+            day: 'numeric'
+          }),
+          day: now.toLocaleDateString(undefined, { weekday: 'long' }),
+          iso: now.toISOString()
+        }
+      };
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  }
+
   getCPUUsage() {
     try {
       const result = execSync(

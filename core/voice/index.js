@@ -1,13 +1,12 @@
 const EventEmitter = require('events');
-const path = require('path');
-const readline = require('readline');
-const { spawn } = require('child_process');
 const {
   AssistantEventBus,
   EVENTS,
-  Logger
+  Logger,
+  Normalizer
 } = require('../shared/index');
 const TextToSpeech = require('./tts/index');
+const WindowsSapiSpeechEngine = require('./stt/windows-sapi');
 const { SPEECH_STATES, SpeechStateMachine } = require('./state/index');
 
 class VoiceManager extends EventEmitter {
@@ -36,13 +35,8 @@ class VoiceManager extends EventEmitter {
       : 1;
     this.conversationIgnoredSpeechCount = 0;
     
-    // Persistent Python subprocess properties
-    this.engineScriptPath = path.join(__dirname, 'engine', 'audio_engine.py');
-    this.pythonCommand = config?.voice?.recognition?.pythonCommand
-      || config?.voice?.wakeword?.pythonCommand
-      || 'python';
+    this.stt = dependencies.stt || new WindowsSapiSpeechEngine(config);
     this.workerProcess = null;
-    this.workerReadline = null;
     this.workerReady = false;
     this.workerStartupPromise = null;
     this.pendingFollowUpListen = null;
@@ -98,7 +92,6 @@ class VoiceManager extends EventEmitter {
     this.logger.info('Initializing voice system');
     await this.tts.initialize();
     
-    // Spawn and establish persistent stdin/stdout piping to Python Audio Engine (Law 8)
     await this._startAudioEngine();
     
     this.logger.info('Voice system ready');
@@ -127,117 +120,22 @@ class VoiceManager extends EventEmitter {
     }
 
     this.workerStartupPromise = new Promise((resolve, reject) => {
-      const recognitionConfig = this.config?.voice?.recognition || this.config?.voice?.wakeword || {};
-      const activationWord = String(this.config?.voice?.wakeWord || '').trim().toLowerCase();
-      const aliases = this.activationMode === 'wakeword' && Array.isArray(recognitionConfig.aliases)
-        ? recognitionConfig.aliases
-        : [];
-      
-      const args = [
-        '-u',
-        this.engineScriptPath,
-        '--activation-mode', this.activationMode,
-        '--wake-word', activationWord,
-        '--model-name', recognitionConfig.modelName || 'tiny.en',
-        '--language', recognitionConfig.language || 'en',
-        '--device', recognitionConfig.device || 'cpu',
-        '--compute-type', recognitionConfig.computeType || 'int8',
-        '--sample-rate', String(recognitionConfig.sampleRate || 16000),
-        '--frame-duration-ms', String(this.config?.voice?.frameDurationMs || 20),
-        '--chunk-duration-ms', String(recognitionConfig.chunkDurationMs || 1200),
-        '--cooldown-ms', String(recognitionConfig.cooldownMs || 2500),
-        '--energy-threshold', String(recognitionConfig.energyThreshold || 0.003),
-        '--speech-start-frames', String(recognitionConfig.speechStartFrames || 2),
-        '--vad-aggressiveness', String(recognitionConfig.vadAggressiveness || 2),
-        '--device-id', String(this.config?.voice?.audioInputDeviceId !== undefined ? this.config.voice.audioInputDeviceId : -1),
-        '--silence-timeout-ms', String(this.config?.voice?.silenceTimeout || 1200),
-        '--max-duration-ms', String(this.config?.voice?.stt?.maxDurationMs || 12000),
-        '--start-speech-timeout-ms', String(this.config?.voice?.stt?.startSpeechTimeoutMs || 3500),
-        '--min-utterance-ms', String(this.config?.voice?.stt?.minUtteranceMs || 250),
-        '--min-rms', String(this.config?.voice?.stt?.minRms || 0.004),
-        '--min-transcript-confidence', String(this.config?.voice?.stt?.minConfidence || 0.55),
-        '--command-recovery-min-confidence', String(this.config?.voice?.stt?.commandRecoveryMinConfidence || 0.25),
-        '--max-no-speech-probability', String(this.config?.voice?.stt?.maxNoSpeechProbability || 0.55),
-        '--max-compression-ratio', String(this.config?.voice?.stt?.maxCompressionRatio || 2.4),
-        '--speaker-similarity-threshold', String(this.config?.voice?.speakerLock?.similarityThreshold || 0.68)
-      ];
-
-      if (this.config?.voice?.allowBluetoothHFP) {
-        args.push('--allow-bluetooth-hfp');
-      }
-
-      if (this.config?.voice?.speakerLock?.enabled !== false) {
-        args.push('--speaker-lock-enabled');
-      }
-
-      if (recognitionConfig.modelCacheDir) {
-        args.push('--model-cache-dir', recognitionConfig.modelCacheDir);
-      }
-
-      for (const alias of aliases) {
-        const val = String(alias || '').trim();
-        if (val) {
-          args.push('--wake-alias', val);
-        }
-      }
-
-      this.logger.info(`Spawning unified Python audio engine with arguments`, args);
-      
-      this.workerProcess = spawn(this.pythonCommand, args, {
-        stdio: ['pipe', 'pipe', 'pipe']
-      });
-
-      this.workerReadline = readline.createInterface({
-        input: this.workerProcess.stdout
-      });
-
-      this.workerReadline.on('line', (line) => {
-        let message;
-        try {
-          message = JSON.parse(line);
-        } catch (err) {
-          this.logger.warn('Non-JSON audio engine output', line);
-          return;
-        }
-
-        if (message.event === 'ready') {
-          this.workerReady = true;
-          this.workerStartupPromise = null;
-          resolve();
-          return;
-        }
-
-        this._handleEngineEvent(message);
-      });
-
-      this.workerProcess.stderr.on('data', (chunk) => {
-        const text = String(chunk || '').trim();
-        if (text) {
-          this.logger.warn('Audio engine stderr', text);
-        }
-      });
-
-      this.workerProcess.once('exit', (code, signal) => {
-        this.logger.warn(`Audio engine exited (${signal || code || 0})`);
-        this.workerReady = false;
+      const onReady = () => {
+        this.workerReady = true;
         this.workerStartupPromise = null;
-        this.workerProcess = null;
-        if (this.workerReadline) {
-          this.workerReadline.close();
-          this.workerReadline = null;
-        }
-        
-        if (!this.isDestroyed) {
-          // Attempt automatic crash recovery (Law 12)
-          this._transitionTo(SPEECH_STATES.RECOVERING);
-          setTimeout(() => {
-            this.initialize().catch(err => {
-              this.logger.error('Audio engine recovery failed', err.message);
-              this._transitionTo(SPEECH_STATES.ERROR);
-            });
-          }, 3000);
-        }
-      });
+        resolve();
+      };
+      const onEvent = (message) => this._handleEngineEvent(message);
+      const onError = (error) => {
+        this.workerStartupPromise = null;
+        reject(error);
+      };
+
+      this.stt.once('ready', onReady);
+      this.stt.once('error', onError);
+      this.stt.on('event', onEvent);
+
+      this.stt.initialize().catch(onError);
     });
 
     return this.workerStartupPromise;
@@ -246,20 +144,22 @@ class VoiceManager extends EventEmitter {
   _handleEngineEvent(message) {
     switch (message.event) {
       case 'listening':
-        this.logger.info(`Microphone streaming persistent hardware InputStream online`, message);
+        this.logger.debug('STT microphone ready', message);
         break;
 
       case 'resumed':
-        this.logger.info('Audio engine capture resumed');
+        this.logger.debug('STT capture resumed');
         this._flushPendingListenAfterResume('engine-resumed');
         break;
 
       case 'paused':
-        this.logger.info('Audio engine capture paused');
+        this.logger.debug('STT capture paused');
         break;
 
       case 'stt_session_activated':
-        this.logger.info('Audio engine STT session armed', message);
+        this.logger.info(`Listening for ${message.mode || 'command'} speech`, {
+          startSpeechTimeoutMs: message.startSpeechTimeoutMs
+        });
         break;
 
       case 'ignored_speech':
@@ -329,20 +229,20 @@ class VoiceManager extends EventEmitter {
         id: 'inline-' + Date.now(),
         text: inlineCommand,
         confidence: data.confidence || 1.0,
-        backend: 'whisper-local'
+        backend: data.backend || 'windows-sapi'
       };
       
       this.eventBus.publish(EVENTS.STT_COMPLETED, {
         text: inlineCommand,
         confidence: data.confidence || 1.0,
-        backend: 'whisper-local'
+        backend: data.backend || 'windows-sapi'
       });
       
       this.emit('speechResult', {
         text: inlineCommand,
         confidence: data.confidence || 1.0,
         isFinal: true,
-        backend: 'whisper-local',
+        backend: data.backend || 'windows-sapi',
         utterance
       });
       
@@ -357,8 +257,9 @@ class VoiceManager extends EventEmitter {
   }
 
   _handleSpeechResult(data) {
-    const normalizedText = this._normalizeTranscript(data.text);
-    const reliability = this._assessTranscriptReliability(normalizedText, data);
+    const selected = this._selectReliableTranscript(data);
+    const normalizedText = selected.text;
+    const reliability = selected.reliability;
     if (!reliability.accepted) {
       this._handleIgnoredSpeech({
         mode: data?.mode || 'command',
@@ -373,22 +274,22 @@ class VoiceManager extends EventEmitter {
     
     this.eventBus.publish(EVENTS.STT_COMPLETED, {
       text: normalizedText,
-      confidence: data.confidence || 0.8,
-      backend: 'whisper-local'
+      confidence: selected.confidence,
+      backend: data.backend || 'windows-sapi'
     });
     
     const utterance = {
       id: 'stt-' + Date.now(),
       text: normalizedText,
-      confidence: data.confidence || 0.8,
-      backend: 'whisper-local'
+      confidence: selected.confidence,
+      backend: data.backend || 'windows-sapi'
     };
 
     this.emit('speechResult', {
       text: normalizedText,
-      confidence: data.confidence || 0.8,
+      confidence: selected.confidence,
       isFinal: true,
-      backend: 'whisper-local',
+      backend: data.backend || 'windows-sapi',
       mode: data.mode || 'command',
       utterance
     });
@@ -420,7 +321,7 @@ class VoiceManager extends EventEmitter {
   }
 
   _handleIgnoredSpeech(data) {
-    this.logger.info('Ignored speech input', {
+    this.logger.debug('Ignored speech input', {
       mode: data?.mode || 'command',
       reason: data?.reason || 'filtered'
     });
@@ -455,6 +356,9 @@ class VoiceManager extends EventEmitter {
 
   startListening(options = {}) {
     if (this.stateMachine.currentState !== SPEECH_STATES.IDLE) {
+      this.logger.info('Voice listen request ignored because the assistant is busy', {
+        state: this.stateMachine.getState()
+      });
       return false;
     }
 
@@ -466,6 +370,11 @@ class VoiceManager extends EventEmitter {
         : undefined;
     this.isActive = true;
     this._transitionTo(SPEECH_STATES.LISTENING, { mode });
+    this.logger.info('Voice listening started', {
+      mode,
+      startSpeechTimeoutMs: startSpeechTimeoutMs || null,
+      maxDurationMs: options.maxDurationMs || null
+    });
     this._sendEngineCommand({
       command: 'listen',
       mode,
@@ -484,26 +393,35 @@ class VoiceManager extends EventEmitter {
     this._transitionTo(SPEECH_STATES.IDLE, { reason: 'manual-stop' });
   }
 
-  manualActivate() {
+  manualActivate(options = {}) {
     if (!this.allowManualActivation) {
       this.logger.info('Voice activation ignored because manual activation is disabled');
       return false;
     }
 
+    const trigger = typeof options === 'string'
+      ? options
+      : options?.trigger;
+
     if (this._canInterruptAssistantSpeech()) {
-      return this._interruptAssistantSpeech();
+      return this._interruptAssistantSpeech({ trigger });
     }
 
     if (this.stateMachine.currentState !== SPEECH_STATES.IDLE) {
+      this.logger.info('Voice activation ignored because the assistant is busy', {
+        state: this.stateMachine.getState(),
+        trigger: trigger || this.config?.voice?.activationShortcut || 'Alt+Space'
+      });
       return false;
     }
 
     const payload = {
       manual: true,
       source: 'hotkey',
-      trigger: this.config?.voice?.activationShortcut || 'Alt+Space'
+      trigger: trigger || this.config?.voice?.activationShortcut || 'Alt+Space'
     };
 
+    this.logger.info('Voice activation requested', payload);
     this.conversationActive = true;
     this.conversationIgnoredSpeechCount = 0;
     this.eventBus.publish(EVENTS.VOICE_ACTIVATED, payload);
@@ -518,7 +436,7 @@ class VoiceManager extends EventEmitter {
     return this.tts?.isSpeaking === true || this.stateMachine.currentState === SPEECH_STATES.RESPONDING;
   }
 
-  _interruptAssistantSpeech() {
+  _interruptAssistantSpeech(options = {}) {
     this.pendingFollowUpListen = null;
     this.pendingListenAfterResume = null;
     if (this.resumeListenFallbackTimer) {
@@ -537,9 +455,10 @@ class VoiceManager extends EventEmitter {
       manual: true,
       interrupted: true,
       source: 'hotkey',
-      trigger: this.config?.voice?.activationShortcut || 'Alt+Space'
+      trigger: options?.trigger || this.config?.voice?.activationShortcut || 'Alt+Space'
     };
 
+    this.logger.info('Voice activation requested during assistant speech', payload);
     this.conversationActive = true;
     this.conversationIgnoredSpeechCount = 0;
     this.eventBus.publish(EVENTS.VOICE_ACTIVATED, payload);
@@ -654,6 +573,10 @@ class VoiceManager extends EventEmitter {
     }
 
     const tokens = normalized.split(/\s+/).filter(Boolean);
+    if (this._isNonActionableTranscript(tokens, mode, normalized)) {
+      return { accepted: false, reason: 'non-actionable-transcript' };
+    }
+
     const noisePhrases = new Set([
       'thank you',
       'thanks for watching',
@@ -674,6 +597,181 @@ class VoiceManager extends EventEmitter {
     return { accepted: true };
   }
 
+  _selectReliableTranscript(data = {}) {
+    const candidates = this._buildTranscriptCandidates(data);
+    let first = null;
+
+    for (const candidate of candidates) {
+      const reliability = this._assessTranscriptReliability(candidate.text, {
+        ...data,
+        confidence: candidate.confidence
+      });
+      const enriched = {
+        ...candidate,
+        reliability
+      };
+
+      if (!first) {
+        first = enriched;
+      }
+
+      if (reliability.accepted && this._looksLikeActionableTranscript(candidate.text)) {
+        return enriched;
+      }
+    }
+
+    const accepted = candidates
+      .map(candidate => ({
+        ...candidate,
+        reliability: this._assessTranscriptReliability(candidate.text, {
+          ...data,
+          confidence: candidate.confidence
+        })
+      }))
+      .find(candidate => candidate.reliability.accepted);
+
+    return accepted || first || {
+      text: '',
+      confidence: 0,
+      reliability: { accepted: false, reason: 'empty-transcript' }
+    };
+  }
+
+  _buildTranscriptCandidates(data = {}) {
+    const candidates = [];
+    const pushCandidate = (text, confidence) => {
+      const normalized = this._normalizeTranscript(text);
+      if (!normalized) {
+        return;
+      }
+      if (candidates.some(candidate => candidate.text.toLowerCase() === normalized.toLowerCase())) {
+        return;
+      }
+      const score = Number(confidence);
+      candidates.push({
+        text: normalized,
+        confidence: Number.isFinite(score) ? score : 0.8
+      });
+    };
+
+    pushCandidate(data.text, data.confidence);
+    if (Array.isArray(data.alternates)) {
+      for (const alternate of data.alternates) {
+        pushCandidate(alternate?.text, alternate?.confidence);
+      }
+    }
+
+    return candidates;
+  }
+
+  _isNonActionableTranscript(tokens, mode, normalized = '') {
+    if (mode === 'confirmation') {
+      return false;
+    }
+
+    if (!Array.isArray(tokens) || tokens.length === 0) {
+      return true;
+    }
+
+    const text = String(normalized || '').trim().toLowerCase();
+    const allowedPhrases = new Set([
+      'help',
+      'show help',
+      'system status',
+      'what can you do',
+      'pause',
+      'resume',
+      'continue',
+      'stop',
+      'cancel',
+      'yes',
+      'no',
+      'mute',
+      'unmute'
+    ]);
+
+    if (allowedPhrases.has(text)) {
+      return false;
+    }
+
+    const allowedSingleTokenCommands = new Set([
+      'help',
+      'pause',
+      'resume',
+      'continue',
+      'stop',
+      'cancel',
+      'yes',
+      'no',
+      'mute',
+      'unmute'
+    ]);
+
+    if (tokens.length === 1) {
+      return !allowedSingleTokenCommands.has(tokens[0]);
+    }
+
+    if (this._looksLikeActionableTranscript(text)) {
+      return false;
+    }
+
+    const fillerTokens = new Set([
+      'a',
+      'an',
+      'and',
+      'can',
+      'could',
+      'for',
+      'of',
+      'or',
+      'please',
+      'the',
+      'to',
+      'uh',
+      'um',
+      'would',
+      'you'
+    ]);
+    const targetTokens = new Set([
+      'alarm',
+      'browser',
+      'brightness',
+      'calculator',
+      'chrome',
+      'desktop',
+      'documents',
+      'downloads',
+      'edge',
+      'excel',
+      'file',
+      'firefox',
+      'folder',
+      'music',
+      'notepad',
+      'powerpoint',
+      'reminder',
+      'spotify',
+      'teams',
+      'timer',
+      'volume',
+      'whatsapp',
+      'window',
+      'word',
+      'youtube'
+    ]);
+    const meaningfulTokens = tokens.filter(token => !fillerTokens.has(token));
+
+    if (tokens.length <= 4 && meaningfulTokens.length <= 1) {
+      return true;
+    }
+
+    if (tokens.length <= 4 && !tokens.some(token => targetTokens.has(token))) {
+      return true;
+    }
+
+    return false;
+  }
+
   _looksLikeActionableTranscript(text) {
     const normalized = String(text || '').trim().toLowerCase();
     if (!normalized) {
@@ -689,7 +787,8 @@ class VoiceManager extends EventEmitter {
       'open', 'close', 'launch', 'start', 'run', 'search', 'find', 'play', 'pause',
       'resume', 'stop', 'mute', 'unmute', 'increase', 'decrease', 'set', 'turn',
       'switch', 'show', 'create', 'delete', 'move', 'copy', 'rename', 'call', 'message',
-      'maximize', 'minimize', 'fullscreen'
+      'maximize', 'minimize', 'fullscreen', 'google', 'look', 'lookup', 'queue',
+      'remind', 'stream', 'watch'
     ]);
     const targetTokens = new Set([
       'chrome', 'youtube', 'edge', 'firefox', 'spotify', 'notepad', 'calculator',
@@ -698,15 +797,55 @@ class VoiceManager extends EventEmitter {
       'folder', 'file', 'browser'
     ]);
 
-    if (actionTokens.has(tokens[0])) {
+    const hasActionToken = (token) => {
+      if (actionTokens.has(token)) {
+        return true;
+      }
+      if (!token || token.length < 3) {
+        return false;
+      }
+      return Boolean(Normalizer.findClosestOption(token, Array.from(actionTokens), {
+        minSimilarity: token.length >= 5 ? 0.62 : 0.72,
+        maxDistance: token.length >= 5 ? 2 : 1
+      }));
+    };
+
+    if (hasActionToken(tokens[0])) {
       return true;
     }
 
-    return tokens.some(token => actionTokens.has(token))
+    const fillerTokens = new Set([
+      'a', 'an', 'and', 'but', 'can', 'could', 'for', 'i', 'is', 'just', 'me',
+      'my', 'now', 'ok', 'okay', 'please', 'saying', 'the', 'to', 'uh', 'um',
+      'was', 'would', 'you'
+    ]);
+    const actionIndex = tokens.findIndex(token => hasActionToken(token));
+    if (
+      actionIndex >= 0
+      && tokens.slice(actionIndex + 1).some(token => !fillerTokens.has(token))
+    ) {
+      return true;
+    }
+
+    return tokens.some(token => hasActionToken(token))
       && tokens.some(token => targetTokens.has(token));
   }
 
   _sendEngineCommand(payload) {
+    if (this.stt) {
+      const command = payload?.command;
+      if (command === 'listen') {
+        this.stt.listen(payload);
+      } else if (command === 'pause') {
+        this.stt.pause();
+      } else if (command === 'resume') {
+        this.stt.resume();
+      } else if (command === 'shutdown') {
+        this.stt.shutdown();
+      }
+      return;
+    }
+
     if (!this.workerProcess || this.workerProcess.killed) {
       return;
     }
@@ -749,7 +888,9 @@ class VoiceManager extends EventEmitter {
 
   destroy() {
     this.isDestroyed = true;
-    if (this.workerProcess) {
+    if (this.stt) {
+      this.stt.shutdown();
+    } else if (this.workerProcess) {
       try {
         this.workerProcess.stdin.write(JSON.stringify({ command: 'shutdown' }) + '\n');
         this.workerProcess.kill();

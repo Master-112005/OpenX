@@ -48,7 +48,26 @@ class AutomationEngine {
         }
         return { success: true, data: { value: current } };
       },
-      'app.open': (entities) => this.apps.open(entities.appName),
+      'app.open': async (entities) => {
+        const appResult = await this.apps.open(entities.appName);
+        if (appResult?.success) {
+          return appResult;
+        }
+
+        const folderResult = this.folders.open(entities.appName);
+        if (folderResult?.success) {
+          return {
+            success: true,
+            data: {
+              ...folderResult.data,
+              app: entities.appName,
+              launchMethod: 'folder'
+            }
+          };
+        }
+
+        return appResult;
+      },
       'app.close': (entities) => this.apps.close(entities.appName),
       'app.switch': (entities) => this.apps.switchTo(entities.appName),
       'file.create': (entities) => this.files.create(entities.filename, entities.path),
@@ -58,12 +77,13 @@ class AutomationEngine {
       'file.copy': (entities) => this.files.copy(entities.source, entities.destination),
       'file.move': (entities) => this.files.move(entities.source, entities.destination),
       'file.search': (entities) => this.files.search(entities.query),
+      'file.list': (entities) => this.files.list(entities.path),
       'folder.create': (entities) => this.folders.create(entities.folderName, entities.path),
       'folder.delete': (entities) => this.folders.delete(entities.folderName, entities.path),
       'folder.move': (entities) => this.folders.move(entities.source, entities.destination),
       'folder.open': (entities) => this.folders.open(entities.folderName),
       'browser.open': (entities) => this.browser.open(entities.url),
-      'browser.search': (entities) => this.browser.search(entities.query),
+      'browser.search': (entities) => this.browser.search(entities.query, entities),
       'media.play': (entities) => this.media.play(entities.mediaQuery, entities.mediaPlatform),
       'media.next': () => this.media.next(),
       'media.previous': () => this.media.previous(),
@@ -91,6 +111,8 @@ class AutomationEngine {
       'system.sleep': () => this.windows.sleep(),
       'system.lock': () => this.windows.lock(),
       'system.status': () => this.system.getStatus(),
+      'system.time': () => this.system.getTime(),
+      'system.date': () => this.system.getDate(),
       'system.cpu': () => this.system.getCPUUsage(),
       'system.memory': () => this.system.getMemoryUsage(),
       'system.battery': () => this.system.getBatteryStatus(),

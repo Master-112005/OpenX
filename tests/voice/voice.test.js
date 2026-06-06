@@ -44,6 +44,35 @@ describe('Voice Manager & Audio Engine Integration', function() {
     }
   }
 
+  class FakeSpeechToText extends EventEmitter {
+    constructor() {
+      super();
+      this.ready = false;
+    }
+    async initialize() {
+      this.ready = true;
+      this.emit('ready', { event: 'ready', backend: 'fake-stt' });
+      return true;
+    }
+    listen(payload) {
+      this.emit('test:stdin', { command: 'listen', ...payload });
+      this.emit('event', {
+        event: 'stt_session_activated',
+        mode: payload?.mode || 'command',
+        startSpeechTimeoutMs: payload?.startSpeechTimeoutMs
+      });
+    }
+    pause() {
+      this.emit('test:stdin', { command: 'pause' });
+      this.emit('event', { event: 'paused' });
+    }
+    resume() {
+      this.emit('test:stdin', { command: 'resume' });
+      this.emit('event', { event: 'resumed' });
+    }
+    shutdown() {}
+  }
+
   function createVoiceManager(config = {}) {
     const mergedConfig = {
       ...config,
@@ -55,29 +84,21 @@ describe('Voice Manager & Audio Engine Integration', function() {
     };
     const eventBus = new AssistantEventBus();
     const tts = new FakeTextToSpeech();
+    const stt = new FakeSpeechToText();
 
     const vm = new VoiceManager(mergedConfig, {
       eventBus,
-      tts
+      tts,
+      stt
     });
 
-    vm._startAudioEngine = function() {
-      this.workerReady = true;
-      this.workerProcess = {
-        stdin: {
-          write: (data) => {
-            this.emit('test:stdin', JSON.parse(data.trim()));
-          }
-        },
-        kill: () => {}
-      };
-      return Promise.resolve();
-    };
+    stt.on('test:stdin', (payload) => vm.emit('test:stdin', payload));
 
     return {
       vm,
       eventBus,
-      tts
+      tts,
+      stt
     };
   }
 
@@ -86,11 +107,10 @@ describe('Voice Manager & Audio Engine Integration', function() {
     AssistantEventBus = require('../../core/shared/index').AssistantEventBus;
   });
 
-  it('should initialize and spawn the persistent subprocess', async function() {
+  it('should initialize the Node speech recognition engine', async function() {
     const { vm } = createVoiceManager();
     await vm.initialize();
     assert.equal(vm.workerReady, true);
-    assert.ok(vm.workerProcess);
     vm.destroy();
   });
 
@@ -155,6 +175,21 @@ describe('Voice Manager & Audio Engine Integration', function() {
     assert.equal(deactivated, false);
     assert.equal(vm.getStatus().active, true);
     assert.equal(vm.getStatus().conversationActive, true);
+    vm.destroy();
+  });
+
+  it('should preserve the manual activation trigger for fallback shortcuts', async function() {
+    const { vm } = createVoiceManager();
+    let activationPayload = null;
+
+    await vm.initialize();
+    vm.on('activated', (payload) => {
+      activationPayload = payload;
+    });
+
+    assert.equal(vm.manualActivate({ trigger: 'Control+Alt+Space' }), true);
+    assert.equal(activationPayload.trigger, 'Control+Alt+Space');
+    assert.equal(vm.getStatus().state, 'LISTENING');
     vm.destroy();
   });
 
@@ -225,7 +260,161 @@ describe('Voice Manager & Audio Engine Integration', function() {
     vm.destroy();
   });
 
-  it('should ignore common Whisper hallucination phrases from background noise', async function() {
+  it('should allow low-confidence fuzzy actionable commands into NLP routing', async function() {
+    const { vm } = createVoiceManager();
+    const results = [];
+
+    await vm.initialize();
+    vm.on('speechResult', (data) => {
+      results.push(data);
+    });
+
+    assert.equal(vm.manualActivate(), true);
+
+    vm._handleEngineEvent({
+      event: 'result',
+      text: 'ope chrome',
+      confidence: 0.34,
+      noSpeechProbability: 0.5,
+      mode: 'conversation'
+    });
+
+    assert.deepEqual(results.map(result => result.text), ['ope chrome']);
+    assert.equal(vm.getStatus().conversationActive, true);
+    vm.destroy();
+  });
+
+  it('should allow low-confidence conversational commands into NLP routing', async function() {
+    const { vm } = createVoiceManager();
+    const results = [];
+
+    await vm.initialize();
+    vm.on('speechResult', (data) => {
+      results.push(data);
+    });
+
+    assert.equal(vm.manualActivate(), true);
+
+    vm._handleEngineEvent({
+      event: 'result',
+      text: 'i was saying search for java tutorial',
+      confidence: 0.34,
+      noSpeechProbability: 0.5,
+      mode: 'conversation'
+    });
+
+    assert.deepEqual(results.map(result => result.text), ['i was saying search for java tutorial']);
+    assert.equal(vm.getStatus().conversationActive, true);
+    vm.destroy();
+  });
+
+  it('should recover actionable commands from recognition alternates', async function() {
+    const { vm } = createVoiceManager();
+    const results = [];
+
+    await vm.initialize();
+    vm.on('speechResult', (data) => {
+      results.push(data);
+    });
+
+    vm._handleEngineEvent({
+      event: 'result',
+      text: 'lola',
+      confidence: 0.72,
+      mode: 'conversation',
+      alternates: [
+        { text: 'open chrome', confidence: 0.56 },
+        { text: 'open edge', confidence: 0.41 }
+      ]
+    });
+
+    assert.equal(results.length, 1);
+    assert.equal(results[0].text, 'open chrome');
+    vm.destroy();
+  });
+
+  it('should recover a command alternate when the primary result is filler noise', async function() {
+    const { vm } = createVoiceManager();
+    const results = [];
+
+    await vm.initialize();
+    vm.on('speechResult', (data) => {
+      results.push(data);
+    });
+
+    vm._handleEngineEvent({
+      event: 'result',
+      text: 'the tool',
+      confidence: 0.88,
+      mode: 'conversation',
+      alternates: [
+        { text: 'open youtube', confidence: 0.62 },
+        { text: 'the tool', confidence: 0.88 }
+      ]
+    });
+
+    assert.equal(results.length, 1);
+    assert.equal(results[0].text, 'open youtube');
+    vm.destroy();
+  });
+
+  it('should ignore one-word non-actionable recognition noise before routing', async function() {
+    const { vm } = createVoiceManager();
+    let speechResult = false;
+
+    await vm.initialize();
+    vm.on('speechResult', () => {
+      speechResult = true;
+    });
+
+    assert.equal(vm.manualActivate(), true);
+
+    vm._handleEngineEvent({
+      event: 'result',
+      text: 'lola',
+      confidence: 0.91,
+      mode: 'conversation'
+    });
+
+    assert.equal(speechResult, false);
+    assert.equal(vm.getStatus().state, 'LISTENING');
+    vm.destroy();
+  });
+
+  it('should ignore short multi-word recognition noise before routing', async function() {
+    const { vm } = createVoiceManager({
+      voice: {
+        conversationIgnoredSpeechLimit: 3
+      }
+    });
+    let speechResult = false;
+
+    await vm.initialize();
+    vm.on('speechResult', () => {
+      speechResult = true;
+    });
+
+    assert.equal(vm.manualActivate(), true);
+
+    vm._handleEngineEvent({
+      event: 'result',
+      text: 'the know of',
+      confidence: 0.91,
+      mode: 'conversation'
+    });
+    vm._handleEngineEvent({
+      event: 'result',
+      text: 'the tool',
+      confidence: 0.91,
+      mode: 'conversation'
+    });
+
+    assert.equal(speechResult, false);
+    assert.equal(vm.getStatus().state, 'LISTENING');
+    vm.destroy();
+  });
+
+  it('should ignore common speech hallucination phrases from background noise', async function() {
     const { vm } = createVoiceManager();
     let speechResult = false;
 

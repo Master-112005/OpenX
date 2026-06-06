@@ -165,6 +165,14 @@ const INTENT_DEFINITIONS = [
     description: 'Search for files'
   },
   {
+    id: 'file.list',
+    patterns: ['list files', 'show files', 'what files are in', 'what files are on', 'list folder'],
+    permissionLevel: 'low',
+    action: 'file.list',
+    entities: [{ name: 'path', type: 'string', required: false }],
+    description: 'List files and folders in a local directory'
+  },
+  {
     id: 'folder.create',
     patterns: ['create folder', 'new folder', 'make folder', 'create a folder', 'create directory', 'new directory'],
     permissionLevel: 'low',
@@ -220,6 +228,22 @@ const INTENT_DEFINITIONS = [
     action: 'browser.search',
     entities: [{ name: 'query', type: 'string', required: true }],
     description: 'Search the web'
+  },
+  {
+    id: 'system.time',
+    patterns: ['what time is it', 'current time', 'tell me the time', 'time now'],
+    permissionLevel: 'low',
+    action: 'system.time',
+    entities: [],
+    description: 'Tell the current local time'
+  },
+  {
+    id: 'system.date',
+    patterns: ['what is the date', 'what is the day', 'current date', 'date today', 'day today'],
+    permissionLevel: 'low',
+    action: 'system.date',
+    entities: [],
+    description: 'Tell the current local date or day'
   },
   {
     id: 'message.send',

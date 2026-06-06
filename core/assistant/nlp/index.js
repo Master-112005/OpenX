@@ -75,12 +75,22 @@ class NlpProcessor {
     const correctedText = correctedTokens.join(' ').trim();
     const intentTokens = correctedTokens.filter(token => !FILLER_WORDS.has(token));
     const intentText = intentTokens.join(' ').trim();
+    const repairedCommandText = this._repairNoisyCommandText(correctedTokens);
+    const commandText = repairedCommandText || correctedText;
+    const noiseTokenCount = this._countNoiseTokens(correctedTokens);
+    const actionTokenCount = this._countActionTokens(correctedTokens);
+    const repairContextTokenCount = this._countRepairContextTokens(correctedTokens);
     const bigrams = buildBigrams(correctedTokens);
     const intentBigrams = buildBigrams(intentTokens);
 
     return {
       normalizedText: normalized,
       correctedText,
+      commandText,
+      repairedCommandText,
+      noiseTokenCount,
+      actionTokenCount,
+      repairContextTokenCount,
       intentText,
       tokens: correctedTokens,
       intentTokens,
@@ -92,6 +102,240 @@ class NlpProcessor {
   scorePattern(preparedInput, pattern) {
     const patternPrepared = this.prepare(pattern);
     return scorePreparedPattern(preparedInput, patternPrepared);
+  }
+
+  _repairNoisyCommandText(tokens) {
+    if (!Array.isArray(tokens) || tokens.length === 0) {
+      return '';
+    }
+
+    const action = this._findNoisyAction(tokens);
+    if (!action) {
+      return '';
+    }
+
+    if (['open', 'close', 'switch'].includes(action.verb)) {
+      const target = this._findKnownPlaceOrApp(tokens, action.index);
+      if (target) {
+        return `${action.verb} ${target}`;
+      }
+    }
+
+    if (['increase', 'decrease', 'mute', 'unmute'].includes(action.verb)) {
+      const target = this._findKnownUtilityTarget(tokens);
+      if (target) {
+        return `${action.verb} ${target}`;
+      }
+    }
+
+    if (['search', 'play', 'pause', 'resume', 'stop', 'set', 'remind'].includes(action.verb)) {
+      return this._buildCommandTail(tokens, action.index, action.verb);
+    }
+
+    return '';
+  }
+
+  _findNoisyAction(tokens) {
+    const groups = [
+      { verb: 'open', words: ['open', 'launch', 'start', 'run', 'show'] },
+      { verb: 'close', words: ['close', 'quit', 'exit', 'terminate'] },
+      { verb: 'switch', words: ['switch', 'focus', 'activate', 'goto', 'go'] },
+      { verb: 'increase', words: ['increase', 'raise', 'up', 'louder', 'higher'] },
+      { verb: 'decrease', words: ['decrease', 'lower', 'down', 'quieter'] },
+      { verb: 'mute', words: ['mute', 'silence'] },
+      { verb: 'unmute', words: ['unmute'] },
+      { verb: 'search', words: ['search', 'google', 'find', 'lookup'] },
+      { verb: 'play', words: ['play', 'stream', 'watch', 'queue'] },
+      { verb: 'pause', words: ['pause'] },
+      { verb: 'resume', words: ['resume', 'continue', 'unpause'] },
+      { verb: 'stop', words: ['stop'] },
+      { verb: 'set', words: ['set'] },
+      { verb: 'remind', words: ['remind'] }
+    ];
+
+    for (let index = 0; index < tokens.length; index += 1) {
+      const token = tokens[index];
+      for (const group of groups) {
+        if (group.words.includes(token)) {
+          return { verb: group.verb, index };
+        }
+
+        const match = Normalizer.findClosestOption(token, group.words, {
+          minSimilarity: token.length >= 5 ? 0.62 : 0.72,
+          maxDistance: token.length >= 5 ? 2 : 1
+        });
+        if (match) {
+          return { verb: group.verb, index };
+        }
+      }
+    }
+
+    return null;
+  }
+
+  _buildCommandTail(tokens, actionIndex, verb) {
+    const tail = tokens.slice(actionIndex);
+    if (tail.length === 0) {
+      return '';
+    }
+
+    const cleaned = tail.filter((token, index) => {
+      if (!token) {
+        return false;
+      }
+      if (index === 0) {
+        return true;
+      }
+      if (['uh', 'um', 'please', 'ok', 'okay', 'sir', 'assistant', 'jarvis'].includes(token)) {
+        return false;
+      }
+      return true;
+    });
+
+    if (cleaned.length === 0) {
+      return '';
+    }
+
+    if (verb === 'search' && cleaned[0] === 'find' && !cleaned.includes('file')) {
+      cleaned[0] = 'search';
+    }
+
+    if (verb === 'search' && cleaned[0] === 'lookup') {
+      cleaned.splice(0, 1, 'look', 'up');
+    }
+
+    if (verb === 'remind' && cleaned[0] === 'remind' && cleaned[1] !== 'me') {
+      cleaned.splice(1, 0, 'me');
+    }
+
+    return cleaned.join(' ').trim();
+  }
+
+  _findKnownPlaceOrApp(tokens, actionIndex) {
+    const aliases = {
+      ...(EntityExtractor.APP_ALIASES || {}),
+      ...(EntityExtractor.FOLDER_ALIASES || {})
+    };
+    const aliasKeys = Object.keys(aliases);
+    const maxWindowSize = aliasKeys.reduce((max, alias) => {
+      return Math.max(max, Normalizer.tokenize(alias).length);
+    }, 1);
+    const searchOrder = [
+      tokens.slice(actionIndex + 1),
+      tokens.slice(0, actionIndex)
+    ];
+
+    for (const segment of searchOrder) {
+      for (let windowSize = maxWindowSize; windowSize >= 1; windowSize -= 1) {
+        for (let index = 0; index <= segment.length - windowSize; index += 1) {
+          const candidate = segment.slice(index, index + windowSize).join(' ').trim();
+          if (!candidate) {
+            continue;
+          }
+          const direct = aliases[candidate];
+          if (direct) {
+            return candidate;
+          }
+          const match = Normalizer.findClosestOption(candidate, aliasKeys, {
+            minSimilarity: 0.64,
+            maxDistance: candidate.length >= 7 ? 2 : 1
+          });
+          if (match) {
+            return match.normalizedMatch;
+          }
+        }
+      }
+    }
+
+    return '';
+  }
+
+  _findKnownUtilityTarget(tokens) {
+    const utilityTargets = ['volume', 'brightness'];
+    for (const token of tokens) {
+      if (utilityTargets.includes(token)) {
+        return token;
+      }
+      const match = Normalizer.findClosestOption(token, utilityTargets, {
+        minSimilarity: 0.68,
+        maxDistance: 2
+      });
+      if (match) {
+        return match.normalizedMatch;
+      }
+    }
+    return '';
+  }
+
+  _countNoiseTokens(tokens) {
+    if (!Array.isArray(tokens)) {
+      return 0;
+    }
+
+    return tokens.filter(token => {
+      if (!token || FILLER_WORDS.has(token) || /^\d+$/.test(token)) {
+        return false;
+      }
+      if (this.vocabulary.includes(token)) {
+        return false;
+      }
+      if (/\./.test(token)) {
+        return false;
+      }
+      return true;
+    }).length;
+  }
+
+  _countActionTokens(tokens) {
+    if (!Array.isArray(tokens)) {
+      return 0;
+    }
+
+    const actionWords = new Set([
+      'activate',
+      'call',
+      'close',
+      'continue',
+      'create',
+      'decrease',
+      'delete',
+      'find',
+      'focus',
+      'increase',
+      'launch',
+      'lower',
+      'maximize',
+      'message',
+      'minimize',
+      'move',
+      'mute',
+      'open',
+      'pause',
+      'play',
+      'raise',
+      'remind',
+      'rename',
+      'resume',
+      'run',
+      'search',
+      'set',
+      'show',
+      'start',
+      'stop',
+      'switch',
+      'unmute'
+    ]);
+
+    return tokens.filter(token => actionWords.has(token)).length;
+  }
+
+  _countRepairContextTokens(tokens) {
+    const action = this._findNoisyAction(tokens);
+    if (!action || action.index <= 0) {
+      return 0;
+    }
+
+    return tokens.slice(0, action.index).filter(Boolean).length;
   }
 }
 

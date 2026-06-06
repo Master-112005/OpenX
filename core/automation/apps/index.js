@@ -42,6 +42,26 @@ const KNOWN_APPS = {
   'antigravity': { processName: 'Antigravity IDE' }
 };
 
+const SPECIAL_LAUNCHERS = {
+  'ms-settings': { target: 'ms-settings:' },
+  'recycle bin': { target: 'C:\\Windows\\explorer.exe', args: ['shell:RecycleBinFolder'] },
+  'microsoft store': { target: 'ms-windows-store:' },
+  'photos': { target: 'ms-photos:' },
+  'google chat': { target: 'https://chat.google.com' },
+  'youtube': { target: 'https://www.youtube.com' }
+};
+
+const BROWSER_APP_NAMES = new Set(['chrome', 'msedge', 'edge', 'firefox']);
+const PROTECTED_BROWSER_TITLE_TOKENS = [
+  'youtube',
+  'spotify',
+  'soundcloud',
+  'gaana',
+  'jiosaavn',
+  'amazon music',
+  'apple music'
+];
+
 class AppController {
   constructor(config) {
     this.logger = new Logger({ level: config?.logging?.level || 'info' });
@@ -66,11 +86,6 @@ class AppController {
         }
       }
 
-      if (app && app.cmd) {
-        launchTarget(app.cmd);
-        return { success: true, data: { app: name } };
-      }
-
       const startApp = this._resolveStartApp(name);
       if (startApp) {
         this._launchStartApp(startApp);
@@ -84,8 +99,17 @@ class AppController {
         };
       }
 
-      launchTarget(name);
-      return { success: true, data: { app: name } };
+      const specialLaunch = this._launchSpecialApp(name);
+      if (specialLaunch.success) {
+        return specialLaunch;
+      }
+
+      if (app?.cmd && this._commandExists(app.cmd)) {
+        launchTarget(app.cmd);
+        return { success: true, data: { app: name, launchMethod: 'command' } };
+      }
+
+      return { success: false, error: `Could not find app: ${name}` };
     } catch (err) {
       this.logger.error(`Failed to open app: ${name}`, err);
       return { success: false, error: `Could not find or open: ${name}` };
@@ -108,17 +132,39 @@ class AppController {
       }
 
       const processNames = this._resolveProcessCandidates(name);
-      let runningProcesses = this._findRunningProcesses(name, processNames);
+      const browserClose = this._isBrowserAppName(name);
+      let runningProcesses = this._filterCloseTargets(
+        name,
+        this._findRunningProcesses(name, processNames)
+      );
 
       if (runningProcesses.length > 0) {
+        const requestedCloseCount = runningProcesses.length;
         this._closeProcessesGracefully(runningProcesses);
         this._sleep(900);
-        runningProcesses = this._findRunningProcesses(name, processNames);
+        runningProcesses = this._filterCloseTargets(
+          name,
+          this._findRunningProcesses(name, processNames)
+        );
 
-        if (runningProcesses.length > 0) {
+        if (browserClose) {
+          return {
+            success: true,
+            data: {
+              app: name,
+              closedCount: requestedCloseCount,
+              closeMethod: 'window'
+            }
+          };
+        }
+
+        if (!browserClose && runningProcesses.length > 0) {
           this._forceTerminateProcesses(runningProcesses);
           this._sleep(700);
-          runningProcesses = this._findRunningProcesses(name, processNames);
+          runningProcesses = this._filterCloseTargets(
+            name,
+            this._findRunningProcesses(name, processNames)
+          );
         }
 
         if (runningProcesses.length === 0) {
@@ -133,7 +179,9 @@ class AppController {
         }
       }
 
-      const windowClose = this._closeAppWindow(name, app);
+      const windowClose = this._closeAppWindow(name, app, {
+        excludeTitleTokens: browserClose ? PROTECTED_BROWSER_TITLE_TOKENS : []
+      });
       if (windowClose.success) {
         return windowClose;
       }
@@ -144,7 +192,7 @@ class AppController {
     }
   }
 
-  _closeAppWindow(name, app = KNOWN_APPS[name]) {
+  _closeAppWindow(name, app = KNOWN_APPS[name], options = {}) {
     const windowQuery = app?.windowQuery || name;
     const preferredTitleTokens = Array.from(new Set(
       [name, ...(Array.isArray(app?.preferredTitleTokens) ? app.preferredTitleTokens : [])]
@@ -163,7 +211,8 @@ class AppController {
 
     const closeResult = this.windowSession.closeWindow(windowQuery, {
       preferredTitleTokens,
-      preferredProcessNames
+      preferredProcessNames,
+      excludeTitleTokens: options.excludeTitleTokens || []
     });
 
     if (!closeResult.success) {
@@ -258,6 +307,44 @@ class AppController {
     launchTarget('C:\\Windows\\explorer.exe', [`shell:AppsFolder\\${appId}`]);
   }
 
+  _launchSpecialApp(name) {
+    const launcher = SPECIAL_LAUNCHERS[name];
+    if (!launcher) {
+      return { success: false };
+    }
+
+    try {
+      launchTarget(launcher.target, launcher.args || []);
+      return {
+        success: true,
+        data: {
+          app: name,
+          launchMethod: 'special',
+          target: launcher.target
+        }
+      };
+    } catch (err) {
+      return { success: false, error: `Could not open: ${name}` };
+    }
+  }
+
+  _commandExists(command) {
+    const safeCommand = String(command || '').trim();
+    if (!safeCommand) {
+      return false;
+    }
+
+    try {
+      execFileSync('where.exe', [safeCommand], {
+        timeout: 3000,
+        stdio: 'ignore'
+      });
+      return true;
+    } catch (err) {
+      return false;
+    }
+  }
+
   _resolveProcessCandidates(name) {
     const candidates = new Set();
     const app = KNOWN_APPS[name];
@@ -331,6 +418,27 @@ class AppController {
       .filter(item => item.score >= 100)
       .sort((left, right) => right.score - left.score)
       .map(item => item.process);
+  }
+
+  _filterCloseTargets(name, processes) {
+    if (!this._isBrowserAppName(name)) {
+      return processes;
+    }
+
+    return processes.filter(process => {
+      const windowTitle = String(process?.MainWindowTitle || '').trim().toLowerCase();
+      const mainWindowHandle = Number(process?.MainWindowHandle || 0);
+
+      if (PROTECTED_BROWSER_TITLE_TOKENS.some(token => windowTitle.includes(token))) {
+        return false;
+      }
+
+      return mainWindowHandle !== 0 || windowTitle.length > 0;
+    });
+  }
+
+  _isBrowserAppName(name) {
+    return BROWSER_APP_NAMES.has(String(name || '').trim().toLowerCase());
   }
 
   _getRunningProcessDetails() {

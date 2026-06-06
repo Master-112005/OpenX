@@ -165,6 +165,115 @@ describe('Action Router', function() {
     assert.equal(result.entities.appName, 'chrome');
   });
 
+  it('should salvage app commands from noisy STT tokens', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId) {
+        return { success: true, data: { actionId } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const misspelled = await router.process('ope chrome', 'voice');
+    const noisy = await router.process('sglkn open lsg chrome', 'voice');
+    const noisyMisspelled = await router.process('sglkn ope lsg chrome', 'voice');
+
+    assert.equal(misspelled.intent, 'app.open');
+    assert.equal(misspelled.entities.appName, 'chrome');
+    assert.equal(noisy.intent, 'app.open');
+    assert.equal(noisy.entities.appName, 'chrome');
+    assert.equal(noisyMisspelled.intent, 'app.open');
+    assert.equal(noisyMisspelled.entities.appName, 'chrome');
+  });
+
+  it('should salvage utility commands from noisy STT tokens', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId) {
+        return { success: true, data: { actionId } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const result = await router.process('sglkn increse lsg volum', 'voice');
+
+    assert.equal(result.intent, 'volume.up');
+  });
+
+  it('should extract commands from conversational lead-ins', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId) {
+        return { success: true, data: { actionId } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const result = await router.process('i was just talking but please open chrome now', 'voice');
+
+    assert.equal(result.intent, 'app.open');
+    assert.equal(result.entities.appName, 'chrome');
+  });
+
+  it('should extract search, timer, and reminder commands from surrounding speech', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId) {
+        return { success: true, data: { actionId } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const search = await router.process('i was saying please search for java tutorial okay', 'voice');
+    const timer = await router.process('there is background speech set timer for 5 minutes', 'voice');
+    const reminder = await router.process('i was talking remind me in 10 minutes to stand up', 'voice');
+
+    assert.equal(search.intent, 'browser.search');
+    assert.equal(search.entities.query, 'java tutorial');
+    assert.equal(timer.intent, 'timer.set');
+    assert.equal(timer.entities.duration, 5);
+    assert.equal(reminder.intent, 'reminder.set');
+    assert.equal(reminder.entities.duration, 10);
+    assert.equal(reminder.entities.reminderText, 'stand up');
+  });
+
+  it('should preserve media commands when extracting from surrounding speech', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId) {
+        return { success: true, data: { actionId } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const result = await router.process('i was saying stop music now', 'voice');
+
+    assert.equal(result.intent, 'media.stop');
+  });
+
+  it('should not execute pure conversation without an action frame', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId) {
+        return { success: true, data: { actionId } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const result = await router.process('i was just talking about chrome today', 'voice');
+
+    assert.equal(result.success, false);
+    assert.equal(result.error, 'Could not determine intent');
+  });
+
   it('should route repaired polite app openings through the explicit app resolver', async function() {
     const config = {
       permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
@@ -210,6 +319,21 @@ describe('Action Router', function() {
     assert.equal(result.entities.folderName, 'downloads');
   });
 
+  it('should route explicit suffix folder openings to folder.open', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId) {
+        return { success: true, data: { actionId } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const result = await router.process('open rakesh folder', 'chat');
+    assert.equal(result.intent, 'folder.open');
+    assert.equal(result.entities.folderName, 'rakesh');
+  });
+
   it('should keep multi-word app names on app.open', async function() {
     const config = {
       permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
@@ -223,6 +347,21 @@ describe('Action Router', function() {
     const result = await router.process('open apple music', 'chat');
     assert.equal(result.intent, 'app.open');
     assert.equal(result.entities.appName, 'apple music');
+  });
+
+  it('should route unknown app names to app.open for app discovery', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId) {
+        return { success: true, data: { actionId } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const result = await router.process('open google chat', 'chat');
+    assert.equal(result.intent, 'app.open');
+    assert.equal(result.entities.appName, 'google chat');
   });
 
   it('should route web searches to browser.search', async function() {
@@ -253,6 +392,95 @@ describe('Action Router', function() {
     const result = await router.process('what is the ipl score yesterday', 'chat');
     assert.equal(result.intent, 'browser.search');
     assert.equal(result.entities.query, 'what is the ipl score yesterday');
+  });
+
+  it('should route local time and date questions to system answers', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId) {
+        return { success: true, data: { actionId } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const time = await router.process('what si the time', 'chat');
+    const day = await router.process('what is the day', 'chat');
+
+    assert.equal(time.intent, 'system.time');
+    assert.equal(day.intent, 'system.date');
+  });
+
+  it('should route event questions to background web search', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId) {
+        return { success: true, data: { actionId } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const result = await router.process('when apple wwdc event', 'chat');
+
+    assert.equal(result.intent, 'browser.search');
+    assert.equal(result.entities.query, 'when apple wwdc event');
+    assert.equal(result.entities.openInBrowser, false);
+  });
+
+  it('should keep brand names inside event question search queries', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId) {
+        return { success: true, data: { actionId } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const result = await router.process('when google io event', 'chat');
+
+    assert.equal(result.intent, 'browser.search');
+    assert.equal(result.entities.query, 'when google io event');
+    assert.equal(result.entities.openInBrowser, false);
+  });
+
+  it('should route local desktop file questions to file listing', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId) {
+        return { success: true, data: { actionId } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const result = await router.process('what files are on desktop', 'chat');
+
+    assert.equal(result.intent, 'file.list');
+    assert.equal(result.entities.path, 'desktop');
+  });
+
+  it('should mark search queries for browser opening only when explicit', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId) {
+        return { success: true, data: { actionId } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const result = await router.process('search for apple wwdc in chrome', 'chat');
+
+    assert.equal(result.intent, 'browser.search');
+    assert.equal(result.entities.query, 'apple wwdc');
+    assert.equal(result.entities.openInBrowser, true);
   });
 
   it('should route whatsapp message commands to message.send', async function() {

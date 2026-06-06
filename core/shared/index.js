@@ -9,6 +9,7 @@ class Logger {
 
   _log(level, message, data) {
     if (this.levels[level] > this.levels[this.level]) return;
+    const suffix = this._formatData(data);
     const entry = {
       timestamp: new Date().toISOString(),
       level,
@@ -16,9 +17,29 @@ class Logger {
       data: data || null
     };
     if (level === 'error') {
-      console.error(`[${entry.timestamp}] [${level.toUpperCase()}] ${message}`, data || '');
+      console.error(`[${entry.timestamp}] [${level.toUpperCase()}] ${message}${suffix}`);
     } else {
-      console.log(`[${entry.timestamp}] [${level.toUpperCase()}] ${message}`, data || '');
+      console.log(`[${entry.timestamp}] [${level.toUpperCase()}] ${message}${suffix}`);
+    }
+  }
+
+  _formatData(data) {
+    if (data === undefined || data === null || data === '') {
+      return '';
+    }
+
+    if (typeof data === 'string') {
+      return ` ${data}`;
+    }
+
+    try {
+      const compact = JSON.stringify(data);
+      if (!compact || compact === '{}') {
+        return '';
+      }
+      return ` ${compact.length > 400 ? `${compact.slice(0, 397)}...` : compact}`;
+    } catch (error) {
+      return ` ${String(data)}`;
     }
   }
 

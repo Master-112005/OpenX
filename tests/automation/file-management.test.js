@@ -96,6 +96,36 @@ describe('File Management Automation', function() {
     assert.equal(fs.existsSync(destinationPath), true);
   });
 
+  it('should list files on the desktop from a local question', async function() {
+    fs.writeFileSync(path.join(tempProfile, 'Desktop', 'notes.txt'), 'todo', 'utf8');
+    fs.mkdirSync(path.join(tempProfile, 'Desktop', 'Projects'), { recursive: true });
+
+    const result = await router.process('what files are on desktop', 'chat');
+
+    assert.equal(result.success, true);
+    assert.equal(result.intent, 'file.list');
+    assert.equal(result.entities.path, 'desktop');
+    assert.equal(result.data.count, 2);
+    assert.deepEqual(result.data.entries.map(entry => entry.name), ['Projects', 'notes.txt']);
+  });
+
+  it('should open a matching folder when no app is found', async function() {
+    const folderPath = path.join(tempProfile, 'OpenX');
+    fs.mkdirSync(folderPath, { recursive: true });
+    engine.apps.open = () => ({ success: false, error: 'Could not find app: openx' });
+    engine.folders.open = (folderName) => {
+      assert.equal(folderName, 'openx');
+      return { success: true, data: { path: folderPath, folderName: 'OpenX' } };
+    };
+
+    const result = await router.process('open openx', 'chat');
+
+    assert.equal(result.success, true);
+    assert.equal(result.intent, 'app.open');
+    assert.equal(result.data.launchMethod, 'folder');
+    assert.equal(result.data.folderName, 'OpenX');
+  });
+
   it('should create a folder on the desktop', async function() {
     const result = await router.process('create folder Projects on desktop', 'chat');
     const expectedPath = path.join(tempProfile, 'Desktop', 'Projects');

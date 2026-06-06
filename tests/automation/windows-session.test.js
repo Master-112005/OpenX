@@ -37,4 +37,21 @@ describe('Windows Session Controller', function() {
     assert.equal(result.handle, 100);
     assert.equal(result.processName, 'notepad');
   });
+
+  it('should exclude protected title tokens from window matching', function() {
+    const controller = new WindowsSessionController({});
+    controller.listWindows = () => ([
+      { handle: 100, title: 'New Tab - Google Chrome', processName: 'chrome', id: 1 },
+      { handle: 200, title: 'Playdate - YouTube', processName: 'chrome', id: 2 }
+    ]);
+    controller._getForegroundWindowHandle = () => 200;
+
+    const result = controller.findWindow('chrome', {
+      preferredProcessNames: ['chrome'],
+      excludeTitleTokens: ['youtube']
+    });
+
+    assert.equal(result.handle, 100);
+    assert.equal(result.title, 'New Tab - Google Chrome');
+  });
 });

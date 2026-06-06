@@ -252,6 +252,44 @@ class FileController {
       }
     };
   }
+
+  list(targetPath = 'home') {
+    const dir = resolveDirectory(targetPath || 'home', { mustExist: true });
+    if (!dir) {
+      return { success: false, error: 'Folder not found' };
+    }
+
+    try {
+      const entries = fs.readdirSync(dir, { withFileTypes: true })
+        .filter(entry => !entry.name.startsWith('.'))
+        .map(entry => ({
+          name: entry.name,
+          type: entry.isDirectory() ? 'folder' : 'file',
+          path: path.join(dir, entry.name)
+        }))
+        .sort((left, right) => {
+          if (left.type !== right.type) {
+            return left.type === 'folder' ? -1 : 1;
+          }
+          return left.name.localeCompare(right.name);
+        });
+
+      return {
+        success: true,
+        data: {
+          path: dir,
+          location: targetPath || 'home',
+          entries: entries.slice(0, 30),
+          count: entries.length,
+          fileCount: entries.filter(entry => entry.type === 'file').length,
+          folderCount: entries.filter(entry => entry.type === 'folder').length
+        }
+      };
+    } catch (err) {
+      this.logger.error('Failed to list files', err);
+      return { success: false, error: err.message };
+    }
+  }
 }
 
 module.exports = FileController;

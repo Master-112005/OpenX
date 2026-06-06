@@ -56,8 +56,7 @@ function applyFormalAddress(text, config) {
     return `${base}, ${honorific}${punctuation}`;
   } else {
     const capitalizedHonorific = honorific.charAt(0).toUpperCase() + honorific.slice(1);
-    const lowerFirstBase = base.charAt(0).toLowerCase() + base.slice(1);
-    return `${capitalizedHonorific}, ${lowerFirstBase}${punctuation}`;
+    return `${capitalizedHonorific}, ${base}${punctuation}`;
   }
 }
 

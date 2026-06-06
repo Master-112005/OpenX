@@ -31,8 +31,7 @@
     "uuid": "^9.0.0"
   },
   "optionalDependencies": {
-    "node-windows": "^1.0.0-beta.8",
-    "vosk": "^0.3.45"
+    "node-windows": "^1.0.0-beta.8"
   },
   "devDependencies": {
     "@eslint/js": "^8.57.0",

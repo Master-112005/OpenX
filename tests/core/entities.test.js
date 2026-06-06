@@ -49,6 +49,13 @@ describe('Entity Extractor', function() {
     assert.equal(entities.appName, 'apple music');
   });
 
+  it('should keep unknown app names for Start menu resolution', function() {
+    const extractor = new EntityExtractor({});
+    const intent = { entities: [{ name: 'appName', type: 'string', required: true }] };
+    const entities = extractor.extract(intent, 'open google chat');
+    assert.equal(entities.appName, 'google chat');
+  });
+
   it('should resolve common PowerPoint speech variations', function() {
     const extractor = new EntityExtractor({});
     const intent = { entities: [{ name: 'appName', type: 'string', required: true }] };
@@ -107,6 +114,13 @@ describe('Entity Extractor', function() {
     const entities = extractor.extract(intent, 'create folder Projects on desktop');
     assert.equal(entities.folderName, 'Projects');
     assert.equal(entities.path, 'desktop');
+  });
+
+  it('should extract suffix folder names from open commands', function() {
+    const extractor = new EntityExtractor({});
+    const intent = { entities: [{ name: 'folderName', type: 'string', required: true }] };
+    const entities = extractor.extract(intent, 'open rakesh folder');
+    assert.equal(entities.folderName, 'rakesh');
   });
 
   it('should extract file move source and destination', function() {

@@ -38,7 +38,7 @@ class WindowsSessionController {
         '-NoProfile',
         '-Command',
         [
-          '$windows = Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle } |',
+          'Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle } |',
           'Select-Object @{Name=\'handle\';Expression={[int64]$_.MainWindowHandle}},',
           '@{Name=\'title\';Expression={$_.MainWindowTitle}},',
           '@{Name=\'processName\';Expression={$_.ProcessName}},',
@@ -177,6 +177,9 @@ $wshell.SendKeys('${escapePowerShell(keys)}')
     const preferredTitleTokens = Array.isArray(options.preferredTitleTokens)
       ? options.preferredTitleTokens.map(value => Normalizer.normalizeText(value)).filter(Boolean)
       : [];
+    const excludedTitleTokens = Array.isArray(options.excludeTitleTokens)
+      ? options.excludeTitleTokens.map(value => Normalizer.normalizeText(value)).filter(Boolean)
+      : [];
 
     let best = null;
 
@@ -184,6 +187,10 @@ $wshell.SendKeys('${escapePowerShell(keys)}')
       const title = Normalizer.normalizeText(candidate.title);
       const processName = Normalizer.normalizeText(candidate.processName);
       let score = 0;
+
+      if (excludedTitleTokens.some(token => token && title.includes(token))) {
+        return;
+      }
 
       if (normalizedQuery) {
         const titleSimilarity = title ? Normalizer.similarity(normalizedQuery, title) : 0;

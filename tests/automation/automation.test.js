@@ -14,6 +14,7 @@ describe('Automation Engine', function() {
     assert.ok(actions.includes('app.open'));
     assert.ok(actions.includes('file.create'));
     assert.ok(actions.includes('file.open'));
+    assert.ok(actions.includes('file.list'));
     assert.ok(actions.includes('folder.create'));
     assert.ok(actions.includes('folder.move'));
     assert.ok(actions.includes('browser.open'));
@@ -24,6 +25,8 @@ describe('Automation Engine', function() {
     assert.ok(actions.includes('alarm.set'));
     assert.ok(actions.includes('reminder.set'));
     assert.ok(actions.includes('system.status'));
+    assert.ok(actions.includes('system.time'));
+    assert.ok(actions.includes('system.date'));
     assert.ok(actions.includes('system.shutdown'));
     assert.ok(actions.includes('window.minimize'));
     assert.ok(actions.includes('help'));
@@ -61,6 +64,8 @@ describe('Automation Engine', function() {
     assert.ok(actions.includes('system.battery'));
     assert.ok(actions.includes('system.disk'));
     assert.ok(actions.includes('system.processes'));
+    assert.ok(actions.includes('system.time'));
+    assert.ok(actions.includes('system.date'));
   });
 
   it('should route media actions correctly', function() {

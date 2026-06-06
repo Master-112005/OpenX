@@ -46,6 +46,73 @@ describe('Response Generator', function() {
     assert.ok(result.toLowerCase().includes('unable to find'));
   });
 
+  it('should humanize missing app errors', function() {
+    const gen = new ResponseGenerator();
+    const result = gen.generate('error', 'executionFailed', { error: 'Could not find app: java' });
+    assert.ok(result.toLowerCase().includes('cannot find the java app'));
+  });
+
+  it('should speak local time and date answers', function() {
+    const gen = new ResponseGenerator();
+    const time = gen.generate('success', 'system.time', { result: { data: { time: '2:45 PM' } } });
+    const date = gen.generate('success', 'system.date', { result: { data: { date: 'Saturday, June 6, 2026' } } });
+
+    assert.ok(time.includes('2:45 PM'));
+    assert.ok(date.includes('Saturday, June 6, 2026'));
+  });
+
+  it('should summarize background web search results', function() {
+    const gen = new ResponseGenerator();
+    const result = gen.generate('success', 'browser.search', {
+      entities: { query: 'apple wwdc' },
+      result: {
+        data: {
+          query: 'apple wwdc',
+          results: [{ snippet: 'WWDC starts on Monday.' }]
+        }
+      }
+    });
+
+    assert.ok(result.includes('WWDC starts on Monday'));
+    assert.ok(!result.toLowerCase().includes('in your browser'));
+  });
+
+  it('should prefer extracted search answers over generic snippets', function() {
+    const gen = new ResponseGenerator();
+    const result = gen.generate('success', 'browser.search', {
+      entities: { query: 'who won the ipl 2026' },
+      result: {
+        data: {
+          query: 'who won the ipl 2026',
+          answer: { text: 'Royal Challengers Bengaluru won IPL 2026.' },
+          results: [{ snippet: 'Full list of Indian Premier League winners.' }]
+        }
+      }
+    });
+
+    assert.ok(result.includes('Royal Challengers Bengaluru won IPL 2026'));
+    assert.ok(!result.includes('Full list'));
+  });
+
+  it('should summarize local file listings', function() {
+    const gen = new ResponseGenerator();
+    const result = gen.generate('success', 'file.list', {
+      result: {
+        data: {
+          path: 'C:\\Users\\rakes\\Desktop',
+          count: 2,
+          entries: [
+            { name: 'Projects', type: 'folder' },
+            { name: 'notes.txt', type: 'file' }
+          ]
+        }
+      }
+    });
+
+    assert.ok(result.includes('Projects'));
+    assert.ok(result.includes('notes.txt'));
+  });
+
   it('should use formal addressing by default', function() {
     const gen = new ResponseGenerator();
     const result = gen.generate('info', 'idle');

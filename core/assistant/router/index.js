@@ -40,8 +40,17 @@ class ActionRouter {
       };
     }
 
-    const preparedInput = this.nlp.prepare(parseResult.commandText);
-    const rawCommandText = parseResult.rawCommandText || parseResult.commandText;
+    const initialPreparedInput = this.nlp.prepare(parseResult.commandText);
+    const useNoisyRepair = this._shouldUseNoisyRepair(initialPreparedInput, parseResult.commandText, source);
+    const effectiveCommandText = useNoisyRepair
+      ? String(initialPreparedInput.repairedCommandText || '').trim()
+      : String(parseResult.commandText || '').trim();
+    const preparedInput = effectiveCommandText === parseResult.commandText
+      ? initialPreparedInput
+      : this.nlp.prepare(effectiveCommandText);
+    const rawCommandText = useNoisyRepair
+      ? effectiveCommandText
+      : (parseResult.rawCommandText || parseResult.commandText);
     const intentResult = (
       this._resolveExplicitMediaControlIntent(rawCommandText, preparedInput) ||
       this._resolveMediaUnderstandingIntent(rawCommandText, source) ||
@@ -52,6 +61,8 @@ class ActionRouter {
       this._resolveExplicitCommunicationIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitOpenIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitAppOpenIntent(rawCommandText, preparedInput) ||
+      this._resolveLocalInfoIntent(rawCommandText, preparedInput) ||
+      this._resolveLocalFileListIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitSearchIntent(rawCommandText, preparedInput) ||
       this._resolveGeneralQuestionSearchIntent(rawCommandText, preparedInput) ||
       this._matchIntent(preparedInput)
@@ -225,6 +236,29 @@ class ActionRouter {
       intent: bestMatch.intent,
       confidence: bestMatch.confidence
     };
+  }
+
+  _shouldUseNoisyRepair(preparedInput, rawText, source) {
+    if (/^\s*(?:what|who|when|where|why|how|which)\b/i.test(String(rawText || ''))) {
+      return false;
+    }
+
+    const repaired = String(preparedInput?.repairedCommandText || '').trim();
+    const corrected = String(preparedInput?.correctedText || rawText || '').trim();
+    if (!repaired || repaired === corrected) {
+      return false;
+    }
+
+    if (/\.[A-Za-z0-9]{1,10}\b/.test(String(rawText || ''))) {
+      return false;
+    }
+
+    if (Number(preparedInput?.actionTokenCount || 0) > 1) {
+      return false;
+    }
+
+    return Number(preparedInput?.noiseTokenCount || 0) > 0
+      || Number(preparedInput?.repairContextTokenCount || 0) > 0;
   }
 
   /**
@@ -544,14 +578,66 @@ class ActionRouter {
     }
 
     if (/^(search for|search the web for|search web|google|look up|find on web)\b/i.test(lower)) {
-      return browserSearchIntent ? { intent: browserSearchIntent, confidence: 1 } : null;
+      return browserSearchIntent
+        ? { intent: browserSearchIntent, confidence: 1, entities: this._buildSearchEntities(rawText, preparedInput) }
+        : null;
+    }
+
+    return null;
+  }
+
+  _resolveLocalInfoIntent(rawText, preparedInput) {
+    const input = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
+    const systemTimeIntent = this.intentRegistry.get('system.time');
+    const systemDateIntent = this.intentRegistry.get('system.date');
+
+    if (/\b(?:time)\b/.test(input) && /^(?:what|when|tell|current|time)\b/.test(input)) {
+      return systemTimeIntent ? { intent: systemTimeIntent, confidence: 1, entities: {} } : null;
+    }
+
+    if (/\b(?:date|day|today)\b/.test(input) && /^(?:what|which|tell|current|date|day)\b/.test(input)) {
+      return systemDateIntent ? { intent: systemDateIntent, confidence: 1, entities: {} } : null;
+    }
+
+    return null;
+  }
+
+  _resolveLocalFileListIntent(rawText, preparedInput) {
+    const input = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
+    if (!/\b(?:file|files|folder|folders|items|contents)\b/.test(input)) {
+      return null;
+    }
+
+    const listRequest = /^(?:what|which|show|list|tell)\b/.test(input) &&
+      /\b(?:are|is|in|on|inside|under|from|files|folders|items|contents)\b/.test(input);
+    if (!listRequest) {
+      return null;
+    }
+
+    const localLocation = this._extractLocalListLocation(input);
+    if (!localLocation) {
+      return null;
+    }
+
+    const fileListIntent = this.intentRegistry.get('file.list');
+    return fileListIntent
+      ? { intent: fileListIntent, confidence: 1, entities: { path: localLocation } }
+      : null;
+  }
+
+  _extractLocalListLocation(input) {
+    const locations = ['desktop', 'downloads', 'documents', 'pictures', 'music', 'videos', 'home'];
+    for (const location of locations) {
+      if (new RegExp(`\\b${location}\\b`, 'i').test(input)) {
+        return location;
+      }
     }
 
     return null;
   }
 
   _resolveGeneralQuestionSearchIntent(rawText, preparedInput) {
-    const input = String(rawText || '').trim().toLowerCase();
+    const input = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
     if (!/^(what|who|when|where|why|how)\b/.test(input)) {
       return null;
     }
@@ -561,14 +647,28 @@ class ActionRouter {
       return null;
     }
 
-    const localVocabulary = new Set(this.nlp.vocabulary || []);
-    const localOverlap = intentTokens.filter(token => localVocabulary.has(token)).length;
-    if (localOverlap > 0) {
-      return null;
-    }
-
     const browserSearchIntent = this.intentRegistry.get('browser.search');
-    return browserSearchIntent ? { intent: browserSearchIntent, confidence: 0.92 } : null;
+    return browserSearchIntent
+      ? { intent: browserSearchIntent, confidence: 0.92, entities: this._buildSearchEntities(rawText, preparedInput) }
+      : null;
+  }
+
+  _buildSearchEntities(rawText, preparedInput) {
+    const corrected = String(preparedInput?.correctedText || rawText || '').trim();
+    const raw = String(rawText || corrected || '').trim();
+    const isQuestion = /^(?:what|who|when|where|why|how)\b/i.test(corrected || raw);
+    let query = isQuestion
+      ? (raw || corrected)
+      : (this.entityExtractor._extractQuery(corrected.toLowerCase(), raw) || raw || corrected);
+    const openInBrowser = /\b(?:open|show|search|look\s+up|google).*\b(?:in|on)\s+(?:chrome|browser)\b/i.test(raw)
+      || /\b(?:open|show)\s+(?:it|results?)\s+(?:in|on)\s+(?:chrome|browser)\b/i.test(raw);
+
+    query = String(query || '').replace(/\s+(?:in|on)\s+(?:chrome|browser)\s*$/i, '').trim();
+
+    return {
+      query,
+      openInBrowser
+    };
   }
 
   _suggestAlternatives(preparedInput) {
@@ -598,6 +698,7 @@ class ActionRouter {
 
     const tokens = normalizedText.split(/\s+/).filter(Boolean);
     const candidates = new Set();
+    const firstToken = tokens[0] || '';
 
     tokens.forEach((token, index) => {
       candidates.add(token);
@@ -611,12 +712,11 @@ class ActionRouter {
         return true;
       }
 
-      const match = Normalizer.findClosestOption(candidate, verbs, {
-        minSimilarity: 0.58,
-        maxDistance: candidate.length >= 5 ? 2 : 1
-      });
-      return Boolean(match);
-    });
+      return false;
+    }) || Boolean(Normalizer.findClosestOption(firstToken, verbs, {
+      minSimilarity: 0.58,
+      maxDistance: firstToken.length >= 5 ? 2 : 1
+    }));
   }
 
   _checkRequiredEntities(intent, entities) {

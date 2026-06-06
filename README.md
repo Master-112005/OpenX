@@ -2,7 +2,7 @@
 
 ## Overview
 
-OpenX is an offline-first intelligent Windows desktop assistant built with Node.js, Electron, and Python. It provides deterministic voice-controlled automation, local AI processing, system-level automation, and modular plugin support without relying on cloud services.
+OpenX is an offline-first intelligent Windows desktop assistant built with Node.js, Electron, and Windows-native services. It provides deterministic voice-controlled automation, local AI-style command processing, system-level automation, and modular plugin support without relying on cloud services.
 
 The platform is designed around a layered architecture with intent routing, entity extraction, permission validation, event-driven communication, and Windows-native automation.
 
@@ -46,7 +46,6 @@ The platform is designed around a layered architecture with intent routing, enti
 
 * Node.js 18+
 * Electron ^28.0.0
-* Python 3.8+
 * PowerShell
 * Win32 API
 * WMI
@@ -70,14 +69,7 @@ The platform is designed around a layered architecture with intent routing, enti
 
 | Package      | Purpose                    |
 | ------------ | -------------------------- |
-| vosk         | Offline speech recognition |
 | node-windows | Windows service management |
-
-## Python Dependencies
-
-* faster-whisper
-* sounddevice
-* webrtcvad
 
 ---
 
@@ -562,14 +554,22 @@ User: "Jarvis, open calculator"
 
 OpenX filters speech at two layers before any automation can run:
 
-* `core/voice/engine/audio_engine.py` rejects weak audio, short utterances, low-confidence Whisper output, high no-speech probability, and repetitive compression artifacts.
-* `core/voice/engine/audio_engine.py` and `core/voice/index.js` use command-aware recovery, so low-confidence but actionable phrases such as "open chrome" or "open youtube" still reach NLP/NLU routing.
-* `core/voice/index.js` performs a second transcript reliability pass for non-command low confidence, known background-noise hallucination phrases, and repeated token loops.
+* `core/voice/stt/windows-sapi.js` performs Node-owned Windows SAPI recognition without a Python worker.
+* SAPI recognition is launched through a temporary PowerShell script file instead of a large `-Command` argument, avoiding Windows `spawn ENAMETOOLONG` crashes when the command grammar grows.
+* Electron registers `voice.activationShortcut` plus `voice.activationFallbackShortcuts`, so `Alt+Space`, `Control+Alt+Space`, and `Control+Space` can start listening when Windows or another app swallows one shortcut.
+* The tray menu includes `Start Listening`, and the console now prints activation and listening events so it is clear whether the shortcut fired, the assistant was busy, or SAPI started a recognition session.
+* Windows SAPI is loaded with an OpenX command grammar for common commands, targets, aliases, and polite variants, so phrases like "open chrome", "open youtube", "open you tube", and "please open youtube" are favored over unrelated dictation guesses.
+* Recognition alternates are inspected; if the primary transcript is filler noise but an alternate is actionable, the actionable alternate is routed.
+* `core/voice/index.js` uses command-aware recovery, so low-confidence but actionable phrases such as "open chrome" or "open youtube" still reach NLP/NLU routing.
+* `core/assistant/nlp/index.js` repairs noisy STT commands by finding the strongest action and known target inside the transcript; examples such as "ope chrome", "sglkn open lsg chrome", and "sglkn increse lsg volum" are reduced to executable commands without changing normal multi-action requests.
+* The NLU layer extracts command frames from general speech, so "I was just talking but please open Chrome now", "I was saying search for Java tutorial", "background speech set timer for 5 minutes", and "I was saying stop music" route to the intended actions, while pure conversation such as "I was just talking about Chrome today" is not executed.
+* `core/assistant/index.js` resolves short follow-ups such as "open it" from recent command context before routing.
+* `core/voice/index.js` performs a transcript reliability pass for one-word non-actions, short filler phrases such as "the know of" or "the tool", non-command low confidence, known background-noise hallucination phrases, and repeated token loops.
 * Rejected speech emits an ignored-speech event and returns to the voice state machine without publishing `speechResult`.
 * In conversation mode, repeated ignored speech is capped by `voice.conversationIgnoredSpeechLimit` so background noise cannot keep re-arming the microphone forever.
 * Voice transcripts still enter the same deterministic parser, NLP processor, intent matcher, entity extractor, and permission validator as chat input.
 
-Important voice tuning options live in `config/index.js`: `voice.conversationIgnoredSpeechLimit`, plus STT options under `voice.stt` such as `minRms`, `minConfidence`, `commandRecoveryMinConfidence`, `confirmationMinConfidence`, `maxNoSpeechProbability`, `maxCompressionRatio`, `minUtteranceMs`, `startSpeechTimeoutMs`, and `maxDurationMs`.
+Important voice tuning options live in `config/index.js`: `voice.activationShortcut`, `voice.activationFallbackShortcuts`, `voice.conversationIgnoredSpeechLimit`, plus STT options under `voice.stt` such as `minConfidence`, `commandRecoveryMinConfidence`, `confirmationMinConfidence`, `startSpeechTimeoutMs`, and `maxDurationMs`.
 
 TTS uses Windows SAPI with configurable `voice.tts.voiceName`, audible volume clamping, a slower default speaking rate, and SSML pauses when `voice.tts.naturalize` is enabled.
 

@@ -217,4 +217,82 @@ describe('Assistant Confirmation Flow', function() {
     assert.equal(result.success, true);
     assert.equal(routedInput, 'open chrome');
   });
+
+  it('should route the repaired command text from noisy voice transcripts', async function() {
+    let routedInput = '';
+    const router = {
+      nlp: {
+        prepare: () => ({
+          correctedText: 'sglkn open lsg chrome',
+          commandText: 'open chrome',
+          repairedCommandText: 'open chrome',
+          noiseTokenCount: 2,
+          actionTokenCount: 1
+        })
+      },
+      process: async (input) => {
+        routedInput = input;
+        return {
+          commandId: 'cmd-5b',
+          success: true,
+          intent: 'app.open',
+          entities: { appName: 'chrome' },
+          response: 'Opened chrome.'
+        };
+      }
+    };
+
+    const assistant = new Assistant({}, {
+      router,
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    const result = await assistant.processVoiceInput('sglkn open lsg chrome');
+
+    assert.equal(result.success, true);
+    assert.equal(routedInput, 'open chrome');
+  });
+
+  it('should resolve voice pronouns from recent command context before routing', async function() {
+    const routedInputs = [];
+    const router = {
+      nlp: {
+        prepare: (input) => ({
+          correctedText: input
+        })
+      },
+      process: async (input) => {
+        routedInputs.push(input);
+        if (input === 'close youtube') {
+          return {
+            commandId: 'cmd-6a',
+            success: false,
+            intent: 'app.close',
+            entities: { appName: 'youtube' },
+            response: 'Could not close youtube.'
+          };
+        }
+        return {
+          commandId: 'cmd-6b',
+          success: true,
+          intent: 'app.open',
+          entities: { appName: 'youtube' },
+          response: 'Opened youtube.'
+        };
+      }
+    };
+
+    const assistant = new Assistant({}, {
+      router,
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    await assistant.processVoiceInput('close youtube');
+    const result = await assistant.processVoiceInput('open it');
+
+    assert.equal(result.success, true);
+    assert.deepEqual(routedInputs, ['close youtube', 'open youtube']);
+  });
 });

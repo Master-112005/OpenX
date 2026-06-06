@@ -54,6 +54,10 @@ function humanizeError(error) {
   }
 
   const lowered = message.toLowerCase();
+  if (lowered.includes('could not find app')) {
+    const appName = message.split(':').slice(1).join(':').trim();
+    return appName ? `I cannot find the ${appName} app` : 'I cannot find that app';
+  }
   if (lowered.includes('file not found')) return 'Unable to find that file';
   if (lowered.includes('folder not found')) return 'Unable to find that folder';
   if (lowered.includes('source not found')) return 'Unable to find the source item';
@@ -248,6 +252,20 @@ const RESPONSE_BUILDERS = {
         ? `I couldn't find any matching files.`
         : `I've found ${count} matching ${count === 1 ? 'file' : 'files'}.`;
     },
+    'file.list': context => {
+      const entries = valueFromContext(context, 'entries', []);
+      const count = valueFromContext(context, 'count', 0);
+      const location = pathLabel(valueFromContext(context, 'path')) || valueFromContext(context, 'location', 'that folder');
+      if (!Array.isArray(entries) || entries.length === 0) {
+        return `I did not find any visible files or folders in ${location}.`;
+      }
+
+      const names = entries.slice(0, 5).map(entry => entry.name).join(', ');
+      const remaining = Math.max(0, count - Math.min(entries.length, 5));
+      return remaining > 0
+        ? `${location} has ${count} items. The first ones are ${names}, and ${remaining} more.`
+        : `${location} has ${count} ${count === 1 ? 'item' : 'items'}: ${names}.`;
+    },
     'folder.create': context => {
       const folderPath = valueFromContext(context, 'path');
       const folderName = valueFromContext(context, 'folderName', basenameOrValue(folderPath));
@@ -292,11 +310,33 @@ const RESPONSE_BUILDERS = {
     },
     'browser.search': context => {
       const query = valueFromContext(context, 'query');
+      const answer = valueFromContext(context, 'answer', null);
+      if (answer?.text) {
+        return answer.text;
+      }
+
+      const results = valueFromContext(context, 'results', []);
+      if (Array.isArray(results) && results.length > 0) {
+        const top = results[0];
+        const snippet = top.snippet || top.title || '';
+        return snippet
+          ? `I found this for "${query}": ${snippet}`
+          : `I found results for "${query}".`;
+      }
+
       return chooseVariant(`browser.search:${query}`, [
-        `Searching the web for "${query}".`,
-        `I've searched for "${query}" in your browser.`,
-        `Looking that up for you: "${query}".`
+        `I searched the web for "${query}".`,
+        `I looked that up in the background: "${query}".`,
+        `I checked the web for "${query}".`
       ]);
+    },
+    'system.time': context => {
+      const time = valueFromContext(context, 'time');
+      return time ? `The time is ${time}.` : 'I could not read the current time.';
+    },
+    'system.date': context => {
+      const date = valueFromContext(context, 'date');
+      return date ? `Today is ${date}.` : 'I could not read the current date.';
     },
     'media.play': context => {
       const query = valueFromContext(context, 'query', valueFromContext(context, 'mediaQuery', ''));

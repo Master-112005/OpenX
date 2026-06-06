@@ -327,12 +327,71 @@ class Assistant extends EventEmitter {
 
     try {
       const prepared = this.router?.nlp?.prepare?.(raw);
-      const candidate = String(prepared?.correctedText || prepared?.normalizedText || '').trim();
-      return candidate || raw;
+      const useNoisyRepair = prepared?.repairedCommandText
+        && (
+          Number(prepared?.noiseTokenCount || 0) > 0
+          || Number(prepared?.repairContextTokenCount || 0) > 0
+        )
+        && Number(prepared?.actionTokenCount || 0) <= 1;
+      const candidate = String(
+        (useNoisyRepair ? prepared.repairedCommandText : '')
+        || prepared?.correctedText
+        || prepared?.normalizedText
+        || ''
+      ).trim();
+      return this._resolveVoiceReference(candidate || raw);
     } catch (error) {
       this.logger.warn('Voice NLP preparation failed', error.message);
-      return raw;
+      return this._resolveVoiceReference(raw);
     }
+  }
+
+  _resolveVoiceReference(input) {
+    const text = String(input || '').trim();
+    if (!text) {
+      return text;
+    }
+
+    const normalized = Normalizer.normalizeText(text);
+    if (!/\b(?:it|that|same)\b/.test(normalized)) {
+      return text;
+    }
+
+    const target = this._getLastReferenceTarget();
+    if (!target) {
+      return text;
+    }
+
+    return normalized
+      .replace(/\b(?:it|that|same)\b/g, target)
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  _getLastReferenceTarget() {
+    const history = this.context.getHistory(8).slice().reverse();
+    const keys = [
+      'appName',
+      'platform',
+      'windowName',
+      'folderName',
+      'filename',
+      'fileName',
+      'query',
+      'contactName'
+    ];
+
+    for (const entry of history) {
+      const entities = entry?.entities || {};
+      for (const key of keys) {
+        const value = String(entities[key] || '').trim();
+        if (value) {
+          return value.toLowerCase();
+        }
+      }
+    }
+
+    return '';
   }
 }
 
