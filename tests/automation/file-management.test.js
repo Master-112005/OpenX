@@ -154,6 +154,15 @@ describe('File Management Automation', function() {
     assert.equal(fs.existsSync(targetPath), false);
   });
 
+  it('should fuzzy match spoken pdf names across common folders without an explicit location', function() {
+    const targetPath = path.join(tempProfile, 'Desktop', 'FarmCast Complete Static Analysis.pdf');
+    fs.writeFileSync(targetPath, 'pdf', 'utf8');
+
+    const resolvedPath = engine.files._resolveFilePath('farmcat.pdf');
+
+    assert.equal(resolvedPath, targetPath);
+  });
+
   it('should open a matching folder when no app is found', async function() {
     const folderPath = path.join(tempProfile, 'OpenX');
     fs.mkdirSync(folderPath, { recursive: true });

@@ -393,6 +393,21 @@ describe('Action Router', function() {
     assert.equal(result.entities.filename, 'practice.java');
   });
 
+  it('should route spoken extension file open commands to file.open', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId) {
+        return { success: true, data: { actionId } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const result = await router.process('open farmcat pdf', 'chat');
+    assert.equal(result.intent, 'file.open');
+    assert.equal(result.entities.filename, 'farmcat.pdf');
+  });
+
   it('should route special folders in open commands to folder.open', async function() {
     const config = {
       permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
@@ -498,6 +513,38 @@ describe('Action Router', function() {
     assert.deepEqual(executed.map(step => step.actionId), ['mode.start', 'media.play', 'volume.set']);
     assert.equal(executed[1].entities.mediaQuery, 'liked songs');
     assert.equal(result.data.commandSteps.length, 2);
+  });
+
+  it('should execute app-specific mode instructions after starting a saved mode', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const executed = [];
+    const stubEngine = {
+      execute(actionId, entities) {
+        executed.push({ actionId, entities });
+        if (actionId === 'mode.start') {
+          return {
+            success: true,
+            data: {
+              modeName: entities.modeName,
+              opened: ['youtube', 'chrome'],
+              failed: [],
+              commands: ['set volume to 100', 'play liked songs', 'search for chatgpt in chrome']
+            }
+          };
+        }
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const result = await router.process('start development mode', 'chat');
+
+    assert.equal(result.intent, 'mode.start');
+    assert.deepEqual(executed.map(step => step.actionId), ['mode.start', 'volume.set', 'media.play', 'browser.search']);
+    assert.equal(executed[3].entities.query, 'chatgpt');
+    assert.equal(executed[3].entities.openInBrowser, true);
+    assert.equal(result.data.commandSteps.length, 3);
   });
 
   it('should route web searches to browser.search', async function() {
@@ -693,6 +740,24 @@ describe('Action Router', function() {
 
     assert.equal(result.intent, 'browser.search');
     assert.equal(result.entities.query, 'apple wwdc');
+    assert.equal(result.entities.openInBrowser, true);
+  });
+
+  it('should route open target in chrome to browser.search instead of app.open', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId) {
+        return { success: true, data: { actionId } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const result = await router.process('open chatgpt in chrome', 'chat');
+
+    assert.equal(result.intent, 'browser.search');
+    assert.equal(result.entities.query, 'chatgpt');
     assert.equal(result.entities.openInBrowser, true);
   });
 

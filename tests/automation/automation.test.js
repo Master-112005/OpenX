@@ -53,7 +53,14 @@ describe('Automation Engine', function() {
   it('should start configured app modes', async function() {
     const engine = new AutomationEngine({
       modes: [
-        { name: 'gaming', apps: ['chrome', 'discord'], commands: ['set volume to 45'] }
+        {
+          name: 'gaming',
+          apps: [
+            { name: 'chrome', instructions: ['search for chatgpt'] },
+            { name: 'discord', instructions: [] }
+          ],
+          commands: ['set volume to 45']
+        }
       ]
     });
     const opened = [];
@@ -67,7 +74,37 @@ describe('Automation Engine', function() {
     assert.equal(result.success, true);
     assert.deepEqual(opened, ['chrome', 'discord']);
     assert.deepEqual(result.data.opened, ['chrome', 'discord']);
-    assert.deepEqual(result.data.commands, ['set volume to 45']);
+    assert.deepEqual(result.data.commands, ['search for chatgpt in chrome', 'set volume to 45']);
+  });
+
+  it('should run separate app instructions for a saved mode', async function() {
+    const engine = new AutomationEngine({
+      modes: [
+        {
+          name: 'development',
+          apps: [
+            { name: 'youtube', instructions: ['set volume to 100', 'play liked songs'] },
+            { name: 'chrome', instructions: ['open chatgpt in chrome'] },
+            { name: 'terminal', instructions: [] }
+          ]
+        }
+      ]
+    });
+    const opened = [];
+    engine.apps.open = async (appName) => {
+      opened.push(appName);
+      return { success: true, data: { appName } };
+    };
+
+    const result = await engine.execute('mode.start', { modeName: 'development' });
+
+    assert.equal(result.success, true);
+    assert.deepEqual(opened, ['youtube', 'chrome', 'terminal']);
+    assert.deepEqual(result.data.commands, [
+      'set volume to 100',
+      'play liked songs',
+      'search for chatgpt in chrome'
+    ]);
   });
 
   it('should allow command-only modes', async function() {

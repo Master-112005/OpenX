@@ -656,14 +656,48 @@
       background: rgba(255, 255, 255, 0.03);
       border: 1px solid rgba(255, 255, 255, 0.06);
       border-radius: 12px;
-      display: grid;
+      display: flex;
+      flex-direction: column;
       gap: 10px;
-      grid-template-columns: minmax(120px, 0.8fr) minmax(180px, 1.4fr);
       padding: 10px;
     }
 
-    .mode-command-wrap {
-      grid-column: 1 / -1;
+    .mode-row-header,
+    .mode-app-header {
+      align-items: center;
+      display: flex;
+      gap: 8px;
+      justify-content: space-between;
+    }
+
+    .mode-row-title {
+      color: rgba(255, 255, 255, 0.82);
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .mode-app-list {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    .mode-app-row {
+      background: rgba(255, 255, 255, 0.035);
+      border: 1px solid rgba(255, 255, 255, 0.055);
+      border-radius: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      padding: 9px;
+    }
+
+    .mode-inline-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
     }
 
     .contact-stage {
@@ -1054,80 +1088,17 @@
           </section>
 
           <section class="settings-section" data-settings-section="modes" id="settings-section-modes">
-            <div class="section-heading">App Modes</div>
-            <div class="section-note">Name each mode, enter the apps it should open, and add optional commands to run after launch. Use commands like <code>start gaming mode</code> or <code>open dev mode</code>.</div>
-            <div class="mode-grid" id="mode-grid">
-              <div class="mode-row">
-                <label class="field-wrap">
-                  <span class="field-label">Mode 1 Name</span>
-                  <input class="field mode-name-field" data-mode-index="0" type="text" placeholder="gaming">
-                </label>
-                <label class="field-wrap">
-                  <span class="field-label">Apps</span>
-                  <input class="field mode-apps-field" data-mode-index="0" type="text" placeholder="chrome, discord">
-                </label>
-                <label class="field-wrap mode-command-wrap">
-                  <span class="field-label">Commands</span>
-                  <textarea class="field field-textarea mode-commands-field" data-mode-index="0" placeholder="play liked songs&#10;set volume to 45"></textarea>
-                </label>
+            <div class="contact-stage-header">
+              <div>
+                <div class="section-heading">App Modes</div>
+                <div class="section-note">Add a mode, choose up to 5 apps, and set separate instructions for each app. Use commands like <code>start development mode</code>.</div>
               </div>
-              <div class="mode-row">
-                <label class="field-wrap">
-                  <span class="field-label">Mode 2 Name</span>
-                  <input class="field mode-name-field" data-mode-index="1" type="text" placeholder="dev">
-                </label>
-                <label class="field-wrap">
-                  <span class="field-label">Apps</span>
-                  <input class="field mode-apps-field" data-mode-index="1" type="text" placeholder="code, chrome, terminal">
-                </label>
-                <label class="field-wrap mode-command-wrap">
-                  <span class="field-label">Commands</span>
-                  <textarea class="field field-textarea mode-commands-field" data-mode-index="1" placeholder="open openx folder"></textarea>
-                </label>
-              </div>
-              <div class="mode-row">
-                <label class="field-wrap">
-                  <span class="field-label">Mode 3 Name</span>
-                  <input class="field mode-name-field" data-mode-index="2" type="text">
-                </label>
-                <label class="field-wrap">
-                  <span class="field-label">Apps</span>
-                  <input class="field mode-apps-field" data-mode-index="2" type="text">
-                </label>
-                <label class="field-wrap mode-command-wrap">
-                  <span class="field-label">Commands</span>
-                  <textarea class="field field-textarea mode-commands-field" data-mode-index="2"></textarea>
-                </label>
-              </div>
-              <div class="mode-row">
-                <label class="field-wrap">
-                  <span class="field-label">Mode 4 Name</span>
-                  <input class="field mode-name-field" data-mode-index="3" type="text">
-                </label>
-                <label class="field-wrap">
-                  <span class="field-label">Apps</span>
-                  <input class="field mode-apps-field" data-mode-index="3" type="text">
-                </label>
-                <label class="field-wrap mode-command-wrap">
-                  <span class="field-label">Commands</span>
-                  <textarea class="field field-textarea mode-commands-field" data-mode-index="3"></textarea>
-                </label>
-              </div>
-              <div class="mode-row">
-                <label class="field-wrap">
-                  <span class="field-label">Mode 5 Name</span>
-                  <input class="field mode-name-field" data-mode-index="4" type="text">
-                </label>
-                <label class="field-wrap">
-                  <span class="field-label">Apps</span>
-                  <input class="field mode-apps-field" data-mode-index="4" type="text">
-                </label>
-                <label class="field-wrap mode-command-wrap">
-                  <span class="field-label">Commands</span>
-                  <textarea class="field field-textarea mode-commands-field" data-mode-index="4"></textarea>
-                </label>
+              <div class="contact-stage-tools">
+                <span class="contact-usage" id="mode-usage">0 / 5 saved</span>
+                <button class="contact-add-btn" id="mode-add-btn" type="button" title="Add mode">+</button>
               </div>
             </div>
+            <div class="mode-grid" id="mode-grid"></div>
           </section>
 
           <section class="settings-section" data-settings-section="contacts" id="settings-section-contacts">
@@ -1235,10 +1206,15 @@
     const contactEditorTitleEl = document.getElementById('contact-editor-title');
     const contactDeleteBtn = document.getElementById('contact-delete-btn');
     const settingsStatusEl = document.getElementById('settings-status');
+    const modeGridEl = document.getElementById('mode-grid');
+    const modeUsageEl = document.getElementById('mode-usage');
+    const modeAddBtn = document.getElementById('mode-add-btn');
 
     const CONFIRM_WORDS = ['proceed', 'yes', 'confirm', 'do it', 'go ahead', 'yeah', 'yep', 'sure', 'continue', 'okay', 'ok'];
     const CANCEL_WORDS = ['no', 'cancel', 'stop', 'never mind', 'abort', 'dont'];
     const CONTACT_LIMIT = 10;
+    const MODE_LIMIT = 5;
+    const MODE_APP_LIMIT = 5;
 
     let isProcessing = false;
     let pendingConfirmation = null;
@@ -1248,6 +1224,7 @@
     let activeSettingsSection = null;
     let isContactEditorOpen = false;
     let hasRenderedWelcome = false;
+    let modeDrafts = [];
 
     const fieldIds = {
       assistantDisplayName: 'assistant-display-name',
@@ -1273,18 +1250,6 @@
       contactCallPlatform: 'contact-call-platform',
       contactWhatsappUri: 'contact-whatsapp-uri'
     };
-
-    function getModeNameFields() {
-      return Array.from(document.querySelectorAll('.mode-name-field'));
-    }
-
-    function getModeAppsFields() {
-      return Array.from(document.querySelectorAll('.mode-apps-field'));
-    }
-
-    function getModeCommandFields() {
-      return Array.from(document.querySelectorAll('.mode-commands-field'));
-    }
 
     function getAssistantDisplayName() {
       return settingsSnapshot?.settings?.assistant?.displayName || 'JARVIS';
@@ -1659,52 +1624,206 @@
       renderContacts();
     }
 
+    function splitInstructionDraft(value) {
+      return String(value || '')
+        .split(/[\n,]+/)
+        .map(item => item.trim())
+        .filter(Boolean);
+    }
+
+    function normalizeModeDrafts(modes) {
+      return (Array.isArray(modes) ? modes : []).slice(0, MODE_LIMIT).map((mode, modeIndex) => {
+        const apps = (Array.isArray(mode?.apps) ? mode.apps : [])
+          .slice(0, MODE_APP_LIMIT)
+          .map(app => {
+            if (app && typeof app === 'object' && !Array.isArray(app)) {
+              return {
+                name: String(app.name || app.appName || '').trim(),
+                instructions: Array.isArray(app.instructions)
+                  ? app.instructions.join('\n')
+                  : String(app.instructions || app.commands || '').trim()
+              };
+            }
+
+            return {
+              name: String(app || '').trim(),
+              instructions: ''
+            };
+          })
+          .filter(app => app.name || app.instructions);
+
+        const legacyCommands = Array.isArray(mode?.commands) ? mode.commands.join('\n') : String(mode?.commands || '').trim();
+        if (legacyCommands && apps.length > 0) {
+          apps[0].instructions = [apps[0].instructions, legacyCommands].filter(Boolean).join('\n');
+        }
+
+        return {
+          id: String(mode?.id || `mode-${modeIndex + 1}`),
+          name: String(mode?.name || '').trim(),
+          apps,
+          commands: legacyCommands && apps.length === 0 ? legacyCommands : ''
+        };
+      });
+    }
+
     function populateModeFields(modes) {
-      const names = getModeNameFields();
-      const apps = getModeAppsFields();
-      const commands = getModeCommandFields();
-      for (let index = 0; index < 5; index += 1) {
-        const mode = Array.isArray(modes) ? modes[index] : null;
-        if (names[index]) {
-          names[index].value = mode?.name || '';
-        }
-        if (apps[index]) {
-          apps[index].value = Array.isArray(mode?.apps) ? mode.apps.join(', ') : '';
-        }
-        if (commands[index]) {
-          commands[index].value = Array.isArray(mode?.commands) ? mode.commands.join('\n') : '';
-        }
+      modeDrafts = normalizeModeDrafts(modes);
+      renderModeEditor();
+    }
+
+    function createEmptyMode() {
+      return {
+        id: `mode-${Date.now()}`,
+        name: '',
+        apps: [{ name: '', instructions: '' }],
+        commands: ''
+      };
+    }
+
+    function renderModeEditor() {
+      modeGridEl.innerHTML = '';
+      modeUsageEl.textContent = `${modeDrafts.length} / ${MODE_LIMIT} saved`;
+      modeAddBtn.disabled = modeDrafts.length >= MODE_LIMIT;
+
+      if (modeDrafts.length === 0) {
+        const empty = document.createElement('div');
+        empty.className = 'section-note';
+        empty.textContent = 'No modes saved yet. Press + to add one.';
+        modeGridEl.appendChild(empty);
+        return;
       }
+
+      modeDrafts.forEach((mode, modeIndex) => {
+        const row = document.createElement('div');
+        row.className = 'mode-row';
+
+        const header = document.createElement('div');
+        header.className = 'mode-row-header';
+        const title = document.createElement('div');
+        title.className = 'mode-row-title';
+        title.textContent = `Mode ${modeIndex + 1}`;
+        const deleteModeBtn = document.createElement('button');
+        deleteModeBtn.className = 'danger-btn';
+        deleteModeBtn.type = 'button';
+        deleteModeBtn.textContent = 'Delete';
+        deleteModeBtn.addEventListener('click', () => {
+          modeDrafts.splice(modeIndex, 1);
+          renderModeEditor();
+        });
+        header.appendChild(title);
+        header.appendChild(deleteModeBtn);
+        row.appendChild(header);
+
+        const nameLabel = document.createElement('label');
+        nameLabel.className = 'field-wrap';
+        const nameText = document.createElement('span');
+        nameText.className = 'field-label';
+        nameText.textContent = 'Mode Name';
+        const nameInput = document.createElement('input');
+        nameInput.className = 'field';
+        nameInput.type = 'text';
+        nameInput.placeholder = 'development';
+        nameInput.value = mode.name || '';
+        nameInput.addEventListener('input', () => {
+          modeDrafts[modeIndex].name = nameInput.value;
+        });
+        nameLabel.appendChild(nameText);
+        nameLabel.appendChild(nameInput);
+        row.appendChild(nameLabel);
+
+        const appHeader = document.createElement('div');
+        appHeader.className = 'mode-app-header';
+        const appTitle = document.createElement('div');
+        appTitle.className = 'mode-row-title';
+        appTitle.textContent = `Apps ${mode.apps.length} / ${MODE_APP_LIMIT}`;
+        const addAppBtn = document.createElement('button');
+        addAppBtn.className = 'secondary-btn';
+        addAppBtn.type = 'button';
+        addAppBtn.textContent = '+ App';
+        addAppBtn.disabled = mode.apps.length >= MODE_APP_LIMIT;
+        addAppBtn.addEventListener('click', () => {
+          modeDrafts[modeIndex].apps.push({ name: '', instructions: '' });
+          renderModeEditor();
+        });
+        appHeader.appendChild(appTitle);
+        appHeader.appendChild(addAppBtn);
+        row.appendChild(appHeader);
+
+        const appList = document.createElement('div');
+        appList.className = 'mode-app-list';
+        mode.apps.forEach((app, appIndex) => {
+          const appRow = document.createElement('div');
+          appRow.className = 'mode-app-row';
+
+          const appNameLabel = document.createElement('label');
+          appNameLabel.className = 'field-wrap';
+          const appNameText = document.createElement('span');
+          appNameText.className = 'field-label';
+          appNameText.textContent = `App ${appIndex + 1}`;
+          const appInput = document.createElement('input');
+          appInput.className = 'field';
+          appInput.type = 'text';
+          appInput.placeholder = 'youtube';
+          appInput.value = app.name || '';
+          appInput.addEventListener('input', () => {
+            modeDrafts[modeIndex].apps[appIndex].name = appInput.value;
+          });
+          appNameLabel.appendChild(appNameText);
+          appNameLabel.appendChild(appInput);
+
+          const instructionLabel = document.createElement('label');
+          instructionLabel.className = 'field-wrap';
+          const instructionText = document.createElement('span');
+          instructionText.className = 'field-label';
+          instructionText.textContent = 'Instructions';
+          const instructionInput = document.createElement('textarea');
+          instructionInput.className = 'field field-textarea';
+          instructionInput.placeholder = 'set volume to 100\nplay liked songs';
+          instructionInput.value = app.instructions || '';
+          instructionInput.addEventListener('input', () => {
+            modeDrafts[modeIndex].apps[appIndex].instructions = instructionInput.value;
+          });
+          instructionLabel.appendChild(instructionText);
+          instructionLabel.appendChild(instructionInput);
+
+          const actions = document.createElement('div');
+          actions.className = 'mode-inline-actions';
+          const deleteAppBtn = document.createElement('button');
+          deleteAppBtn.className = 'danger-btn';
+          deleteAppBtn.type = 'button';
+          deleteAppBtn.textContent = 'Delete App';
+          deleteAppBtn.addEventListener('click', () => {
+            modeDrafts[modeIndex].apps.splice(appIndex, 1);
+            renderModeEditor();
+          });
+          actions.appendChild(deleteAppBtn);
+
+          appRow.appendChild(appNameLabel);
+          appRow.appendChild(instructionLabel);
+          appRow.appendChild(actions);
+          appList.appendChild(appRow);
+        });
+        row.appendChild(appList);
+
+        modeGridEl.appendChild(row);
+      });
     }
 
     function collectModesPayload() {
-      const names = getModeNameFields();
-      const apps = getModeAppsFields();
-      const commands = getModeCommandFields();
-      const modes = [];
-
-      for (let index = 0; index < 5; index += 1) {
-        const name = String(names[index]?.value || '').trim();
-        const appList = String(apps[index]?.value || '')
-          .split(',')
-          .map(app => app.trim())
-          .filter(Boolean);
-        const commandList = String(commands[index]?.value || '')
-          .split(/[\n,]+/)
-          .map(command => command.trim())
-          .filter(Boolean);
-
-        if (name || appList.length > 0 || commandList.length > 0) {
-          modes.push({
-            id: `mode-${index + 1}`,
-            name,
-            apps: appList,
-            commands: commandList
-          });
-        }
-      }
-
-      return modes;
+      return modeDrafts
+        .slice(0, MODE_LIMIT)
+        .map((mode, modeIndex) => ({
+          id: mode.id || `mode-${modeIndex + 1}`,
+          name: String(mode.name || '').trim(),
+          apps: (mode.apps || []).slice(0, MODE_APP_LIMIT)
+            .map(app => ({
+              name: String(app.name || '').trim(),
+              instructions: splitInstructionDraft(app.instructions)
+            }))
+            .filter(app => app.name),
+          commands: splitInstructionDraft(mode.commands)
+        }))
+        .filter(mode => mode.name || mode.apps.length > 0 || mode.commands.length > 0);
     }
 
     function collectSettingsPayload() {
@@ -1922,6 +2041,15 @@
     });
     document.getElementById('settings-save-btn').addEventListener('click', saveSettings);
     document.getElementById('settings-reset-btn').addEventListener('click', resetSettings);
+    modeAddBtn.addEventListener('click', () => {
+      if (modeDrafts.length >= MODE_LIMIT) {
+        setSettingsStatus(`Mode limit reached. Remove one of the ${MODE_LIMIT} saved modes before adding another.`, 'error');
+        return;
+      }
+      modeDrafts.push(createEmptyMode());
+      renderModeEditor();
+      setActiveSettingsSection('modes');
+    });
     contactAddBtn.addEventListener('click', openNewContactEditor);
     document.getElementById('contact-save-btn').addEventListener('click', saveContact);
     document.getElementById('contact-delete-btn').addEventListener('click', deleteContact);

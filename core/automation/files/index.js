@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 const Logger = require('../../shared/index').Logger;
+const Normalizer = require('../../shared/index').Normalizer;
 const Validator = require('../../shared/index').Validator;
 const {
   findEntryByName,
@@ -47,10 +48,22 @@ class FileController {
       return this._findFuzzyFileInDirectory(dir, safeName);
     }
 
-    return findEntryByName(safeName, {
+    const exactMatch = findEntryByName(safeName, {
       roots: SEARCH_ROOTS(),
       type: 'file'
     });
+    if (exactMatch) {
+      return exactMatch;
+    }
+
+    for (const root of SEARCH_ROOTS()) {
+      const fuzzyMatch = this._findFuzzyFileInDirectory(root, safeName);
+      if (fuzzyMatch) {
+        return fuzzyMatch;
+      }
+    }
+
+    return null;
   }
 
   create(filename, targetPath) {
@@ -347,7 +360,17 @@ class FileController {
         }
 
         const entryBase = path.basename(entry.name, entryExt).toLowerCase();
-        const tokenScore = requestedTokens.filter(token => entryBase.includes(token)).length;
+        const entryTokens = entryBase
+          .split(/[^a-z0-9]+/i)
+          .map(token => token.trim())
+          .filter(Boolean);
+        const tokenScore = requestedTokens.filter(token => (
+          entryBase.includes(token) ||
+          entryTokens.some(entryToken => entryToken.includes(token) || token.includes(entryToken) || Normalizer.findClosestOption(token, [entryToken], {
+            minSimilarity: 0.74,
+            maxDistance: 2
+          }))
+        )).length;
         const exactSubstring = requestedBase && entryBase.includes(requestedBase);
         const score = (exactSubstring ? 10 : 0) + tokenScore;
         return score > 0 ? { entry, score } : null;

@@ -176,13 +176,16 @@ class AutomationEngine {
       return { success: false, error: `Mode not found: ${requestedName}` };
     }
 
-    const apps = Array.isArray(mode.apps)
-      ? mode.apps.map(app => String(app || '').trim()).filter(Boolean)
-      : [];
+    const appEntries = this._normalizeModeAppEntries(mode);
+    const apps = appEntries.map(app => app.name).filter(Boolean);
+    const appCommands = appEntries.flatMap(app => (
+      app.instructions.map(command => this._contextualizeModeInstruction(app.name, command))
+    ));
     const commands = Array.isArray(mode.commands)
       ? mode.commands.map(command => String(command || '').trim()).filter(Boolean)
       : [];
-    if (apps.length === 0 && commands.length === 0) {
+    const allCommands = [...appCommands, ...commands].filter(Boolean);
+    if (apps.length === 0 && allCommands.length === 0) {
       return { success: false, error: `Mode has no apps or commands configured: ${mode.name}` };
     }
 
@@ -198,16 +201,79 @@ class AutomationEngine {
     }
 
     return {
-      success: opened.length > 0 || commands.length > 0,
+      success: opened.length > 0 || allCommands.length > 0,
       error: failed.length > 0 ? `Some mode apps failed: ${failed.map(item => item.appName).join(', ')}` : undefined,
       data: {
         modeName: mode.name,
         opened,
         failed,
         appCount: apps.length,
-        commands
+        commands: allCommands
       }
     };
+  }
+
+  _normalizeModeAppEntries(mode) {
+    if (!Array.isArray(mode?.apps)) {
+      return [];
+    }
+
+    return mode.apps
+      .map(app => {
+        if (app && typeof app === 'object' && !Array.isArray(app)) {
+          return {
+            name: String(app.name || app.appName || '').trim(),
+            instructions: this._normalizeInstructionList(app.instructions || app.commands || [])
+          };
+        }
+
+        return {
+          name: String(app || '').trim(),
+          instructions: []
+        };
+      })
+      .filter(app => app.name);
+  }
+
+  _normalizeInstructionList(value) {
+    const source = Array.isArray(value)
+      ? value
+      : String(value || '').split(/[\n,]+/);
+
+    return source
+      .map(command => String(command || '').trim().replace(/\s+/g, ' '))
+      .filter(Boolean)
+      .slice(0, 12);
+  }
+
+  _contextualizeModeInstruction(appName, instruction) {
+    const app = Normalizer.normalizeText(appName);
+    const command = String(instruction || '').trim().replace(/\s+/g, ' ');
+    if (!command) {
+      return '';
+    }
+
+    const lower = command.toLowerCase();
+    const browserApp = /^(?:chrome|google chrome|msedge|edge|microsoft edge|firefox|browser)$/.test(app);
+    if (browserApp) {
+      const appLabel = app.includes('edge') ? 'edge' : app.includes('firefox') ? 'firefox' : 'chrome';
+      const openInBrowserMatch = lower.match(/^open\s+(.+?)\s+(?:in|on)\s+(?:chrome|browser|edge|firefox)$/i);
+      if (openInBrowserMatch?.[1]) {
+        return `search for ${openInBrowserMatch[1].trim()} in ${appLabel}`;
+      }
+
+      const searchMatch = lower.match(/^search\s+(?:for\s+)?(.+)$/i);
+      if (searchMatch?.[1] && !/\s+(?:in|on)\s+(?:chrome|browser|edge|firefox)$/i.test(lower)) {
+        return `search for ${searchMatch[1].trim()} in ${appLabel}`;
+      }
+    }
+
+    const youtubeApp = /^(?:youtube|yt)$/.test(app);
+    if (youtubeApp && !/^(?:play|stream|listen|watch|pause|resume|unpause|stop|set|volume|next|previous|search)\b/i.test(command)) {
+      return `play ${command} on youtube`;
+    }
+
+    return command;
   }
 
   _findMode(modeName, modes) {

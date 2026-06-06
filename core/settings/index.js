@@ -176,6 +176,48 @@ function normalizeActivationShortcut(value, fallback = 'Alt+Space') {
   return `${modifiers.join('+')}+${key}`;
 }
 
+function splitInstructionList(value) {
+  const source = Array.isArray(value)
+    ? value
+    : String(value || '').split(/[\n,]+/);
+
+  return Array.from(new Set(source
+    .map(item => String(item || '').trim().replace(/\s+/g, ' '))
+    .filter(Boolean)))
+    .slice(0, 12);
+}
+
+function sanitizeModeAppEntries(entry) {
+  const rawApps = Array.isArray(entry.apps)
+    ? entry.apps
+    : String(entry.apps || '').split(/[\n,]+/);
+  const apps = [];
+  const seenApps = new Set();
+
+  rawApps.forEach(appEntry => {
+    const isObjectEntry = isPlainObject(appEntry);
+    const appName = String(isObjectEntry ? (appEntry.name || appEntry.appName || '') : appEntry || '')
+      .trim()
+      .replace(/\s+/g, ' ');
+    if (!appName) {
+      return;
+    }
+
+    const normalizedAppName = appName.toLowerCase();
+    if (seenApps.has(normalizedAppName) || apps.length >= 5) {
+      return;
+    }
+
+    seenApps.add(normalizedAppName);
+    apps.push({
+      name: appName,
+      instructions: splitInstructionList(isObjectEntry ? (appEntry.instructions || appEntry.commands || '') : '')
+    });
+  });
+
+  return apps;
+}
+
 function sanitizeModes(value) {
   const source = Array.isArray(value) ? value : [];
   const modes = [];
@@ -196,20 +238,8 @@ function sanitizeModes(value) {
       return;
     }
 
-    const rawApps = Array.isArray(entry.apps)
-      ? entry.apps
-      : String(entry.apps || '').split(/[\n,]+/);
-    const apps = Array.from(new Set(rawApps
-      .map(app => String(app || '').trim().replace(/\s+/g, ' '))
-      .filter(Boolean)))
-      .slice(0, 12);
-    const rawCommands = Array.isArray(entry.commands)
-      ? entry.commands
-      : String(entry.commands || entry.instructions || '').split(/[\n,]+/);
-    const commands = Array.from(new Set(rawCommands
-      .map(command => String(command || '').trim().replace(/\s+/g, ' '))
-      .filter(Boolean)))
-      .slice(0, 12);
+    const apps = sanitizeModeAppEntries(entry);
+    const commands = splitInstructionList(entry.commands || entry.instructions || '');
 
     seenNames.add(normalizedName);
     modes.push({

@@ -433,6 +433,7 @@ class EntityExtractor {
       /\b(?:delete|remove|erase)\s+file\s+(.+?)(?=\s+(?:on|in|at|to|from)\b|$)/i,
       /\b(?:delete|remove|erase)\s+(.+?)\s+file(?=\s+(?:on|in|at|to|from)\b|$)/i,
       /\b(?:delete|remove|erase)\s+(.+?)(?=\s+(?:on|in|at|from)\b|$)/i,
+      /\b(?:open|show)\s+(?:file\s+)?(.+?)(?=\s+(?:on|in|at|from)\b|$)/i,
       /\b(?:rename|copy|move)\s+file\s+(.+?)(?=\s+(?:to|into|in|on|from)\b|$)/i
     ];
 

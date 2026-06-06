@@ -439,6 +439,10 @@ class ActionRouter {
       return false;
     }
 
+    if (/^\s*(?:open|show|search|look\s+up|google)\b.*\b(?:in|on)\s+(?:chrome|browser|edge|firefox)\s*$/i.test(String(rawText || ''))) {
+      return false;
+    }
+
     const repaired = String(preparedInput?.repairedCommandText || '').trim();
     const corrected = String(preparedInput?.correctedText || rawText || '').trim();
     if (!repaired || repaired === corrected) {
@@ -694,9 +698,15 @@ class ActionRouter {
     const fileIntent = this.intentRegistry.get('file.open');
     if (fileIntent) {
       const fileEntities = this.entityExtractor.extract(fileIntent, rawText);
-      if (fileEntities.filename) {
-        return { intent: fileIntent, confidence: 1 };
+      if (fileEntities.filename && this._looksLikeFileReference(fileEntities.filename, rawText)) {
+        return { intent: fileIntent, confidence: 1, entities: fileEntities };
       }
+    }
+
+    const browserSearchIntent = this.intentRegistry.get('browser.search');
+    const browserSearchEntities = this._extractOpenInBrowserSearch(rawText, preparedInput);
+    if (browserSearchIntent && browserSearchEntities) {
+      return { intent: browserSearchIntent, confidence: 1, entities: browserSearchEntities };
     }
 
     const folderIntent = this.intentRegistry.get('folder.open');
@@ -747,7 +757,7 @@ class ActionRouter {
     const fileIntent = this.intentRegistry.get('file.open');
     if (fileIntent) {
       const fileEntities = this.entityExtractor.extract(fileIntent, rawText);
-      if (fileEntities.filename) {
+      if (fileEntities.filename && this._looksLikeFileReference(fileEntities.filename, rawText)) {
         return null;
       }
     }
@@ -783,6 +793,33 @@ class ActionRouter {
       /(https?:\/\/|www\.)/i.test(text) ||
       /\b[a-z0-9-]+\.(?:com|org|net|io|ai|app|dev|edu|gov|co|in|me|info)(?:\/\S*)?\b/i.test(text)
     );
+  }
+
+  _looksLikeFileReference(filename, rawText) {
+    const fileName = String(filename || '').trim();
+    const text = String(rawText || fileName || '').toLowerCase();
+    return /\.[A-Za-z0-9]{1,10}$/.test(fileName) ||
+      /\b(?:file|document|pdf|docx?|xlsx?|pptx?|txt|csv|json|js|ts|html|css|java|py|md|png|jpe?g|gif|mp4|mp3)\b/i.test(text);
+  }
+
+  _extractOpenInBrowserSearch(rawText, preparedInput) {
+    const input = String(preparedInput?.correctedText || rawText || '').trim();
+    const match = input.match(/^open\s+(.+?)\s+(?:in|on)\s+(chrome|browser|edge|firefox)$/i);
+    if (!match || !match[1]) {
+      return null;
+    }
+
+    const query = match[1]
+      .replace(/^(?:the|a|an)\s+/i, '')
+      .trim();
+    if (!query || this._looksLikeFileReference(query, rawText)) {
+      return null;
+    }
+
+    return {
+      query,
+      openInBrowser: true
+    };
   }
 
   _looksLikeFolderOpenRequest(input) {
