@@ -176,6 +176,53 @@ function normalizeActivationShortcut(value, fallback = 'Alt+Space') {
   return `${modifiers.join('+')}+${key}`;
 }
 
+function sanitizeModes(value) {
+  const source = Array.isArray(value) ? value : [];
+  const modes = [];
+  const seenNames = new Set();
+
+  source.forEach((entry, index) => {
+    if (!isPlainObject(entry) || modes.length >= 5) {
+      return;
+    }
+
+    const name = String(entry.name || '').trim().replace(/\s+/g, ' ');
+    if (!name) {
+      return;
+    }
+
+    const normalizedName = name.toLowerCase();
+    if (seenNames.has(normalizedName)) {
+      return;
+    }
+
+    const rawApps = Array.isArray(entry.apps)
+      ? entry.apps
+      : String(entry.apps || '').split(/[\n,]+/);
+    const apps = Array.from(new Set(rawApps
+      .map(app => String(app || '').trim().replace(/\s+/g, ' '))
+      .filter(Boolean)))
+      .slice(0, 12);
+    const rawCommands = Array.isArray(entry.commands)
+      ? entry.commands
+      : String(entry.commands || entry.instructions || '').split(/[\n,]+/);
+    const commands = Array.from(new Set(rawCommands
+      .map(command => String(command || '').trim().replace(/\s+/g, ' '))
+      .filter(Boolean)))
+      .slice(0, 12);
+
+    seenNames.add(normalizedName);
+    modes.push({
+      id: String(entry.id || `mode-${index + 1}`).trim() || `mode-${index + 1}`,
+      name,
+      apps,
+      commands
+    });
+  });
+
+  return modes;
+}
+
 class SettingsService {
   constructor(baseConfig) {
     this.baseConfig = deepClone(baseConfig || {});
@@ -223,7 +270,8 @@ class SettingsService {
       chat: {
         themeId: String(baseConfig?.chat?.activeTheme || 'midnight').trim(),
         maxHistory: clampNumber(baseConfig?.chat?.maxHistory, 50, 2000, 500)
-      }
+      },
+      modes: []
     };
   }
 
@@ -322,6 +370,7 @@ class SettingsService {
     runtimeConfig.chat = runtimeConfig.chat || {};
     runtimeConfig.chat.maxHistory = settings.chat.maxHistory;
     runtimeConfig.chat.activeTheme = settings.chat.themeId;
+    runtimeConfig.modes = deepClone(settings.modes);
 
     return runtimeConfig;
   }
@@ -377,7 +426,8 @@ class SettingsService {
       chat: {
         themeId,
         maxHistory: clampNumber(source.chat?.maxHistory, 50, 2000, this.defaults.chat.maxHistory)
-      }
+      },
+      modes: sanitizeModes(source.modes)
     };
   }
 }

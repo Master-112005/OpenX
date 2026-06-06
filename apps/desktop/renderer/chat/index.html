@@ -646,6 +646,26 @@
       grid-template-columns: 1fr;
     }
 
+    .mode-grid {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .mode-row {
+      background: rgba(255, 255, 255, 0.03);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 12px;
+      display: grid;
+      gap: 10px;
+      grid-template-columns: minmax(120px, 0.8fr) minmax(180px, 1.4fr);
+      padding: 10px;
+    }
+
+    .mode-command-wrap {
+      grid-column: 1 / -1;
+    }
+
     .contact-stage {
       background: rgba(255, 255, 255, 0.03);
       border: 1px solid rgba(255, 255, 255, 0.06);
@@ -793,6 +813,7 @@
 
       .hero-stats,
       .field-grid,
+      .mode-row,
       .theme-grid,
       .settings-nav {
         grid-template-columns: 1fr;
@@ -910,6 +931,10 @@
               <span class="nav-label">Access</span>
               <span class="nav-hint">Choose when automation commands require confirmation.</span>
             </button>
+            <button class="settings-nav-chip" data-section-target="modes" type="button">
+              <span class="nav-label">Modes</span>
+              <span class="nav-hint">Create up to 5 app launch modes.</span>
+            </button>
             <button class="settings-nav-chip" data-section-target="contacts" type="button">
               <span class="nav-label">Contacts</span>
               <span class="nav-hint">Manage up to 10 saved contacts from one compact list.</span>
@@ -1025,6 +1050,83 @@
                   <option value="critical">Critical - full access, no confirmation</option>
                 </select>
               </label>
+            </div>
+          </section>
+
+          <section class="settings-section" data-settings-section="modes" id="settings-section-modes">
+            <div class="section-heading">App Modes</div>
+            <div class="section-note">Name each mode, enter the apps it should open, and add optional commands to run after launch. Use commands like <code>start gaming mode</code> or <code>open dev mode</code>.</div>
+            <div class="mode-grid" id="mode-grid">
+              <div class="mode-row">
+                <label class="field-wrap">
+                  <span class="field-label">Mode 1 Name</span>
+                  <input class="field mode-name-field" data-mode-index="0" type="text" placeholder="gaming">
+                </label>
+                <label class="field-wrap">
+                  <span class="field-label">Apps</span>
+                  <input class="field mode-apps-field" data-mode-index="0" type="text" placeholder="chrome, discord">
+                </label>
+                <label class="field-wrap mode-command-wrap">
+                  <span class="field-label">Commands</span>
+                  <textarea class="field field-textarea mode-commands-field" data-mode-index="0" placeholder="play liked songs&#10;set volume to 45"></textarea>
+                </label>
+              </div>
+              <div class="mode-row">
+                <label class="field-wrap">
+                  <span class="field-label">Mode 2 Name</span>
+                  <input class="field mode-name-field" data-mode-index="1" type="text" placeholder="dev">
+                </label>
+                <label class="field-wrap">
+                  <span class="field-label">Apps</span>
+                  <input class="field mode-apps-field" data-mode-index="1" type="text" placeholder="code, chrome, terminal">
+                </label>
+                <label class="field-wrap mode-command-wrap">
+                  <span class="field-label">Commands</span>
+                  <textarea class="field field-textarea mode-commands-field" data-mode-index="1" placeholder="open openx folder"></textarea>
+                </label>
+              </div>
+              <div class="mode-row">
+                <label class="field-wrap">
+                  <span class="field-label">Mode 3 Name</span>
+                  <input class="field mode-name-field" data-mode-index="2" type="text">
+                </label>
+                <label class="field-wrap">
+                  <span class="field-label">Apps</span>
+                  <input class="field mode-apps-field" data-mode-index="2" type="text">
+                </label>
+                <label class="field-wrap mode-command-wrap">
+                  <span class="field-label">Commands</span>
+                  <textarea class="field field-textarea mode-commands-field" data-mode-index="2"></textarea>
+                </label>
+              </div>
+              <div class="mode-row">
+                <label class="field-wrap">
+                  <span class="field-label">Mode 4 Name</span>
+                  <input class="field mode-name-field" data-mode-index="3" type="text">
+                </label>
+                <label class="field-wrap">
+                  <span class="field-label">Apps</span>
+                  <input class="field mode-apps-field" data-mode-index="3" type="text">
+                </label>
+                <label class="field-wrap mode-command-wrap">
+                  <span class="field-label">Commands</span>
+                  <textarea class="field field-textarea mode-commands-field" data-mode-index="3"></textarea>
+                </label>
+              </div>
+              <div class="mode-row">
+                <label class="field-wrap">
+                  <span class="field-label">Mode 5 Name</span>
+                  <input class="field mode-name-field" data-mode-index="4" type="text">
+                </label>
+                <label class="field-wrap">
+                  <span class="field-label">Apps</span>
+                  <input class="field mode-apps-field" data-mode-index="4" type="text">
+                </label>
+                <label class="field-wrap mode-command-wrap">
+                  <span class="field-label">Commands</span>
+                  <textarea class="field field-textarea mode-commands-field" data-mode-index="4"></textarea>
+                </label>
+              </div>
             </div>
           </section>
 
@@ -1171,6 +1273,18 @@
       contactCallPlatform: 'contact-call-platform',
       contactWhatsappUri: 'contact-whatsapp-uri'
     };
+
+    function getModeNameFields() {
+      return Array.from(document.querySelectorAll('.mode-name-field'));
+    }
+
+    function getModeAppsFields() {
+      return Array.from(document.querySelectorAll('.mode-apps-field'));
+    }
+
+    function getModeCommandFields() {
+      return Array.from(document.querySelectorAll('.mode-commands-field'));
+    }
 
     function getAssistantDisplayName() {
       return settingsSnapshot?.settings?.assistant?.displayName || 'JARVIS';
@@ -1426,6 +1540,7 @@
       setFieldValue(fieldIds.profileRole, settings.userProfile.role);
       setFieldValue(fieldIds.chatMaxHistory, String(settings.chat.maxHistory));
       setFieldValue(fieldIds.systemPermissionLevel, settings.system.permissionLevel);
+      populateModeFields(settings.modes || []);
 
       renderThemeCards();
       applyTheme(settings.chat.themeId);
@@ -1544,6 +1659,54 @@
       renderContacts();
     }
 
+    function populateModeFields(modes) {
+      const names = getModeNameFields();
+      const apps = getModeAppsFields();
+      const commands = getModeCommandFields();
+      for (let index = 0; index < 5; index += 1) {
+        const mode = Array.isArray(modes) ? modes[index] : null;
+        if (names[index]) {
+          names[index].value = mode?.name || '';
+        }
+        if (apps[index]) {
+          apps[index].value = Array.isArray(mode?.apps) ? mode.apps.join(', ') : '';
+        }
+        if (commands[index]) {
+          commands[index].value = Array.isArray(mode?.commands) ? mode.commands.join('\n') : '';
+        }
+      }
+    }
+
+    function collectModesPayload() {
+      const names = getModeNameFields();
+      const apps = getModeAppsFields();
+      const commands = getModeCommandFields();
+      const modes = [];
+
+      for (let index = 0; index < 5; index += 1) {
+        const name = String(names[index]?.value || '').trim();
+        const appList = String(apps[index]?.value || '')
+          .split(',')
+          .map(app => app.trim())
+          .filter(Boolean);
+        const commandList = String(commands[index]?.value || '')
+          .split(/[\n,]+/)
+          .map(command => command.trim())
+          .filter(Boolean);
+
+        if (name || appList.length > 0 || commandList.length > 0) {
+          modes.push({
+            id: `mode-${index + 1}`,
+            name,
+            apps: appList,
+            commands: commandList
+          });
+        }
+      }
+
+      return modes;
+    }
+
     function collectSettingsPayload() {
       return {
         assistant: {
@@ -1572,7 +1735,8 @@
         },
         system: {
           permissionLevel: document.getElementById(fieldIds.systemPermissionLevel).value
-        }
+        },
+        modes: collectModesPayload()
       };
     }
 

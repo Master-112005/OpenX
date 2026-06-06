@@ -83,7 +83,11 @@ describe('Settings Service', function() {
       },
       system: {
         permissionLevel: 'critical'
-      }
+      },
+      modes: [
+        { name: 'gaming', apps: ['chrome', 'discord'], commands: ['set volume to 45'] },
+        { name: 'dev', apps: 'code, chrome, terminal', instructions: 'open openx folder\nset volume to 35' }
+      ]
     });
 
     assert.equal(saved.assistant.displayName, 'Athena');
@@ -94,6 +98,11 @@ describe('Settings Service', function() {
     assert.equal(saved.chat.themeId, 'forest');
     assert.equal(saved.chat.maxHistory, 900);
     assert.equal(saved.system.permissionLevel, 'critical');
+    assert.equal(saved.modes.length, 2);
+    assert.deepEqual(saved.modes[0].apps, ['chrome', 'discord']);
+    assert.deepEqual(saved.modes[0].commands, ['set volume to 45']);
+    assert.deepEqual(saved.modes[1].apps, ['code', 'chrome', 'terminal']);
+    assert.deepEqual(saved.modes[1].commands, ['open openx folder', 'set volume to 35']);
 
     const runtimeConfig = service.buildRuntimeConfig();
     assert.equal(runtimeConfig.assistant.displayName, 'Athena');
@@ -101,6 +110,28 @@ describe('Settings Service', function() {
     assert.equal(runtimeConfig.assistant.userProfile.email, 'rakesh@example.com');
     assert.equal(runtimeConfig.chat.activeTheme, 'forest');
     assert.equal(runtimeConfig.system.permissionLevel, 'critical');
+    assert.deepEqual(runtimeConfig.modes[0], saved.modes[0]);
+  });
+
+  it('should sanitize custom modes and enforce a maximum of 5', function() {
+    const { service } = createService();
+    const saved = service.saveSettings({
+      modes: [
+        { name: 'gaming', apps: ['chrome', 'discord', 'chrome'], commands: ['play liked songs', 'play liked songs'] },
+        { name: 'Gaming', apps: ['duplicate'] },
+        { name: 'dev', apps: 'code, chrome' },
+        { name: 'work', apps: ['outlook'] },
+        { name: 'study', apps: ['notepad'] },
+        { name: 'media', apps: ['youtube'] },
+        { name: 'extra', apps: ['paint'] }
+      ]
+    });
+
+    assert.equal(saved.modes.length, 5);
+    assert.deepEqual(saved.modes[0].apps, ['chrome', 'discord']);
+    assert.deepEqual(saved.modes[0].commands, ['play liked songs']);
+    assert.equal(saved.modes.find(mode => mode.name === 'Gaming'), undefined);
+    assert.equal(saved.modes[4].name, 'media');
   });
 
   it('should fall back to the default shortcut when the activation shortcut is invalid', function() {

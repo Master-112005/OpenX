@@ -91,6 +91,14 @@ const INTENT_DEFINITIONS = [
     description: 'Switch to a running application'
   },
   {
+    id: 'mode.start',
+    patterns: ['start mode', 'open mode', 'launch mode', 'activate mode', 'start the mode'],
+    permissionLevel: 'low',
+    action: 'mode.start',
+    entities: [{ name: 'modeName', type: 'string', required: true }],
+    description: 'Start a saved app mode'
+  },
+  {
     id: 'file.create',
     patterns: ['create file', 'new file', 'make file', 'create a file'],
     permissionLevel: 'low',

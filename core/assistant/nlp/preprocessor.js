@@ -86,7 +86,10 @@ function buildBigrams(tokens) {
 
 function preprocessCommand(text) {
   const expanded = Normalizer.expandContractions(text || '');
-  const normalized = Normalizer.normalizeText(expanded);
+  const spaced = expanded
+    .replace(/\b([a-zA-Z]{2,})(\d{2,4})\b/g, '$1 $2')
+    .replace(/\b(\d{2,4})([a-zA-Z]{2,})\b/g, '$1 $2');
+  const normalized = Normalizer.normalizeText(spaced);
   const stripped = stripLeadIns(normalized);
   const replaced = applyPhraseReplacements(stripped);
   const sequenceRepaired = applyTokenSequenceReplacements(Normalizer.tokenize(replaced));

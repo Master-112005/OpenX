@@ -16,7 +16,11 @@ function cleanEntityName(value, options = {}) {
     result = result.replace(/^(?:file|folder|directory)\s+/i, '');
   }
 
-  return result.trim() || null;
+  result = result
+    .replace(/\s+(pdf|txt|docx?|xlsx?|pptx?|csv|json|xml|html?|js|ts|py|java|png|jpe?g|gif|webp|mp[34]|wav|zip|rar)$/i, '.$1')
+    .trim();
+
+  return result || null;
 }
 
 function getHomeDirectory() {

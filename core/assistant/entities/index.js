@@ -188,6 +188,9 @@ class EntityExtractor {
         case 'mediaPlatform':
           entities.mediaPlatform = this._extractMediaPlatform(normalized, text);
           break;
+        case 'modeName':
+          entities.modeName = this._extractModeName(normalized, text);
+          break;
         default:
           break;
       }
@@ -420,11 +423,6 @@ class EntityExtractor {
   }
 
   _extractFilename(text, raw) {
-    const explicitFile = raw.match(/(?:^|[\s"])([^\s"\\/]+\.[A-Za-z0-9]{1,10})(?=$|[\s"])/);
-    if (explicitFile) {
-      return cleanEntityName(explicitFile[1]);
-    }
-
     const explicitPath = raw.match(/(?:^|[\s"])([A-Za-z]:\\[^\s"]+\.[A-Za-z0-9]{1,10})(?=$|[\s"])/);
     if (explicitPath) {
       return cleanEntityName(explicitPath[1]);
@@ -434,6 +432,7 @@ class EntityExtractor {
       /\b(?:create|new|make)\s+file\s+(.+?)(?=\s+(?:on|in|at|to|from)\b|$)/i,
       /\b(?:delete|remove|erase)\s+file\s+(.+?)(?=\s+(?:on|in|at|to|from)\b|$)/i,
       /\b(?:delete|remove|erase)\s+(.+?)\s+file(?=\s+(?:on|in|at|to|from)\b|$)/i,
+      /\b(?:delete|remove|erase)\s+(.+?)(?=\s+(?:on|in|at|from)\b|$)/i,
       /\b(?:rename|copy|move)\s+file\s+(.+?)(?=\s+(?:to|into|in|on|from)\b|$)/i
     ];
 
@@ -442,6 +441,11 @@ class EntityExtractor {
       if (match && match[1]) {
         return cleanEntityName(match[1]);
       }
+    }
+
+    const explicitFile = raw.match(/(?:^|[\s"])([^\s"\\/]+\.[A-Za-z0-9]{1,10})(?=$|[\s"])/);
+    if (explicitFile) {
+      return cleanEntityName(explicitFile[1]);
     }
 
     return null;
@@ -787,6 +791,29 @@ class EntityExtractor {
     if (/\bjiosaavn\b|\bsaavn\b|\bjio\s*music\b/i.test(source)) return 'jiosaavn';
     if (/\bamazon\s*music\b|\bamazon\b/i.test(source)) return 'amazon music';
     if (/\bapple\s*music\b|\bapple\b/i.test(source)) return 'apple music';
+
+    return null;
+  }
+
+  _extractModeName(text, raw) {
+    const source = String(raw || text || '').trim();
+    if (!source) return null;
+
+    const patterns = [
+      /\b(?:start|open|launch|run|activate)\s+(?:the\s+)?(.+?)\s+mode\b/i,
+      /\b(?:start|open|launch|run|activate)\s+mode\s+(.+)$/i
+    ];
+
+    for (const pattern of patterns) {
+      const match = source.match(pattern);
+      if (match && match[1]) {
+        const cleaned = this._stripTrailingEntityNoise(match[1])
+          .replace(/\bmode\b/gi, ' ')
+          .replace(/\s+/g, ' ')
+          .trim();
+        return cleaned || null;
+      }
+    }
 
     return null;
   }

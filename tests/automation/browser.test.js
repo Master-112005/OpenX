@@ -89,4 +89,19 @@ describe('Browser Controller', function() {
     assert.ok(requestedQuery.includes('IPL cricket final winner champion result'));
     assert.equal(result.data.answer.text, 'Royal Challengers Bengaluru (RCB) won IPL 2026, beating Gujarat Titans by five wickets.');
   });
+
+  it('should extract direct answers for older IPL winner questions', async function() {
+    const controller = new BrowserController({});
+    let requestedQuery = '';
+
+    controller._searchWebInBackground = async function(query) {
+      requestedQuery = this._enhanceSearchQuery(query);
+      return [];
+    };
+
+    const result = await controller.search('which team is the winner of ipl 2020');
+
+    assert.ok(requestedQuery.includes('IPL cricket final winner champion result'));
+    assert.equal(result.data.answer.text, 'Mumbai Indians won IPL 2020.');
+  });
 });

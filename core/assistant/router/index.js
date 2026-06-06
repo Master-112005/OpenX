@@ -26,7 +26,7 @@ class ActionRouter {
     });
   }
 
-  async process(inputText, source = 'chat') {
+  async process(inputText, source = 'chat', options = {}) {
     const commandId = IdGenerator.generate();
     this.logger.info(`Processing command: ${commandId}`, { input: inputText, source });
 
@@ -51,23 +51,15 @@ class ActionRouter {
     const rawCommandText = useNoisyRepair
       ? effectiveCommandText
       : (parseResult.rawCommandText || parseResult.commandText);
-    const intentResult = (
-      this._resolveExplicitMediaControlIntent(rawCommandText, preparedInput) ||
-      this._resolveMediaUnderstandingIntent(rawCommandText, source) ||
-      this._resolveExplicitMediaIntent(rawCommandText, preparedInput) ||
-      this._resolveExplicitFolderMoveIntent(rawCommandText, preparedInput) ||
-      this._resolveExplicitAppIntent(rawCommandText, preparedInput) ||
-      this._resolveExplicitWindowIntent(rawCommandText, preparedInput) ||
-      this._resolveExplicitCommunicationIntent(rawCommandText, preparedInput) ||
-      this._resolveExplicitOpenIntent(rawCommandText, preparedInput) ||
-      this._resolveExplicitAppOpenIntent(rawCommandText, preparedInput) ||
-      this._resolveCalculationIntent(rawCommandText, preparedInput) ||
-      this._resolveLocalInfoIntent(rawCommandText, preparedInput) ||
-      this._resolveLocalFileListIntent(rawCommandText, preparedInput) ||
-      this._resolveExplicitSearchIntent(rawCommandText, preparedInput) ||
-      this._resolveGeneralQuestionSearchIntent(rawCommandText, preparedInput) ||
-      this._matchIntent(preparedInput)
-    );
+
+    if (options.allowMulti !== false) {
+      const multiPlan = this._buildMultiCommandPlan(rawCommandText, source);
+      if (multiPlan) {
+        return this._executeMultiCommand(commandId, multiPlan, source);
+      }
+    }
+
+    const intentResult = this._resolveIntent(rawCommandText, preparedInput, source);
     if (!intentResult || intentResult.confidence < CONFIDENCE_THRESHOLD) {
       return {
         commandId,
@@ -81,6 +73,32 @@ class ActionRouter {
       };
     }
 
+    return this._completeIntent(commandId, intentResult, rawCommandText, source);
+  }
+
+  _resolveIntent(rawCommandText, preparedInput, source) {
+    return (
+      this._resolveExplicitMediaControlIntent(rawCommandText, preparedInput) ||
+      this._resolveMediaUnderstandingIntent(rawCommandText, source) ||
+      this._resolveExplicitMediaIntent(rawCommandText, preparedInput) ||
+      this._resolveExplicitFolderMoveIntent(rawCommandText, preparedInput) ||
+      this._resolveExplicitModeIntent(rawCommandText, preparedInput) ||
+      this._resolveExplicitAppIntent(rawCommandText, preparedInput) ||
+      this._resolveExplicitWindowIntent(rawCommandText, preparedInput) ||
+      this._resolveExplicitCommunicationIntent(rawCommandText, preparedInput) ||
+      this._resolveExplicitOpenIntent(rawCommandText, preparedInput) ||
+      this._resolveExplicitAppOpenIntent(rawCommandText, preparedInput) ||
+      this._resolveExplicitReminderIntent(rawCommandText, preparedInput) ||
+      this._resolveCalculationIntent(rawCommandText, preparedInput) ||
+      this._resolveLocalInfoIntent(rawCommandText, preparedInput) ||
+      this._resolveLocalFileListIntent(rawCommandText, preparedInput) ||
+      this._resolveExplicitSearchIntent(rawCommandText, preparedInput) ||
+      this._resolveGeneralQuestionSearchIntent(rawCommandText, preparedInput) ||
+      this._matchIntent(preparedInput)
+    );
+  }
+
+  async _completeIntent(commandId, intentResult, rawCommandText, source) {
     const entities = intentResult.entities || this.entityExtractor.extract(
       intentResult.intent,
       rawCommandText
@@ -134,7 +152,162 @@ class ActionRouter {
         })
       };
     }
-    return this._execute(commandId, intentResult, entities, rawCommandText);
+    return this._execute(commandId, intentResult, entities, rawCommandText, source);
+  }
+
+  _buildMultiCommandPlan(rawText, source) {
+    const text = String(rawText || '').trim();
+    if (!text || !/\b(?:and|then|after that|afterwards)\b|[;]/i.test(text)) {
+      return null;
+    }
+
+    if (this._looksLikeSingleMediaPlatformRequest(text)) {
+      return null;
+    }
+
+    let clauses = text
+      .split(/\s*(?:;|\b(?:and then|then|after that|afterwards|and)\b)\s*/i)
+      .map(part => part.trim())
+      .filter(Boolean)
+      .slice(0, 6);
+
+    if (clauses.length > 0 && this._isPoliteLeadInClause(clauses[0])) {
+      clauses = clauses.slice(1);
+    }
+
+    if (clauses.length < 2) {
+      return null;
+    }
+
+    clauses = this._normalizeMultiClauses(clauses);
+
+    const actionableClauses = clauses.filter(clause => this._clauseLooksActionable(clause, source));
+    if (actionableClauses.length < 2) {
+      return null;
+    }
+
+    return clauses;
+  }
+
+  _looksLikeSingleMediaPlatformRequest(text) {
+    const source = String(text || '').trim().toLowerCase();
+    return /^(?:open|launch|start)\s+(?:youtube|spotify|apple\s+music|amazon\s+music|soundcloud)\s+and\s+(?:play|stream|listen|watch)\b/.test(source);
+  }
+
+  _normalizeMultiClauses(clauses) {
+    const verbsThatCanCarry = new Set([
+      'open',
+      'launch',
+      'start',
+      'run',
+      'close',
+      'quit',
+      'exit',
+      'terminate',
+      'minimize',
+      'maximize',
+      'switch',
+      'focus'
+    ]);
+    let carriedVerb = null;
+
+    return clauses.map(clause => {
+      const prepared = this.nlp.prepare(clause);
+      const corrected = String(prepared.correctedText || clause || '').trim();
+      const normalized = corrected.toLowerCase();
+      const verbMatch = normalized.match(/^(open|launch|start|run|close|quit|exit|terminate|minimize|maximize|switch|focus|pause|resume|unpause|stop|set)\b/);
+
+      if (verbMatch) {
+        if (verbsThatCanCarry.has(verbMatch[1])) {
+          carriedVerb = verbMatch[1];
+        }
+        return corrected;
+      }
+
+      if (carriedVerb && /^[a-z0-9][a-z0-9\s.-]*$/i.test(corrected)) {
+        return `${carriedVerb} ${corrected}`;
+      }
+
+      return corrected;
+    });
+  }
+
+  _extractModeCommandsFromData(data) {
+    if (!data || !Array.isArray(data.commands)) {
+      return [];
+    }
+
+    return data.commands
+      .map(command => String(command || '').trim())
+      .filter(Boolean)
+      .slice(0, 8);
+  }
+
+  _clauseLooksActionable(clause, source) {
+    if (this._isPoliteLeadInClause(clause)) {
+      return false;
+    }
+
+    const prepared = this.nlp.prepare(clause);
+    const intentResult = this._resolveIntent(clause, prepared, source);
+    return Boolean(intentResult && intentResult.confidence >= CONFIDENCE_THRESHOLD);
+  }
+
+  _isPoliteLeadInClause(clause) {
+    return /^(?:go\s+ahead|please|kindly|ok|okay|sure|can\s+you|could\s+you|would\s+you)$/i.test(String(clause || '').trim());
+  }
+
+  async _executeMultiCommand(commandId, clauses, source) {
+    const steps = [];
+
+    for (const clause of clauses) {
+      const result = await this.process(clause, source, { allowMulti: false });
+      steps.push({
+        input: clause,
+        success: result.success,
+        intent: result.intent,
+        entities: result.entities,
+        response: result.response,
+        error: result.error || null
+      });
+
+      if (result.requiresConfirmation || !result.success) {
+        return {
+          commandId,
+          success: false,
+          intent: 'multi.command',
+          confidence: 1,
+          entities: { commands: clauses },
+          steps,
+          response: result.requiresConfirmation
+            ? result.response
+            : this._buildMultiCommandResponse(steps),
+          requiresConfirmation: result.requiresConfirmation,
+          confirmationMessage: result.confirmationMessage,
+          permissionLevel: result.permissionLevel
+        };
+      }
+    }
+
+    return {
+      commandId,
+      success: true,
+      intent: 'multi.command',
+      confidence: 1,
+      entities: { commands: clauses },
+      steps,
+      response: this._buildMultiCommandResponse(steps)
+    };
+  }
+
+  _buildMultiCommandResponse(steps) {
+    const completed = steps.filter(step => step.success).length;
+    const failed = steps.find(step => !step.success);
+    if (failed) {
+      return `${completed} command${completed === 1 ? '' : 's'} completed. ${failed.response || failed.error || 'One command failed.'}`;
+    }
+
+    return `Completed ${completed} command${completed === 1 ? '' : 's'}.`;
   }
 
   async confirmAndExecute(commandId, intentId, entities) {
@@ -148,31 +321,53 @@ class ActionRouter {
       };
     }
 
-    return this._execute(commandId, { intent, confidence: 1.0 }, entities, '');
+    return this._execute(commandId, { intent, confidence: 1.0 }, entities, '', 'confirmation');
   }
 
-  async _execute(commandId, intentResult, entities) {
+  async _execute(commandId, intentResult, entities, rawCommandText = '', source = 'chat') {
     try {
       const result = await this.automationEngine.execute(intentResult.intent.action, entities);
       this.logger.info(`Execution result: ${commandId}`, { success: result.success });
 
+      const modeCommandSteps = [];
+      if (result.success && intentResult.intent.id === 'mode.start') {
+        const modeCommands = this._extractModeCommandsFromData(result.data);
+        for (const command of modeCommands) {
+          const stepResult = await this.process(command, source, { allowMulti: true });
+          modeCommandSteps.push({
+            input: command,
+            success: stepResult.success,
+            intent: stepResult.intent,
+            entities: stepResult.entities,
+            steps: stepResult.steps || null,
+            response: stepResult.response,
+            error: stepResult.error || null
+          });
+        }
+      }
+
+      const responseData = modeCommandSteps.length > 0
+        ? { ...(result.data || {}), commandSteps: modeCommandSteps }
+        : result.data;
+      const responseResult = { ...result, data: responseData };
+
       return {
         commandId,
-        success: result.success,
+        success: result.success && modeCommandSteps.every(step => step.success),
         intent: intentResult.intent.id,
         confidence: intentResult.confidence,
         entities,
         response: result.success
           ? this._buildResponse('success', intentResult.intent.id, {
               entities,
-              result,
+              result: responseResult,
               intent: intentResult.intent
             })
           : this._buildResponse('error', 'executionFailed', {
               error: result.error,
               intent: intentResult.intent
             }),
-        data: result.data || null
+        data: responseData || null
       };
     } catch (err) {
       this.logger.error(`Execution error: ${commandId}`, err);
@@ -275,6 +470,10 @@ class ActionRouter {
     const textToUse = (preparedInput?.correctedText || rawText || '').trim().toLowerCase();
     if (!textToUse) return null;
 
+    if (/\b(?:open|close|launch|start|run|quit|exit|terminate)\b/.test(textToUse)) {
+      return null;
+    }
+
     // Check for next/skip
     if (/\b(next\s*song|next\s*track|skip\s*song|skip\s*track|play\s+next|skip)\b/i.test(textToUse)) {
       const intent = this.intentRegistry.get('media.next');
@@ -296,6 +495,11 @@ class ActionRouter {
     // Check for resume
     if (/\b(resume|resume\s*music|resume\s*song|resume\s*playback|play\s+again|continue|unpause|carry\s+on)\b/i.test(textToUse)) {
       const intent = this.intentRegistry.get('media.resume');
+      if (intent) return { intent, confidence: 1 };
+    }
+
+    if (/\b(stop\s*music|stop\s*song|stop\s*playback|stop\s*media)\b/i.test(textToUse)) {
+      const intent = this.intentRegistry.get('media.stop');
       if (intent) return { intent, confidence: 1 };
     }
 
@@ -329,6 +533,11 @@ class ActionRouter {
   }
 
   _resolveMediaUnderstandingIntent(rawText, source) {
+    if (/^\s*(?:close|quit|exit|terminate|stop)\b/i.test(String(rawText || '')) &&
+      /\b(?:app|application|chrome|edge|firefox|browser|youtube|spotify|google\s+chat|discord|teams)\b/i.test(String(rawText || ''))) {
+      return null;
+    }
+
     const routed = this.mediaUnderstanding.route(rawText, { source });
     if (!routed.success) {
       return null;
@@ -399,6 +608,31 @@ class ActionRouter {
     }
 
     return { intent, confidence: 1 };
+  }
+
+  _resolveExplicitModeIntent(rawText, preparedInput) {
+    const correctedText = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
+    if (!correctedText) {
+      return null;
+    }
+
+    if (!/\b(?:start|open|launch|run|activate)\b/.test(correctedText) || !/\bmode\b/.test(correctedText)) {
+      return null;
+    }
+
+    const intent = this.intentRegistry.get('mode.start');
+    if (!intent) {
+      return null;
+    }
+
+    const entities = this.entityExtractor.extract(intent, rawText);
+    const correctedEntities = this.entityExtractor.extract(intent, correctedText);
+    const modeName = entities.modeName || correctedEntities.modeName;
+    if (!modeName) {
+      return null;
+    }
+
+    return { intent, confidence: 1, entities: { modeName } };
   }
 
   _resolveExplicitAppIntent(rawText, preparedInput) {
@@ -587,6 +821,32 @@ class ActionRouter {
     return null;
   }
 
+  _resolveExplicitReminderIntent(rawText, preparedInput) {
+    const input = String(preparedInput?.correctedText || rawText || '').trim();
+    if (!/^remind\b/i.test(input)) {
+      return null;
+    }
+
+    const intent = this.intentRegistry.get('reminder.set');
+    if (!intent) {
+      return null;
+    }
+
+    const entities = this.entityExtractor.extract(intent, rawText);
+    if (!entities.reminderText) {
+      const fallbackText = input
+        .replace(/^remind(?:\s+me)?\s+(?:to\s+)?/i, '')
+        .trim();
+      if (fallbackText) {
+        entities.reminderText = fallbackText;
+      }
+    }
+
+    return entities.reminderText
+      ? { intent, confidence: 1, entities }
+      : null;
+  }
+
   _resolveLocalInfoIntent(rawText, preparedInput) {
     const input = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
     const systemTimeIntent = this.intentRegistry.get('system.time');
@@ -698,24 +958,27 @@ class ActionRouter {
 
   _resolveLocalFileListIntent(rawText, preparedInput) {
     const input = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
-    if (!/\b(?:file|files|folder|folders|items|contents)\b/.test(input)) {
+    const query = preparedInput?.query || {};
+    if (!/\b(?:file|files|folder|folders|items|contents|pdf|pdfs|images?|photos?|pictures?|videos?|audio|music)\b/.test(input)) {
       return null;
     }
 
-    const listRequest = /^(?:what|which|show|list|tell)\b/.test(input) &&
-      /\b(?:are|is|in|on|inside|under|from|files|folders|items|contents)\b/.test(input);
+    const listRequest = query.isLocalFileQuestion || (
+      /^(?:what|which|show|list|tell)\b/.test(input) &&
+      /\b(?:are|is|in|on|inside|under|from|files|folders|items|contents)\b/.test(input)
+    );
     if (!listRequest) {
       return null;
     }
 
-    const localLocation = this._extractLocalListLocation(input);
+    const localLocation = query.localLocation || this._extractLocalListLocation(input);
     if (!localLocation) {
       return null;
     }
 
     const fileListIntent = this.intentRegistry.get('file.list');
     return fileListIntent
-      ? { intent: fileListIntent, confidence: 1, entities: { path: localLocation } }
+      ? { intent: fileListIntent, confidence: 1, entities: { path: localLocation, fileType: query.requestedFileType || null } }
       : null;
   }
 
@@ -732,7 +995,8 @@ class ActionRouter {
 
   _resolveGeneralQuestionSearchIntent(rawText, preparedInput) {
     const input = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
-    if (!/^(what|who|when|where|why|how)\b/.test(input)) {
+    const query = preparedInput?.query || {};
+    if (!/^(what|who|when|where|why|how|which)\b/.test(input) && !query.isKnowledgeQuestion) {
       return null;
     }
 
@@ -750,9 +1014,9 @@ class ActionRouter {
   _buildSearchEntities(rawText, preparedInput) {
     const corrected = String(preparedInput?.correctedText || rawText || '').trim();
     const raw = String(rawText || corrected || '').trim();
-    const isQuestion = /^(?:what|who|when|where|why|how)\b/i.test(corrected || raw);
+    const isQuestion = /^(?:what|who|when|where|why|how|which)\b/i.test(corrected || raw);
     let query = isQuestion
-      ? (raw || corrected)
+      ? (corrected || raw)
       : (this.entityExtractor._extractQuery(corrected.toLowerCase(), raw) || raw || corrected);
     const openInBrowser = /\b(?:open|show|search|look\s+up|google).*\b(?:in|on)\s+(?:chrome|browser)\b/i.test(raw)
       || /\b(?:open|show)\s+(?:it|results?)\s+(?:in|on)\s+(?:chrome|browser)\b/i.test(raw);

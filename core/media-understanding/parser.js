@@ -230,6 +230,9 @@ class MediaParser {
   }
 
   _buildQuery({ artist, song, genre, entityText }) {
+    const preferenceMatch = String(entityText || '').match(/\b(?:liked|favorite|favourite)\s+(?:song|songs|music|tracks?)\b/i);
+    if (preferenceMatch) return preferenceMatch[0].toLowerCase();
+
     if (artist && song) return `${artist} ${song}`;
     if (artist) return `${artist} songs`;
     if (genre) return `${genre} songs`;

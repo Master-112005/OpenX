@@ -77,6 +77,7 @@ class NlpProcessor {
     const intentText = intentTokens.join(' ').trim();
     const repairedCommandText = this._repairNoisyCommandText(correctedTokens);
     const commandText = repairedCommandText || correctedText;
+    const query = this._understandQuery(correctedTokens, correctedText, text || '');
     const noiseTokenCount = this._countNoiseTokens(correctedTokens);
     const actionTokenCount = this._countActionTokens(correctedTokens);
     const repairContextTokenCount = this._countRepairContextTokens(correctedTokens);
@@ -88,6 +89,7 @@ class NlpProcessor {
       correctedText,
       commandText,
       repairedCommandText,
+      query,
       noiseTokenCount,
       actionTokenCount,
       repairContextTokenCount,
@@ -97,6 +99,75 @@ class NlpProcessor {
       bigrams,
       intentBigrams
     };
+  }
+
+  _understandQuery(tokens, correctedText, rawText) {
+    const safeTokens = Array.isArray(tokens) ? tokens : [];
+    const text = String(correctedText || '').trim().toLowerCase();
+    const raw = String(rawText || '').trim();
+    const questionWord = safeTokens.find(token => ['what', 'who', 'when', 'where', 'why', 'how', 'which'].includes(token)) || null;
+    const action = this._findNoisyAction(safeTokens);
+    const localLocation = this._findLocalLocation(safeTokens);
+    const requestedFileType = this._findRequestedFileType(safeTokens);
+    const isQuestion = Boolean(questionWord) || /^(?:what|who|when|where|why|how|which)\b/i.test(raw);
+    const isLocalFileQuestion = Boolean(localLocation) &&
+      /\b(?:file|files|folder|folders|items|contents|pdf|pdfs|documents?)\b/i.test(text) &&
+      /^(?:what|which|show|list|tell)\b/i.test(text);
+    const isKnowledgeQuestion = isQuestion && !isLocalFileQuestion &&
+      !/\b(?:time|date|day)\b/i.test(text);
+    const clauses = text
+      .split(/\s+\band\b\s+|\s*;\s*/i)
+      .map(clause => clause.trim())
+      .filter(Boolean);
+
+    let type = 'unknown';
+    if (action?.verb) {
+      type = 'action';
+    }
+    if (isQuestion) {
+      type = isKnowledgeQuestion ? 'knowledge-question' : 'local-question';
+    }
+    if (isLocalFileQuestion) {
+      type = 'local-file-question';
+    }
+
+    return {
+      type,
+      questionWord,
+      actionVerb: action?.verb || null,
+      localLocation,
+      requestedFileType,
+      isQuestion,
+      isKnowledgeQuestion,
+      isLocalFileQuestion,
+      clauses
+    };
+  }
+
+  _findLocalLocation(tokens) {
+    const folders = Object.keys(EntityExtractor.FOLDER_ALIASES || {});
+    for (const token of tokens || []) {
+      if (folders.includes(token)) {
+        return EntityExtractor.FOLDER_ALIASES[token];
+      }
+      const match = Normalizer.findClosestOption(token, folders, {
+        minSimilarity: 0.68,
+        maxDistance: 2
+      });
+      if (match) {
+        return EntityExtractor.FOLDER_ALIASES[match.normalizedMatch];
+      }
+    }
+    return null;
+  }
+
+  _findRequestedFileType(tokens) {
+    const joined = (tokens || []).join(' ');
+    if (/\bpdfs?\b/i.test(joined)) return 'pdf';
+    if (/\bimages?\b|\bphotos?\b|\bpictures?\b/i.test(joined)) return 'image';
+    if (/\bvideos?\b/i.test(joined)) return 'video';
+    if (/\baudio\b|\bmusic\b|\bsongs?\b/i.test(joined)) return 'audio';
+    return null;
   }
 
   scorePattern(preparedInput, pattern) {

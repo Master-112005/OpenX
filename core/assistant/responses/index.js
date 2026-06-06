@@ -38,12 +38,12 @@ function pathLabel(filePath) {
   if (!filePath || typeof filePath !== 'string') return '';
 
   const normalized = filePath.toLowerCase();
-  if (normalized.includes('\\desktop\\')) return 'Desktop';
-  if (normalized.includes('\\documents\\')) return 'Documents';
-  if (normalized.includes('\\downloads\\')) return 'Downloads';
-  if (normalized.includes('\\pictures\\')) return 'Pictures';
-  if (normalized.includes('\\music\\')) return 'Music';
-  if (normalized.includes('\\videos\\')) return 'Videos';
+  if (normalized.includes('\\desktop\\') || normalized.endsWith('\\desktop')) return 'Desktop';
+  if (normalized.includes('\\documents\\') || normalized.endsWith('\\documents')) return 'Documents';
+  if (normalized.includes('\\downloads\\') || normalized.endsWith('\\downloads')) return 'Downloads';
+  if (normalized.includes('\\pictures\\') || normalized.endsWith('\\pictures')) return 'Pictures';
+  if (normalized.includes('\\music\\') || normalized.endsWith('\\music')) return 'Music';
+  if (normalized.includes('\\videos\\') || normalized.endsWith('\\videos')) return 'Videos';
   return path.dirname(filePath);
 }
 
@@ -58,6 +58,10 @@ function humanizeError(error) {
     const appName = message.split(':').slice(1).join(':').trim();
     return appName ? `I cannot find the ${appName} app` : 'I cannot find that app';
   }
+  if (lowered.includes('mode not found')) return 'I cannot find that mode in settings';
+  if (lowered.includes('mode has no apps or commands configured')) return 'That mode does not have any apps or commands configured yet';
+  if (lowered.includes('mode has no apps configured')) return 'That mode does not have any apps configured yet';
+  if (lowered.includes('some mode apps failed')) return 'I started the mode, but one or more apps could not be opened';
   if (lowered.includes('file not found')) return 'Unable to find that file';
   if (lowered.includes('folder not found')) return 'Unable to find that folder';
   if (lowered.includes('source not found')) return 'Unable to find the source item';
@@ -196,6 +200,28 @@ const RESPONSE_BUILDERS = {
         `Focused on ${name}.`
       ]);
     },
+    'mode.start': context => {
+      const modeName = valueFromContext(context, 'modeName', 'mode');
+      const opened = valueFromContext(context, 'opened', []);
+      const failed = valueFromContext(context, 'failed', []);
+      const commandSteps = valueFromContext(context, 'commandSteps', []);
+      const openedLabel = Array.isArray(opened) && opened.length > 0
+        ? opened.join(', ')
+        : '';
+      const commandCount = Array.isArray(commandSteps) ? commandSteps.filter(step => step.success).length : 0;
+      const commandLabel = commandCount > 0
+        ? ` Ran ${commandCount} configured command${commandCount === 1 ? '' : 's'}.`
+        : '';
+      if (Array.isArray(failed) && failed.length > 0) {
+        const failedLabel = failed.map(item => item.appName).join(', ');
+        return openedLabel
+          ? `Started ${modeName} mode and opened ${openedLabel}. Could not open ${failedLabel}.${commandLabel}`
+          : `I found ${modeName} mode, but could not open its apps.`;
+      }
+      return openedLabel
+        ? `Started ${modeName} mode and opened ${openedLabel}.${commandLabel}`
+        : `Started ${modeName} mode.${commandLabel}`;
+    },
     'file.create': context => {
       const filePath = valueFromContext(context, 'path', valueFromContext(context, 'filename'));
       const fileName = valueFromContext(context, 'filename', basenameOrValue(filePath));
@@ -256,15 +282,19 @@ const RESPONSE_BUILDERS = {
       const entries = valueFromContext(context, 'entries', []);
       const count = valueFromContext(context, 'count', 0);
       const location = pathLabel(valueFromContext(context, 'path')) || valueFromContext(context, 'location', 'that folder');
+      const fileType = valueFromContext(context, 'fileType', null);
+      const typeLabel = fileType ? `${fileType.toUpperCase()} ${count === 1 ? 'file' : 'files'}` : `${count === 1 ? 'item' : 'items'}`;
       if (!Array.isArray(entries) || entries.length === 0) {
-        return `I did not find any visible files or folders in ${location}.`;
+        return fileType
+          ? `I did not find any visible ${fileType.toUpperCase()} files in ${location}.`
+          : `I did not find any visible files or folders in ${location}.`;
       }
 
       const names = entries.slice(0, 5).map(entry => entry.name).join(', ');
       const remaining = Math.max(0, count - Math.min(entries.length, 5));
       return remaining > 0
-        ? `${location} has ${count} items. The first ones are ${names}, and ${remaining} more.`
-        : `${location} has ${count} ${count === 1 ? 'item' : 'items'}: ${names}.`;
+        ? `${location} has ${count} ${typeLabel}. The first ones are ${names}, and ${remaining} more.`
+        : `${location} has ${count} ${typeLabel}: ${names}.`;
     },
     'folder.create': context => {
       const folderPath = valueFromContext(context, 'path');

@@ -109,6 +109,51 @@ describe('File Management Automation', function() {
     assert.deepEqual(result.data.entries.map(entry => entry.name), ['Projects', 'notes.txt']);
   });
 
+  it('should list only requested file types from a local question', async function() {
+    fs.writeFileSync(path.join(tempProfile, 'Desktop', 'report.pdf'), 'pdf', 'utf8');
+    fs.writeFileSync(path.join(tempProfile, 'Desktop', 'notes.txt'), 'todo', 'utf8');
+
+    const result = await router.process('what are the pdfs on the desktop', 'chat');
+
+    assert.equal(result.success, true);
+    assert.equal(result.intent, 'file.list');
+    assert.equal(result.entities.path, 'desktop');
+    assert.equal(result.entities.fileType, 'pdf');
+    assert.equal(result.data.count, 1);
+    assert.deepEqual(result.data.entries.map(entry => entry.name), ['report.pdf']);
+  });
+
+  it('should delete named files without requiring the word file', async function() {
+    const targetPath = path.join(tempProfile, 'Desktop', 'farmcast.pdf');
+    fs.writeFileSync(targetPath, 'pdf', 'utf8');
+
+    const result = await router.process('delete farmcast pdf on the desktop', 'chat');
+
+    assert.equal(result.success, true);
+    assert.equal(result.intent, 'file.delete');
+    assert.equal(result.entities.filename, 'farmcast.pdf');
+    assert.equal(result.entities.path, 'desktop');
+    assert.equal(fs.existsSync(targetPath), false);
+  });
+
+  it('should preserve multi-word filenames and match partial spoken names', async function() {
+    const targetPath = path.join(tempProfile, 'Desktop', 'FarmCast Complete Static Analysis.pdf');
+    fs.writeFileSync(targetPath, 'pdf', 'utf8');
+
+    const explicit = await router.process('delete FarmCast Complete Static Analysis.pdf on the desktop', 'chat');
+
+    assert.equal(explicit.success, true);
+    assert.equal(explicit.entities.filename, 'FarmCast Complete Static Analysis.pdf');
+    assert.equal(fs.existsSync(targetPath), false);
+
+    fs.writeFileSync(targetPath, 'pdf', 'utf8');
+    const partial = await router.process('delete the farmcast pdf on the desktop', 'chat');
+
+    assert.equal(partial.success, true);
+    assert.equal(partial.entities.filename, 'farmcast.pdf');
+    assert.equal(fs.existsSync(targetPath), false);
+  });
+
   it('should open a matching folder when no app is found', async function() {
     const folderPath = path.join(tempProfile, 'OpenX');
     fs.mkdirSync(folderPath, { recursive: true });

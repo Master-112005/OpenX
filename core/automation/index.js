@@ -1,4 +1,5 @@
 const Logger = require('../shared/index').Logger;
+const Normalizer = require('../shared/index').Normalizer;
 const VolumeController = require('./volume/index');
 const BrightnessController = require('./brightness/index');
 const FileController = require('./files/index');
@@ -70,6 +71,7 @@ class AutomationEngine {
       },
       'app.close': (entities) => this.apps.close(entities.appName),
       'app.switch': (entities) => this.apps.switchTo(entities.appName),
+      'mode.start': (entities) => this._startMode(entities.modeName),
       'file.create': (entities) => this.files.create(entities.filename, entities.path),
       'file.open': (entities) => this.files.open(entities.filename, entities.path),
       'file.delete': (entities) => this.files.delete(entities.filename, entities.path),
@@ -77,7 +79,7 @@ class AutomationEngine {
       'file.copy': (entities) => this.files.copy(entities.source, entities.destination),
       'file.move': (entities) => this.files.move(entities.source, entities.destination),
       'file.search': (entities) => this.files.search(entities.query),
-      'file.list': (entities) => this.files.list(entities.path),
+      'file.list': (entities) => this.files.list(entities.path, { fileType: entities.fileType }),
       'folder.create': (entities) => this.folders.create(entities.folderName, entities.path),
       'folder.delete': (entities) => this.folders.delete(entities.folderName, entities.path),
       'folder.move': (entities) => this.folders.move(entities.source, entities.destination),
@@ -160,6 +162,71 @@ class AutomationEngine {
 
   getActions() {
     return Object.keys(this._actionMap);
+  }
+
+  async _startMode(modeName) {
+    const requestedName = String(modeName || '').trim();
+    if (!requestedName) {
+      return { success: false, error: 'Mode name is required' };
+    }
+
+    const modes = Array.isArray(this.config?.modes) ? this.config.modes : [];
+    const mode = this._findMode(requestedName, modes);
+    if (!mode) {
+      return { success: false, error: `Mode not found: ${requestedName}` };
+    }
+
+    const apps = Array.isArray(mode.apps)
+      ? mode.apps.map(app => String(app || '').trim()).filter(Boolean)
+      : [];
+    const commands = Array.isArray(mode.commands)
+      ? mode.commands.map(command => String(command || '').trim()).filter(Boolean)
+      : [];
+    if (apps.length === 0 && commands.length === 0) {
+      return { success: false, error: `Mode has no apps or commands configured: ${mode.name}` };
+    }
+
+    const opened = [];
+    const failed = [];
+    for (const appName of apps) {
+      const result = await this.apps.open(appName);
+      if (result?.success) {
+        opened.push(appName);
+      } else {
+        failed.push({ appName, error: result?.error || 'Failed to open' });
+      }
+    }
+
+    return {
+      success: opened.length > 0 || commands.length > 0,
+      error: failed.length > 0 ? `Some mode apps failed: ${failed.map(item => item.appName).join(', ')}` : undefined,
+      data: {
+        modeName: mode.name,
+        opened,
+        failed,
+        appCount: apps.length,
+        commands
+      }
+    };
+  }
+
+  _findMode(modeName, modes) {
+    const normalized = Normalizer.normalizeText(modeName);
+    const candidates = modes.filter(mode => mode && mode.name);
+    const exact = candidates.find(mode => Normalizer.normalizeText(mode.name) === normalized);
+    if (exact) {
+      return exact;
+    }
+
+    const fuzzy = Normalizer.findClosestOption(normalized, candidates.map(mode => mode.name), {
+      minSimilarity: 0.72,
+      maxDistance: 2
+    });
+    if (!fuzzy) {
+      return null;
+    }
+
+    return candidates.find(mode => Normalizer.normalizeText(mode.name) === fuzzy.normalizedMatch) || null;
   }
 }
 

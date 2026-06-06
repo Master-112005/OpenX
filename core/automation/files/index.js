@@ -44,7 +44,7 @@ class FileController {
         return candidate;
       }
 
-      return null;
+      return this._findFuzzyFileInDirectory(dir, safeName);
     }
 
     return findEntryByName(safeName, {
@@ -253,13 +253,14 @@ class FileController {
     };
   }
 
-  list(targetPath = 'home') {
+  list(targetPath = 'home', options = {}) {
     const dir = resolveDirectory(targetPath || 'home', { mustExist: true });
     if (!dir) {
       return { success: false, error: 'Folder not found' };
     }
 
     try {
+      const fileType = String(options?.fileType || '').trim().toLowerCase();
       const entries = fs.readdirSync(dir, { withFileTypes: true })
         .filter(entry => !entry.name.startsWith('.'))
         .map(entry => ({
@@ -267,6 +268,7 @@ class FileController {
           type: entry.isDirectory() ? 'folder' : 'file',
           path: path.join(dir, entry.name)
         }))
+        .filter(entry => this._matchesListFilter(entry, fileType))
         .sort((left, right) => {
           if (left.type !== right.type) {
             return left.type === 'folder' ? -1 : 1;
@@ -279,6 +281,7 @@ class FileController {
         data: {
           path: dir,
           location: targetPath || 'home',
+          fileType: fileType || null,
           entries: entries.slice(0, 30),
           count: entries.length,
           fileCount: entries.filter(entry => entry.type === 'file').length,
@@ -289,6 +292,74 @@ class FileController {
       this.logger.error('Failed to list files', err);
       return { success: false, error: err.message };
     }
+  }
+
+  _matchesListFilter(entry, fileType) {
+    if (!fileType) {
+      return true;
+    }
+
+    if (fileType === 'pdf') {
+      return entry.type === 'file' && /\.pdf$/i.test(entry.name);
+    }
+    if (fileType === 'image') {
+      return entry.type === 'file' && /\.(png|jpe?g|gif|webp|bmp|svg)$/i.test(entry.name);
+    }
+    if (fileType === 'video') {
+      return entry.type === 'file' && /\.(mp4|mkv|mov|avi|webm|wmv)$/i.test(entry.name);
+    }
+    if (fileType === 'audio') {
+      return entry.type === 'file' && /\.(mp3|wav|m4a|flac|aac|ogg)$/i.test(entry.name);
+    }
+
+    return true;
+  }
+
+  _findFuzzyFileInDirectory(dir, requestedName) {
+    if (!dir || !requestedName || !fs.existsSync(dir)) {
+      return null;
+    }
+
+    const requestedExt = path.extname(requestedName).toLowerCase();
+    const requestedBase = path.basename(requestedName, requestedExt).toLowerCase();
+    const requestedTokens = requestedBase
+      .split(/[^a-z0-9]+/i)
+      .map(token => token.trim())
+      .filter(Boolean);
+
+    if (requestedTokens.length === 0 && !requestedExt) {
+      return null;
+    }
+
+    let entries = [];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch (err) {
+      return null;
+    }
+
+    const matches = entries
+      .filter(entry => entry.isFile())
+      .map(entry => {
+        const entryExt = path.extname(entry.name).toLowerCase();
+        if (requestedExt && entryExt !== requestedExt) {
+          return null;
+        }
+
+        const entryBase = path.basename(entry.name, entryExt).toLowerCase();
+        const tokenScore = requestedTokens.filter(token => entryBase.includes(token)).length;
+        const exactSubstring = requestedBase && entryBase.includes(requestedBase);
+        const score = (exactSubstring ? 10 : 0) + tokenScore;
+        return score > 0 ? { entry, score } : null;
+      })
+      .filter(Boolean)
+      .sort((left, right) => right.score - left.score || left.entry.name.localeCompare(right.entry.name));
+
+    if (matches.length === 0) {
+      return null;
+    }
+
+    return path.join(dir, matches[0].entry.name);
   }
 }
 

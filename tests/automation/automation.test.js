@@ -12,6 +12,7 @@ describe('Automation Engine', function() {
     const actions = engine.getActions();
     assert.ok(actions.includes('volume.set'));
     assert.ok(actions.includes('app.open'));
+    assert.ok(actions.includes('mode.start'));
     assert.ok(actions.includes('file.create'));
     assert.ok(actions.includes('file.open'));
     assert.ok(actions.includes('file.list'));
@@ -47,6 +48,47 @@ describe('Automation Engine', function() {
     const engine = new AutomationEngine({});
     const result = await engine.execute('nonexistent.action', {});
     assert.equal(result.success, false);
+  });
+
+  it('should start configured app modes', async function() {
+    const engine = new AutomationEngine({
+      modes: [
+        { name: 'gaming', apps: ['chrome', 'discord'], commands: ['set volume to 45'] }
+      ]
+    });
+    const opened = [];
+    engine.apps.open = async (appName) => {
+      opened.push(appName);
+      return { success: true, data: { appName } };
+    };
+
+    const result = await engine.execute('mode.start', { modeName: 'gaming' });
+
+    assert.equal(result.success, true);
+    assert.deepEqual(opened, ['chrome', 'discord']);
+    assert.deepEqual(result.data.opened, ['chrome', 'discord']);
+    assert.deepEqual(result.data.commands, ['set volume to 45']);
+  });
+
+  it('should allow command-only modes', async function() {
+    const engine = new AutomationEngine({
+      modes: [
+        { name: 'media', apps: [], commands: ['play liked songs'] }
+      ]
+    });
+    const result = await engine.execute('mode.start', { modeName: 'media' });
+
+    assert.equal(result.success, true);
+    assert.deepEqual(result.data.opened, []);
+    assert.deepEqual(result.data.commands, ['play liked songs']);
+  });
+
+  it('should fail clearly when a configured mode is missing', async function() {
+    const engine = new AutomationEngine({ modes: [] });
+    const result = await engine.execute('mode.start', { modeName: 'gaming' });
+
+    assert.equal(result.success, false);
+    assert.match(result.error, /Mode not found/);
   });
 
   it('should route volume actions correctly', function() {

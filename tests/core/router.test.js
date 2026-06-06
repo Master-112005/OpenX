@@ -51,6 +51,95 @@ describe('Action Router', function() {
     assert.equal(result.entities.appName, 'chrome');
   });
 
+  it('should keep compound close commands on app.close before media resume', async function() {
+    const config = {
+      permissions: {
+        levels: {
+          low: { requiresConfirmation: false, requiresAuth: false },
+          medium: { requiresConfirmation: false, requiresAuth: false }
+        }
+      }
+    };
+    const stubEngine = {
+      execute(actionId) {
+        return { success: true, data: { actionId } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const result = await router.process('close chrome and continue the video on youtube', 'chat', { allowMulti: false });
+
+    assert.equal(result.intent, 'app.close');
+    assert.equal(result.entities.appName, 'chrome');
+  });
+
+  it('should execute independent multi-command requests in sequence', async function() {
+    const config = {
+      permissions: {
+        levels: {
+          low: { requiresConfirmation: false, requiresAuth: false },
+          medium: { requiresConfirmation: false, requiresAuth: false }
+        }
+      }
+    };
+    const executed = [];
+    const stubEngine = {
+      execute(actionId, entities) {
+        executed.push({ actionId, entities });
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const result = await router.process('stop music and open chrome', 'chat');
+
+    assert.equal(result.intent, 'multi.command');
+    assert.deepEqual(executed.map(step => step.actionId), ['media.stop', 'app.open']);
+    assert.equal(executed[1].entities.appName, 'chrome');
+  });
+
+  it('should split window and volume commands without swallowing the second command', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const executed = [];
+    const stubEngine = {
+      execute(actionId, entities) {
+        executed.push({ actionId, entities });
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const result = await router.process('minimize the youtube and set vol to 50', 'chat');
+
+    assert.equal(result.intent, 'multi.command');
+    assert.deepEqual(executed.map(step => step.actionId), ['window.minimize', 'volume.set']);
+    assert.equal(executed[0].entities.windowName, 'youtube');
+    assert.equal(executed[1].entities.value, 50);
+  });
+
+  it('should execute three or four app commands and carry the verb to bare follow-up apps', async function() {
+    const config = {
+      permissions: {
+        levels: {
+          low: { requiresConfirmation: false, requiresAuth: false },
+          medium: { requiresConfirmation: false, requiresAuth: false }
+        }
+      }
+    };
+    const executed = [];
+    const stubEngine = {
+      execute(actionId, entities) {
+        executed.push({ actionId, entities });
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const result = await router.process('clouse chrome and open whatsapp and clock', 'chat');
+
+    assert.equal(result.intent, 'multi.command');
+    assert.deepEqual(executed.map(step => step.actionId), ['app.close', 'app.open', 'app.open']);
+    assert.deepEqual(executed.map(step => step.entities.appName), ['chrome', 'whatsapp', 'clock']);
+  });
+
   it('should tolerate misordered close app phrasing', async function() {
     const config = {
       permissions: {
@@ -364,6 +453,53 @@ describe('Action Router', function() {
     assert.equal(result.entities.appName, 'google chat');
   });
 
+  it('should route saved mode commands before generic app opening', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...entities, opened: ['chrome'] } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const result = await router.process('start gaming mode', 'chat');
+
+    assert.equal(result.intent, 'mode.start');
+    assert.equal(result.entities.modeName, 'gaming');
+  });
+
+  it('should execute configured commands after starting a saved mode', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const executed = [];
+    const stubEngine = {
+      execute(actionId, entities) {
+        executed.push({ actionId, entities });
+        if (actionId === 'mode.start') {
+          return {
+            success: true,
+            data: {
+              modeName: entities.modeName,
+              opened: ['youtube'],
+              failed: [],
+              commands: ['play liked songs', 'set volume to 45']
+            }
+          };
+        }
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const result = await router.process('start media mode', 'chat');
+
+    assert.equal(result.intent, 'mode.start');
+    assert.deepEqual(executed.map(step => step.actionId), ['mode.start', 'media.play', 'volume.set']);
+    assert.equal(executed[1].entities.mediaQuery, 'liked songs');
+    assert.equal(result.data.commandSteps.length, 2);
+  });
+
   it('should route web searches to browser.search', async function() {
     const config = {
       permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
@@ -499,6 +635,47 @@ describe('Action Router', function() {
 
     assert.equal(result.intent, 'file.list');
     assert.equal(result.entities.path, 'desktop');
+  });
+
+  it('should route local file-type questions to filtered file listing', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId) {
+        return { success: true, data: { actionId, entries: [], count: 0 } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const result = await router.process('what are the pdfs on the desktop', 'chat');
+
+    assert.equal(result.intent, 'file.list');
+    assert.equal(result.entities.path, 'desktop');
+    assert.equal(result.entities.fileType, 'pdf');
+  });
+
+  it('should route corrected knowledge questions to background web search', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const whichWinner = await router.process('which team is the winner of ipl 2020', 'chat');
+    const compactWinner = await router.process('who is the winner of ipl2020', 'chat');
+    const captain = await router.process('who is the capatin of indian cricket team in 2026', 'chat');
+
+    assert.equal(whichWinner.intent, 'browser.search');
+    assert.equal(whichWinner.entities.query, 'which team is the winner of ipl 2020');
+    assert.equal(compactWinner.intent, 'browser.search');
+    assert.equal(compactWinner.entities.query, 'who is the winner of ipl 2020');
+    assert.equal(captain.intent, 'browser.search');
+    assert.equal(captain.entities.query, 'who is the captain of indian cricket team in 2026');
   });
 
   it('should mark search queries for browser opening only when explicit', async function() {
@@ -644,6 +821,23 @@ describe('Action Router', function() {
     assert.equal(result.entities.reminderText, 'eat lunch');
   });
 
+  it('should route reminder commands that still need a time detail', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId, entities) {
+        return { success: false, error: 'Invalid reminder time', data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const result = await router.process('remind me to happy birthday to my brother', 'chat');
+
+    assert.equal(result.intent, 'reminder.set');
+    assert.equal(result.entities.reminderText, 'happy birthday to my brother');
+  });
+
   it('should route play next song to media.next', async function() {
     const config = {
       permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
@@ -783,6 +977,9 @@ describe('Action Router', function() {
 
     const stopResult = await router.process('stop music', 'chat');
     assert.equal(stopResult.intent, 'media.stop');
+
+    const typoStopResult = await router.process('stop musc', 'chat');
+    assert.equal(typoStopResult.intent, 'media.stop');
 
     const searchResult = await router.process('search music arijit', 'chat');
     assert.equal(searchResult.intent, 'media.search');
