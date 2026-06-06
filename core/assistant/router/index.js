@@ -61,6 +61,7 @@ class ActionRouter {
       this._resolveExplicitCommunicationIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitOpenIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitAppOpenIntent(rawCommandText, preparedInput) ||
+      this._resolveCalculationIntent(rawCommandText, preparedInput) ||
       this._resolveLocalInfoIntent(rawCommandText, preparedInput) ||
       this._resolveLocalFileListIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitSearchIntent(rawCommandText, preparedInput) ||
@@ -600,6 +601,99 @@ class ActionRouter {
     }
 
     return null;
+  }
+
+  _resolveCalculationIntent(rawText, preparedInput) {
+    const input = String(rawText || preparedInput?.correctedText || '').trim();
+    if (!input) {
+      return null;
+    }
+
+    const expression = this._extractCalculationExpression(input) ||
+      this._extractCalculationExpression(preparedInput?.correctedText);
+    if (!expression) {
+      return null;
+    }
+
+    const calculateIntent = this.intentRegistry.get('system.calculate');
+    return calculateIntent
+      ? { intent: calculateIntent, confidence: 1, entities: { expression } }
+      : null;
+  }
+
+  _extractCalculationExpression(input) {
+    const text = String(input || '')
+      .trim()
+      .toLowerCase()
+      .replace(/\behat\b/g, 'what')
+      .replace(/\bteh\b/g, 'the');
+    if (!text) {
+      return null;
+    }
+
+    const withoutLead = text
+      .replace(/^(?:what\s+is|what's|calculate|solve|answer|find|tell\s+me)\s+/i, '')
+      .replace(/^(?:the\s+)?(?:value|answer|result)\s+of\s+/i, '')
+      .trim();
+
+    const candidate = withoutLead || text;
+    if (this._looksLikeCalculationExpression(candidate)) {
+      return candidate;
+    }
+
+    const symbolSegments = candidate.match(/[-+*/%^().,\d\s]+/g) || [];
+    const bestSegment = symbolSegments
+      .map(segment => segment.trim())
+      .filter(segment => segment.length > 0)
+      .sort((left, right) => right.length - left.length)
+      .find(segment => this._looksLikeCalculationExpression(segment));
+
+    return bestSegment || null;
+  }
+
+  _looksLikeCalculationExpression(candidate) {
+    const text = String(candidate || '').trim();
+    if (!text || !/\d/.test(text)) {
+      return false;
+    }
+
+    const operatorWords = [
+      'plus',
+      'add',
+      'minus',
+      'subtract',
+      'times',
+      'multiply',
+      'multiplied',
+      'divide',
+      'divided',
+      'over',
+      'power',
+      'squared',
+      'cubed',
+      'root',
+      'percent'
+    ];
+    const hasOperator = /[+\-*/%^]/.test(text) ||
+      new RegExp(`\\b(?:${operatorWords.join('|')})\\b`, 'i').test(text);
+    if (!hasOperator) {
+      return false;
+    }
+
+    const allowedWords = [
+      ...operatorWords,
+      'by',
+      'of',
+      'to',
+      'the',
+      'square',
+      'sqrt',
+      'absolute',
+      'abs'
+    ];
+    const wordMatches = text.match(/[a-z]+/gi) || [];
+    return wordMatches.every(word => allowedWords.includes(word.toLowerCase())) &&
+      /^[\d\s+\-*/%^().,%a-z]+$/i.test(text);
   }
 
   _resolveLocalFileListIntent(rawText, preparedInput) {

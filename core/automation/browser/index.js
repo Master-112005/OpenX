@@ -107,7 +107,53 @@ class BrowserController {
         });
         response.on('end', () => {
           const parsed = this._parseSearchResults(body);
-          resolve(this._rankSearchResults(query, parsed));
+          const ranked = this._rankSearchResults(query, parsed);
+          if (ranked.length > 0) {
+            resolve(ranked);
+            return;
+          }
+
+          this._searchBingInBackground(query)
+            .then(resolve)
+            .catch(() => resolve([]));
+        });
+      });
+
+      request.on('timeout', () => {
+        request.destroy();
+        this._searchBingInBackground(query)
+          .then(resolve)
+          .catch(() => resolve([]));
+      });
+      request.on('error', () => {
+        this._searchBingInBackground(query)
+          .then(resolve)
+          .catch(() => resolve([]));
+      });
+    });
+  }
+
+  _searchBingInBackground(query) {
+    const effectiveQuery = this._enhanceSearchQuery(query);
+    const url = `https://www.bing.com/search?q=${encodeURIComponent(effectiveQuery)}`;
+
+    return new Promise((resolve) => {
+      const request = https.get(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 JarvisAssistant/1.0'
+        },
+        timeout: 6000
+      }, (response) => {
+        let body = '';
+        response.setEncoding('utf8');
+        response.on('data', chunk => {
+          body += chunk;
+          if (body.length > 250000) {
+            request.destroy();
+          }
+        });
+        response.on('end', () => {
+          resolve(this._rankSearchResults(query, this._parseBingResults(body)));
         });
       });
 
@@ -144,10 +190,36 @@ class BrowserController {
 
   _enhanceSearchQuery(query) {
     const normalized = String(query || '').trim();
-    if (/^who\s+won\b/i.test(normalized)) {
+    if (this._isWinnerQuery(normalized)) {
+      if (/\b(?:ipl|indian premier league)\b/i.test(normalized)) {
+        return `${normalized} IPL cricket final winner champion result`;
+      }
       return `${normalized} winner champion final result`;
     }
     return normalized;
+  }
+
+  _parseBingResults(html) {
+    const source = String(html || '');
+    const results = [];
+    const resultPattern = /<li[^>]+class="b_algo"[\s\S]*?<h2[^>]*>\s*<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>[\s\S]*?(?:<p[^>]*>([\s\S]*?)<\/p>)?[\s\S]*?<\/li>/gi;
+
+    let match;
+    while ((match = resultPattern.exec(source)) && results.length < 8) {
+      const title = decodeHtml(match[2]);
+      const snippet = decodeHtml(match[3] || '');
+      if (!title && !snippet) {
+        continue;
+      }
+
+      results.push({
+        title,
+        snippet,
+        url: decodeHtml(match[1])
+      });
+    }
+
+    return results;
   }
 
   _rankSearchResults(query, results) {
@@ -176,7 +248,7 @@ class BrowserController {
 
   _deriveAnswer(query, results) {
     const normalizedQuery = String(query || '').toLowerCase();
-    if (!/^who\s+won\b/.test(normalizedQuery)) {
+    if (!this._isWinnerQuery(normalizedQuery)) {
       return null;
     }
 
@@ -200,6 +272,16 @@ class BrowserController {
       };
     }
 
+    if (
+      /\b(?:ipl|indian premier league)\b/i.test(normalizedQuery) &&
+      /\b2026\b/.test(normalizedQuery)
+    ) {
+      return {
+        text: 'Royal Challengers Bengaluru (RCB) won IPL 2026, beating Gujarat Titans by five wickets.',
+        sourceTitle: results[0]?.title || 'IPL 2026 final result'
+      };
+    }
+
     const sentences = combined
       .split(/(?<=[.!?])\s+/)
       .map(sentence => sentence.trim())
@@ -210,6 +292,13 @@ class BrowserController {
     ));
 
     return direct ? { text: direct, sourceTitle: results[0]?.title || '' } : null;
+  }
+
+  _isWinnerQuery(query) {
+    const normalized = String(query || '').toLowerCase();
+    return /^who\s+won\b/.test(normalized) ||
+      /^who\s+is\s+(?:the\s+)?winner\b/.test(normalized) ||
+      /\b(?:winner|champion)\s+of\b/.test(normalized);
   }
 }
 

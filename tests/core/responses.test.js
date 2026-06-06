@@ -61,6 +61,13 @@ describe('Response Generator', function() {
     assert.ok(date.includes('Saturday, June 6, 2026'));
   });
 
+  it('should speak calculation answers', function() {
+    const gen = new ResponseGenerator();
+    const result = gen.generate('success', 'system.calculate', { result: { data: { result: 600 } } });
+
+    assert.ok(result.includes('600'));
+  });
+
   it('should summarize background web search results', function() {
     const gen = new ResponseGenerator();
     const result = gen.generate('success', 'browser.search', {

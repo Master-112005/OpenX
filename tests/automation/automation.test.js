@@ -27,6 +27,7 @@ describe('Automation Engine', function() {
     assert.ok(actions.includes('system.status'));
     assert.ok(actions.includes('system.time'));
     assert.ok(actions.includes('system.date'));
+    assert.ok(actions.includes('system.calculate'));
     assert.ok(actions.includes('system.shutdown'));
     assert.ok(actions.includes('window.minimize'));
     assert.ok(actions.includes('help'));
@@ -66,6 +67,34 @@ describe('Automation Engine', function() {
     assert.ok(actions.includes('system.processes'));
     assert.ok(actions.includes('system.time'));
     assert.ok(actions.includes('system.date'));
+    assert.ok(actions.includes('system.calculate'));
+  });
+
+  it('should execute local calculations', async function() {
+    const engine = new AutomationEngine({});
+    const result = await engine.execute('system.calculate', { expression: '20*30 + 5' });
+
+    assert.equal(result.success, true);
+    assert.equal(result.data.result, 605);
+  });
+
+  it('should execute expanded local calculation forms', async function() {
+    const engine = new AutomationEngine({});
+    const cases = [
+      ['ehat is teh value of 999+959*9', 9630],
+      ['2 to the power of 8', 256],
+      ['square root of 144', 12],
+      ['25% of 200', 50],
+      ['30 percent of 20', 6],
+      ['1,000 + 2.5', 1002.5],
+      ['absolute value of -15', 15]
+    ];
+
+    for (const [expression, expected] of cases) {
+      const result = await engine.execute('system.calculate', { expression });
+      assert.equal(result.success, true, expression);
+      assert.equal(result.data.result, expected, expression);
+    }
   });
 
   it('should route media actions correctly', function() {

@@ -338,6 +338,12 @@ const RESPONSE_BUILDERS = {
       const date = valueFromContext(context, 'date');
       return date ? `Today is ${date}.` : 'I could not read the current date.';
     },
+    'system.calculate': context => {
+      const result = valueFromContext(context, 'result');
+      return result !== '' && result !== null && result !== undefined
+        ? `The answer is ${result}.`
+        : 'I could not calculate that.';
+    },
     'media.play': context => {
       const query = valueFromContext(context, 'query', valueFromContext(context, 'mediaQuery', ''));
       const rawPlatform = valueFromContext(context, 'platform', valueFromContext(context, 'mediaPlatform', 'YouTube'));

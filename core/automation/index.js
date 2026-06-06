@@ -113,6 +113,7 @@ class AutomationEngine {
       'system.status': () => this.system.getStatus(),
       'system.time': () => this.system.getTime(),
       'system.date': () => this.system.getDate(),
+      'system.calculate': (entities) => this.system.calculate(entities.expression),
       'system.cpu': () => this.system.getCPUUsage(),
       'system.memory': () => this.system.getMemoryUsage(),
       'system.battery': () => this.system.getBatteryStatus(),

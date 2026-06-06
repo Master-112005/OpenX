@@ -44,6 +44,157 @@ class SystemController {
     }
   }
 
+  calculate(expression) {
+    const source = String(expression || '').trim();
+    if (!source) {
+      return { success: false, error: 'No calculation expression provided' };
+    }
+
+    try {
+      const normalized = this._normalizeCalculationExpression(source);
+      if (!normalized || !/^[\d+\-*/^().\s%a-z]+$/.test(normalized) || !/\d/.test(normalized)) {
+        return { success: false, error: 'Invalid calculation expression' };
+      }
+
+      const result = this._evaluateArithmeticExpression(normalized);
+      if (!Number.isFinite(result)) {
+        return { success: false, error: 'Invalid calculation result' };
+      }
+
+      return {
+        success: true,
+        data: {
+          expression: source,
+          normalizedExpression: normalized,
+          result: Number.isInteger(result) ? result : Number(result.toFixed(10))
+        }
+      };
+    } catch (err) {
+      return { success: false, error: 'Invalid calculation expression' };
+    }
+  }
+
+  _normalizeCalculationExpression(expression) {
+    return String(expression || '')
+      .toLowerCase()
+      .replace(/\behat\b/g, 'what')
+      .replace(/\bteh\b/g, 'the')
+      .replace(/(\d),(?=\d{3}\b)/g, '$1')
+      .replace(/\b(?:what\s+is|what's|calculate|solve|answer|find|tell\s+me|equals?)\b/g, ' ')
+      .replace(/\b(?:the\s+)?(?:value|answer|result)\s+of\b/g, ' ')
+      .replace(/(\d+(?:\.\d+)?)\s+percent\s+of\s+(\d+(?:\.\d+)?)/g, '$1% of $2')
+      .replace(/(\d+(?:\.\d+)?)\s*%\s+of\s+(\d+(?:\.\d+)?)/g, '($1/100)*$2')
+      .replace(/\b(?:square\s+root|sqrt)\s+of\s+([+\-]?\d+(?:\.\d+)?)/g, 'sqrt($1)')
+      .replace(/\b(?:absolute\s+value|absolute|abs)\s+of\s+([+\-]?\d+(?:\.\d+)?)/g, 'abs($1)')
+      .replace(/\b(?:squared|square)\b/g, '^2')
+      .replace(/\bcubed\b/g, '^3')
+      .replace(/\b(?:to\s+the\s+power\s+of|power\s+of|raised\s+to|power)\b/g, '^')
+      .replace(/\b(?:plus|add)\b/g, '+')
+      .replace(/\b(?:minus|subtract)\b/g, '-')
+      .replace(/\b(?:times|multiply|multiplied\s+by|x)\b/g, '*')
+      .replace(/\b(?:divided\s+by|divide\s+by|over)\b/g, '/')
+      .replace(/[=,]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  _evaluateArithmeticExpression(expression) {
+    const tokens = String(expression || '').match(/sqrt|abs|\d+(?:\.\d+)?|[+\-*/^()%]/g) || [];
+    let index = 0;
+
+    const peek = () => tokens[index];
+    const consume = expected => {
+      const token = tokens[index];
+      if (expected && token !== expected) {
+        throw new Error('Unexpected token');
+      }
+      index += 1;
+      return token;
+    };
+
+    const parseExpression = () => {
+      let value = parseTerm();
+      while (peek() === '+' || peek() === '-') {
+        const operator = consume();
+        const right = parseTerm();
+        value = operator === '+' ? value + right : value - right;
+      }
+      return value;
+    };
+
+    const parseTerm = () => {
+      let value = parsePower();
+      while (peek() === '*' || peek() === '/' || peek() === '%') {
+        const operator = consume();
+        const right = parsePower();
+        if ((operator === '/' || operator === '%') && right === 0) {
+          throw new Error('Division by zero');
+        }
+        if (operator === '*') value *= right;
+        if (operator === '/') value /= right;
+        if (operator === '%') value %= right;
+      }
+      return value;
+    };
+
+    const parsePower = () => {
+      let value = parseFactor();
+      if (peek() === '^') {
+        consume('^');
+        const exponent = parsePower();
+        value = Math.pow(value, exponent);
+      }
+      return value;
+    };
+
+    const parseFactor = () => {
+      if (peek() === '+') {
+        consume('+');
+        return parseFactor();
+      }
+      if (peek() === '-') {
+        consume('-');
+        return -parseFactor();
+      }
+      if (peek() === 'sqrt' || peek() === 'abs') {
+        const fn = consume();
+        const value = peek() === '('
+          ? (() => {
+              consume('(');
+              const inner = parseExpression();
+              consume(')');
+              return inner;
+            })()
+          : parseFactor();
+        if (fn === 'sqrt') {
+          if (value < 0) {
+            throw new Error('Invalid square root');
+          }
+          return Math.sqrt(value);
+        }
+        return Math.abs(value);
+      }
+      if (peek() === '(') {
+        consume('(');
+        const value = parseExpression();
+        consume(')');
+        return value;
+      }
+
+      const token = consume();
+      if (!/^\d+(?:\.\d+)?$/.test(token || '')) {
+        throw new Error('Expected number');
+      }
+      return Number(token);
+    };
+
+    const result = parseExpression();
+    if (index !== tokens.length) {
+      throw new Error('Unexpected trailing tokens');
+    }
+    return result;
+  }
+
   getCPUUsage() {
     try {
       const result = execSync(

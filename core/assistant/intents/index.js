@@ -246,6 +246,14 @@ const INTENT_DEFINITIONS = [
     description: 'Tell the current local date or day'
   },
   {
+    id: 'system.calculate',
+    patterns: ['calculate', 'what is', 'solve'],
+    permissionLevel: 'low',
+    action: 'system.calculate',
+    entities: [{ name: 'expression', type: 'string', required: true }],
+    description: 'Calculate a simple arithmetic expression'
+  },
+  {
     id: 'message.send',
     patterns: ['send message to', 'send a message to', 'send text to', 'message', 'text', 'ask', 'tell', 'msg'],
     permissionLevel: 'low',

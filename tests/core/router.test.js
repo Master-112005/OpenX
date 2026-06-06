@@ -412,6 +412,42 @@ describe('Action Router', function() {
     assert.equal(day.intent, 'system.date');
   });
 
+  it('should route arithmetic questions to local calculation', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...entities, result: 600 } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const result = await router.process('what is 20*30', 'chat');
+
+    assert.equal(result.intent, 'system.calculate');
+    assert.equal(result.entities.expression, '20*30');
+    assert.ok(result.response.includes('600'));
+  });
+
+  it('should extract arithmetic from typo-heavy question text', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...entities, result: 9630 } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const result = await router.process('ehat is teh value of 999+959*9', 'chat');
+
+    assert.equal(result.intent, 'system.calculate');
+    assert.equal(result.entities.expression, '999+959*9');
+    assert.ok(result.response.includes('9630'));
+  });
+
   it('should route event questions to background web search', async function() {
     const config = {
       permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
