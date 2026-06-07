@@ -530,7 +530,7 @@ describe('Action Router', function() {
               modeName: entities.modeName,
               opened: ['youtube', 'chrome'],
               failed: [],
-              commands: ['set volume to 100', 'play liked songs', 'search for chatgpt in chrome']
+              commands: ['set volume to 100', 'play liked songs', 'search for chatgpt in chrome', 'open first result for chatgpt']
             }
           };
         }
@@ -541,10 +541,11 @@ describe('Action Router', function() {
     const result = await router.process('start development mode', 'chat');
 
     assert.equal(result.intent, 'mode.start');
-    assert.deepEqual(executed.map(step => step.actionId), ['mode.start', 'volume.set', 'media.play', 'browser.search']);
+    assert.deepEqual(executed.map(step => step.actionId), ['mode.start', 'volume.set', 'media.play', 'browser.search', 'browser.openFirstResult']);
     assert.equal(executed[3].entities.query, 'chatgpt');
     assert.equal(executed[3].entities.openInBrowser, true);
-    assert.equal(result.data.commandSteps.length, 3);
+    assert.equal(executed[4].entities.query, 'chatgpt');
+    assert.equal(result.data.commandSteps.length, 4);
   });
 
   it('should execute search then first-result browser follow-up commands', async function() {
@@ -816,6 +817,26 @@ describe('Action Router', function() {
     assert.equal(result.intent, 'browser.search');
     assert.equal(result.entities.query, 'chatgpt');
     assert.equal(result.entities.openInBrowser, true);
+  });
+
+  it('should route first-result follow-up commands before generic app opening', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const executed = [];
+    const stubEngine = {
+      execute(actionId, entities) {
+        executed.push({ actionId, entities });
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const result = await router.process('open first result for chatgpt', 'chat');
+
+    assert.equal(result.intent, 'browser.openFirstResult');
+    assert.equal(result.entities.query, 'chatgpt');
+    assert.deepEqual(executed.map(step => step.actionId), ['browser.openFirstResult']);
   });
 
   it('should route whatsapp message commands to message.send', async function() {

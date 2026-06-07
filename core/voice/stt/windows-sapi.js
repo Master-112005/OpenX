@@ -30,14 +30,20 @@ class WindowsSapiSpeechEngine extends EventEmitter {
     }
 
     const mode = String(options.mode || 'command');
-    const timeoutMs = Number(options.startSpeechTimeoutMs) > 0
+    const startSpeechTimeoutMs = Number(options.startSpeechTimeoutMs) > 0
       ? Number(options.startSpeechTimeoutMs)
       : 20000;
+    const maxDurationMs = Number(options.maxDurationMs) > 0
+      ? Number(options.maxDurationMs)
+      : startSpeechTimeoutMs;
+    const timeoutMs = Math.max(1000, Math.min(startSpeechTimeoutMs, maxDurationMs));
 
     this.emit('event', {
       event: 'stt_session_activated',
       mode,
-      startSpeechTimeoutMs: timeoutMs
+      startSpeechTimeoutMs,
+      maxDurationMs,
+      timeoutMs
     });
 
     const scriptPath = this._writeRecognitionScriptFile(timeoutMs, mode);
@@ -294,7 +300,9 @@ class WindowsSapiSpeechEngine extends EventEmitter {
       'call',
       'message',
       'maximize',
-      'minimize'
+      'minimize',
+      'click',
+      'go to'
     ];
     const targetAliases = [
       ['chrome', 'google chrome', 'chrome browser'],
@@ -323,6 +331,17 @@ class WindowsSapiSpeechEngine extends EventEmitter {
       ['file'],
       ['browser']
     ];
+    const webTargets = [
+      'chatgpt',
+      'chat gpt',
+      'claude',
+      'gemini',
+      'perplexity',
+      'github',
+      'gmail',
+      'google drive',
+      'google docs'
+    ];
     const standalone = [
       'help',
       'show help',
@@ -336,7 +355,20 @@ class WindowsSapiSpeechEngine extends EventEmitter {
       'mute volume',
       'unmute volume',
       'increase brightness',
-      'decrease brightness'
+      'decrease brightness',
+      'open first result',
+      'open the first result',
+      'open first link',
+      'open the first link',
+      'click first result',
+      'click the first result',
+      'click first link',
+      'click the first link',
+      'play liked songs',
+      'play songs',
+      'play music',
+      'next song',
+      'previous song'
     ];
     const phrases = new Set(standalone);
 
@@ -356,6 +388,16 @@ class WindowsSapiSpeechEngine extends EventEmitter {
       phrases.add(`open up ${target}`);
       phrases.add(`bring up ${target}`);
       phrases.add(`go to ${target}`);
+    }
+
+    for (const target of webTargets) {
+      phrases.add(`open ${target}`);
+      phrases.add(`open ${target} in chrome`);
+      phrases.add(`search for ${target}`);
+      phrases.add(`search for ${target} in chrome`);
+      phrases.add(`google ${target}`);
+      phrases.add(`click the first result for ${target}`);
+      phrases.add(`open first result for ${target}`);
     }
 
     return Array.from(phrases).sort();

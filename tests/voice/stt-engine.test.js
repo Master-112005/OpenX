@@ -54,6 +54,9 @@ describe('Node Windows SAPI STT Engine', function() {
     assert.ok(phrases.includes('please open youtube'));
     assert.ok(phrases.includes('can you open youtube'));
     assert.ok(phrases.includes('open up youtube'));
+    assert.ok(phrases.includes('search for chatgpt in chrome'));
+    assert.ok(phrases.includes('open first result for chatgpt'));
+    assert.ok(phrases.includes('play liked songs'));
     assert.ok(script.includes('OpenX Commands'));
     assert.ok(script.includes('Alternates'));
   });

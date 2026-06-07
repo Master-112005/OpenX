@@ -59,7 +59,7 @@ const CONFIG = {
     stt: {
       provider: 'windows-sapi',
       language: 'en',
-      maxDurationMs: 12000,
+      maxDurationMs: 20000,
       startSpeechTimeoutMs: 3500,
       minConfidence: 0.55,
       commandRecoveryMinConfidence: 0.25,

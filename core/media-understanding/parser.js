@@ -116,7 +116,9 @@ class MediaParser {
     const inferredPlatform = this.platformMapper.infer(explicitPlatform, context);
     const tail = removePlatformClause(stripPoliteNoise(firstPlayTail(normalizedText) || normalizedText));
     const entityText = this._cleanEntityText(tail);
-    const artistMatch = this.artistMatcher.match(entityText || normalizedText);
+    const artistMatch = this._shouldMatchArtist(entityText)
+      ? this.artistMatcher.match(entityText)
+      : { match: null, confidence: 0, reason: 'generic-media-query' };
     const genre = this._extractGenre(entityText);
     const song = this._extractSong(entityText, artistMatch.match, genre);
     const query = this._buildQuery({ artist: artistMatch.match, song, genre, entityText });
@@ -208,6 +210,21 @@ class MediaParser {
     const tokens = tokenize(input);
     const genre = tokens.find(token => GENRES.has(token));
     return genre || null;
+  }
+
+  _shouldMatchArtist(input) {
+    const tokens = tokenize(input)
+      .filter(token => !GENERIC_MEDIA_TERMS.has(token));
+    if (tokens.length === 0) {
+      return false;
+    }
+
+    const preferenceWords = new Set(['liked', 'favorite', 'favourite']);
+    if (tokens.every(token => preferenceWords.has(token) || GENRES.has(token))) {
+      return false;
+    }
+
+    return true;
   }
 
   _extractSong(input, artist, genre) {

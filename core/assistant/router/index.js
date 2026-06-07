@@ -86,6 +86,7 @@ class ActionRouter {
       this._resolveExplicitAppIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitWindowIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitCommunicationIntent(rawCommandText, preparedInput) ||
+      this._resolveBrowserFollowupIntent(rawCommandText, preparedInput) ||
       this._resolveKnownWebOpenIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitOpenIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitAppOpenIntent(rawCommandText, preparedInput) ||
@@ -93,7 +94,6 @@ class ActionRouter {
       this._resolveCalculationIntent(rawCommandText, preparedInput) ||
       this._resolveLocalInfoIntent(rawCommandText, preparedInput) ||
       this._resolveLocalFileListIntent(rawCommandText, preparedInput) ||
-      this._resolveBrowserFollowupIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitSearchIntent(rawCommandText, preparedInput) ||
       this._resolveGeneralQuestionSearchIntent(rawCommandText, preparedInput) ||
       this._matchIntent(preparedInput)

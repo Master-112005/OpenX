@@ -8,6 +8,8 @@ const {
 const TextToSpeech = require('./tts/index');
 const WindowsSapiSpeechEngine = require('./stt/windows-sapi');
 const { SPEECH_STATES, SpeechStateMachine } = require('./state/index');
+const IntentRegistry = require('../assistant/intents/index').IntentRegistry;
+const NlpProcessor = require('../assistant/nlp/index');
 
 class VoiceManager extends EventEmitter {
   constructor(config, dependencies = {}) {
@@ -36,6 +38,7 @@ class VoiceManager extends EventEmitter {
     this.conversationIgnoredSpeechCount = 0;
     
     this.stt = dependencies.stt || new WindowsSapiSpeechEngine(config);
+    this.nlp = dependencies.nlp || new NlpProcessor(new IntentRegistry());
     this.workerProcess = null;
     this.workerReady = false;
     this.workerStartupPromise = null;
@@ -158,7 +161,9 @@ class VoiceManager extends EventEmitter {
 
       case 'stt_session_activated':
         this.logger.info(`Listening for ${message.mode || 'command'} speech`, {
-          startSpeechTimeoutMs: message.startSpeechTimeoutMs
+          startSpeechTimeoutMs: message.startSpeechTimeoutMs,
+          maxDurationMs: message.maxDurationMs || null,
+          timeoutMs: message.timeoutMs || null
         });
         break;
 
@@ -264,10 +269,19 @@ class VoiceManager extends EventEmitter {
       this._handleIgnoredSpeech({
         mode: data?.mode || 'command',
         reason: reliability.reason,
-        confidence: data?.confidence ?? null
+        confidence: selected.confidence ?? data?.confidence ?? null,
+        text: normalizedText,
+        rawText: data?.text || ''
       });
       return;
     }
+
+    this.logger.info('STT transcript accepted', {
+      mode: data?.mode || 'command',
+      text: normalizedText,
+      confidence: selected.confidence,
+      rawText: data?.text || ''
+    });
 
     this._transitionTo(SPEECH_STATES.TRANSCRIBING);
     this._transitionTo(SPEECH_STATES.THINKING);
@@ -303,6 +317,11 @@ class VoiceManager extends EventEmitter {
   }
 
   _handleSessionTimeout(data) {
+    this.logger.info('Voice listening timed out', {
+      mode: data?.mode || 'command',
+      reason: data?.reason || 'session-timeout',
+      timeoutMs: data?.timeoutMs || 0
+    });
     this.isActive = false;
     if (data?.mode === 'conversation' || data?.mode === 'confirmation') {
       this.conversationActive = false;
@@ -321,9 +340,12 @@ class VoiceManager extends EventEmitter {
   }
 
   _handleIgnoredSpeech(data) {
-    this.logger.debug('Ignored speech input', {
+    this.logger.info('Ignored speech input', {
       mode: data?.mode || 'command',
-      reason: data?.reason || 'filtered'
+      reason: data?.reason || 'filtered',
+      text: data?.text || '',
+      rawText: data?.rawText || '',
+      confidence: data?.confidence ?? null
     });
 
     this._transitionTo(SPEECH_STATES.IDLE, {
@@ -654,14 +676,41 @@ class VoiceManager extends EventEmitter {
       });
     };
 
+    this._buildNlpTranscriptVariants(data.text).forEach(variant => {
+      pushCandidate(variant, Number(data.confidence) > 0 ? Number(data.confidence) : 0.72);
+    });
     pushCandidate(data.text, data.confidence);
     if (Array.isArray(data.alternates)) {
       for (const alternate of data.alternates) {
+        this._buildNlpTranscriptVariants(alternate?.text).forEach(variant => {
+          pushCandidate(variant, Number(alternate?.confidence) > 0 ? Number(alternate.confidence) : 0.72);
+        });
         pushCandidate(alternate?.text, alternate?.confidence);
       }
     }
 
     return candidates;
+  }
+
+  _buildNlpTranscriptVariants(text) {
+    const raw = this._normalizeTranscript(text);
+    if (!raw) {
+      return [];
+    }
+
+    try {
+      const prepared = this.nlp.prepare(raw);
+      return [
+        prepared.repairedCommandText,
+        prepared.correctedText,
+        prepared.commandText
+      ]
+        .map(value => this._normalizeTranscript(value))
+        .filter(value => value && value.toLowerCase() !== raw.toLowerCase());
+    } catch (error) {
+      this.logger.debug('Voice NLP transcript preparation failed', error.message);
+      return [];
+    }
   }
 
   _isNonActionableTranscript(tokens, mode, normalized = '') {
@@ -711,45 +760,46 @@ class VoiceManager extends EventEmitter {
       return !allowedSingleTokenCommands.has(tokens[0]);
     }
 
-    if (this._looksLikeActionableTranscript(text)) {
+    if (this._looksLikeQuestionTranscript(text) || this._looksLikeActionableTranscript(text)) {
       return false;
     }
 
-    const fillerTokens = new Set([
-      'a',
-      'an',
-      'and',
-      'can',
-      'could',
-      'for',
-      'of',
-      'or',
-      'please',
-      'the',
-      'to',
-      'uh',
-      'um',
-      'would',
-      'you'
-    ]);
+    return true;
+  }
+
+  _looksLikeQuestionTranscript(text) {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!/^(?:what|who|when|where|why|how|which)\b/.test(normalized)) {
+      return false;
+    }
+
     const targetTokens = new Set([
       'alarm',
+      'apple',
       'browser',
       'brightness',
       'calculator',
+      'chatgpt',
       'chrome',
+      'claude',
       'desktop',
       'documents',
       'downloads',
       'edge',
+      'event',
       'excel',
       'file',
       'firefox',
       'folder',
+      'gemini',
+      'google',
+      'link',
       'music',
       'notepad',
+      'perplexity',
       'powerpoint',
       'reminder',
+      'result',
       'spotify',
       'teams',
       'timer',
@@ -757,19 +807,17 @@ class VoiceManager extends EventEmitter {
       'whatsapp',
       'window',
       'word',
+      'date',
+      'day',
+      'ipl',
+      'news',
+      'time',
+      'wwdc',
       'youtube'
     ]);
-    const meaningfulTokens = tokens.filter(token => !fillerTokens.has(token));
 
-    if (tokens.length <= 4 && meaningfulTokens.length <= 1) {
-      return true;
-    }
-
-    if (tokens.length <= 4 && !tokens.some(token => targetTokens.has(token))) {
-      return true;
-    }
-
-    return false;
+    const tokens = normalized.split(/\s+/).filter(Boolean);
+    return tokens.some(token => targetTokens.has(token)) || tokens.length >= 5;
   }
 
   _looksLikeActionableTranscript(text) {
@@ -794,7 +842,8 @@ class VoiceManager extends EventEmitter {
       'chrome', 'youtube', 'edge', 'firefox', 'spotify', 'notepad', 'calculator',
       'downloads', 'documents', 'desktop', 'volume', 'brightness', 'timer', 'alarm',
       'reminder', 'whatsapp', 'teams', 'word', 'excel', 'powerpoint', 'music', 'window',
-      'folder', 'file', 'browser'
+      'folder', 'file', 'browser', 'chatgpt', 'claude', 'gemini', 'perplexity', 'google',
+      'link', 'result'
     ]);
 
     const hasActionToken = (token) => {
@@ -802,6 +851,9 @@ class VoiceManager extends EventEmitter {
         return true;
       }
       if (!token || token.length < 3) {
+        return false;
+      }
+      if (token.length <= 3) {
         return false;
       }
       return Boolean(Normalizer.findClosestOption(token, Array.from(actionTokens), {

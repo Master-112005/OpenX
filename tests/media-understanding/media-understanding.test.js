@@ -42,6 +42,18 @@ describe('Media Understanding', function() {
     assert.ok(parsed.confidence >= 0.8);
   });
 
+  it('should keep generic song requests generic instead of inventing an artist', function() {
+    const { MediaParser } = require('../../core/media-understanding/parser');
+    const parser = new MediaParser();
+
+    const parsed = parser.parse('play songs');
+
+    assert.equal(parsed.intent, 'media.play');
+    assert.equal(parsed.artist, null);
+    assert.equal(parsed.query, 'music');
+    assert.equal(parsed.platform, 'youtube');
+  });
+
   it('should parse open-platform-and-play commands', function() {
     const { MediaParser } = require('../../core/media-understanding/parser');
     const parser = new MediaParser();

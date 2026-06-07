@@ -231,6 +231,10 @@ class NlpProcessor {
           return { verb: group.verb, index };
         }
 
+        if (!token || token.length <= 3) {
+          continue;
+        }
+
         const match = Normalizer.findClosestOption(token, group.words, {
           minSimilarity: token.length >= 5 ? 0.62 : 0.72,
           maxDistance: token.length >= 5 ? 2 : 1

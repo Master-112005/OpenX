@@ -279,7 +279,7 @@ describe('Voice Manager & Audio Engine Integration', function() {
       mode: 'conversation'
     });
 
-    assert.deepEqual(results.map(result => result.text), ['ope chrome']);
+    assert.deepEqual(results.map(result => result.text), ['open chrome']);
     assert.equal(vm.getStatus().conversationActive, true);
     vm.destroy();
   });
@@ -303,7 +303,31 @@ describe('Voice Manager & Audio Engine Integration', function() {
       mode: 'conversation'
     });
 
-    assert.deepEqual(results.map(result => result.text), ['i was saying search for java tutorial']);
+    assert.deepEqual(results.map(result => result.text), ['search for java tutorial']);
+    assert.equal(vm.getStatus().conversationActive, true);
+    vm.destroy();
+  });
+
+  it('should use NLP-corrected STT text for typo-heavy search commands', async function() {
+    const { vm } = createVoiceManager();
+    const results = [];
+
+    await vm.initialize();
+    vm.on('speechResult', (data) => {
+      results.push(data);
+    });
+
+    assert.equal(vm.manualActivate(), true);
+
+    vm._handleEngineEvent({
+      event: 'result',
+      text: 'serch chatgpt in chrome',
+      confidence: 0.38,
+      noSpeechProbability: 0.5,
+      mode: 'conversation'
+    });
+
+    assert.deepEqual(results.map(result => result.text), ['search chatgpt in chrome']);
     assert.equal(vm.getStatus().conversationActive, true);
     vm.destroy();
   });
@@ -433,6 +457,70 @@ describe('Voice Manager & Audio Engine Integration', function() {
 
     assert.equal(speechResult, false);
     assert.equal(vm.getStatus().state, 'IDLE');
+    vm.destroy();
+  });
+
+  it('should reject noisy dictation phrases that look like fuzzy commands', async function() {
+    const { vm } = createVoiceManager({
+      voice: {
+        conversationIgnoredSpeechLimit: 10
+      }
+    });
+    let speechResult = false;
+
+    await vm.initialize();
+    vm.on('speechResult', () => {
+      speechResult = true;
+    });
+
+    assert.equal(vm.manualActivate(), true);
+
+    for (const text of [
+      'Although you do a',
+      'Albany until',
+      "Old then you'd go",
+      'all chat you do a',
+      'all the new dial',
+      'old the you d go'
+    ]) {
+      vm._handleEngineEvent({
+        event: 'result',
+        text,
+        confidence: 0.72,
+        mode: 'conversation'
+      });
+    }
+
+    assert.equal(speechResult, false);
+    assert.equal(vm.getStatus().conversationActive, true);
+    vm.destroy();
+  });
+
+  it('should still allow question-style voice requests', async function() {
+    const { vm } = createVoiceManager();
+    const results = [];
+
+    await vm.initialize();
+    vm.on('speechResult', (data) => {
+      results.push(data);
+    });
+
+    assert.equal(vm.manualActivate(), true);
+
+    vm._handleEngineEvent({
+      event: 'result',
+      text: 'what is the time',
+      confidence: 0.72,
+      mode: 'conversation'
+    });
+    vm._handleEngineEvent({
+      event: 'result',
+      text: 'when apple wwdc event',
+      confidence: 0.72,
+      mode: 'conversation'
+    });
+
+    assert.deepEqual(results.map(result => result.text), ['what is the time', 'when apple wwdc event']);
     vm.destroy();
   });
 
