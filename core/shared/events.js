@@ -15,6 +15,12 @@ const EVENTS = Object.freeze({
   RESPONSE_COMPLETED: 'response.completed',
   UI_STATE_CHANGED: 'ui.state.changed',
   VOICE_STATE_CHANGED: 'voice.state.changed',
+  VOICE_SESSION_STARTED: 'voice.sessionStarted',
+  VOICE_SESSION_ENDED: 'voice.sessionEnded',
+  VOICE_PARTIAL_TRANSCRIPT: 'voice.partialTranscript',
+  VOICE_FINAL_TRANSCRIPT: 'voice.finalTranscript',
+  VOICE_PROCESSING_STARTED: 'voice.processingStarted',
+  VOICE_PROCESSING_FINISHED: 'voice.processingFinished',
   VOICE_ERROR: 'voice.error'
 });
 

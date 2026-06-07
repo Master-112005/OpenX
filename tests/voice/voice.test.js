@@ -114,6 +114,46 @@ describe('Voice Manager & Audio Engine Integration', function() {
     vm.destroy();
   });
 
+  it('should select whisper-stream when configured without changing the voice contract', function() {
+    const vm = new VoiceManager({
+      voice: {
+        stt: {
+          provider: 'whisper-stream'
+        },
+        whisper: {}
+      }
+    }, {
+      eventBus: new AssistantEventBus(),
+      tts: new FakeTextToSpeech()
+    });
+
+    assert.equal(vm.stt.constructor.name, 'WhisperStreamSpeechEngine');
+    vm.destroy();
+  });
+
+  it('should fall back to Windows SAPI when the configured primary STT engine is unavailable', async function() {
+    const vm = new VoiceManager({
+      voice: {
+        stt: {
+          provider: 'whisper-stream'
+        },
+        whisper: {
+          executablePath: 'missing/whisper-stream.exe',
+          modelPath: 'missing/ggml-small.en.bin'
+        }
+      }
+    }, {
+      eventBus: new AssistantEventBus(),
+      tts: new FakeTextToSpeech()
+    });
+
+    await vm.initialize();
+
+    assert.equal(vm.stt.constructor.name, 'WindowsSapiSpeechEngine');
+    assert.equal(vm.workerReady, true);
+    vm.destroy();
+  });
+
   it('should activate listening when the hotkey is triggered', function(done) {
     const { vm } = createVoiceManager();
 

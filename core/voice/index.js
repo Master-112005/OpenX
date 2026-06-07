@@ -7,9 +7,14 @@ const {
 } = require('../shared/index');
 const TextToSpeech = require('./tts/index');
 const WindowsSapiSpeechEngine = require('./stt/windows-sapi');
+const WhisperStreamSpeechEngine = require('./stt/whisper-stream');
 const { SPEECH_STATES, SpeechStateMachine } = require('./state/index');
 const IntentRegistry = require('../assistant/intents/index').IntentRegistry;
 const NlpProcessor = require('../assistant/nlp/index');
+const TranscriptNormalizer = require('./transcript/transcript-normalizer');
+const CommandRecoveryReranker = require('./recovery/reranker');
+const VoiceConfidenceGate = require('./confidence/index');
+const { VoiceSessionManager } = require('./session/index');
 
 class VoiceManager extends EventEmitter {
   constructor(config, dependencies = {}) {
@@ -21,6 +26,7 @@ class VoiceManager extends EventEmitter {
     // Asynchronous SAPI TTS engine refactored in Task 1
     this.tts = dependencies.tts || new TextToSpeech(config);
     this.stateMachine = dependencies.stateMachine || new SpeechStateMachine(this.eventBus);
+    this.sessionManager = dependencies.sessionManager || new VoiceSessionManager();
     
     this.isActive = false;
     this.isDestroyed = false;
@@ -37,8 +43,11 @@ class VoiceManager extends EventEmitter {
       : 1;
     this.conversationIgnoredSpeechCount = 0;
     
-    this.stt = dependencies.stt || new WindowsSapiSpeechEngine(config);
+    this.stt = dependencies.stt || this._createSpeechEngine(config);
     this.nlp = dependencies.nlp || new NlpProcessor(new IntentRegistry());
+    this.transcriptNormalizer = dependencies.transcriptNormalizer || new TranscriptNormalizer();
+    this.recovery = dependencies.recovery || new CommandRecoveryReranker(config?.voice?.recovery || {});
+    this.confidenceGate = dependencies.confidenceGate || new VoiceConfidenceGate(config?.voice?.confidence || {});
     this.workerProcess = null;
     this.workerReady = false;
     this.workerStartupPromise = null;
@@ -47,6 +56,7 @@ class VoiceManager extends EventEmitter {
     this.resumeListenFallbackTimer = null;
     
     this._setupTtsListeners();
+    this._setupSessionListeners();
   }
 
   _setupTtsListeners() {
@@ -57,6 +67,7 @@ class VoiceManager extends EventEmitter {
       this._pauseCaptureStream();
       
       this._transitionTo(SPEECH_STATES.RESPONDING, { text });
+      this.sessionManager.markResponding({ text });
       this.emit('speaking', text);
     });
 
@@ -88,6 +99,52 @@ class VoiceManager extends EventEmitter {
       
       this._resumeCaptureStream();
       this._transitionTo(SPEECH_STATES.ERROR, { stage: 'tts' });
+    });
+  }
+
+  _createSpeechEngine(config = {}) {
+    const provider = String(
+      config?.voice?.stt?.provider
+      || config?.voice?.recognition?.provider
+      || 'windows-sapi'
+    ).trim().toLowerCase();
+
+    if (provider === 'whisper' || provider === 'whisper-stream') {
+      return new WhisperStreamSpeechEngine(config);
+    }
+
+    return new WindowsSapiSpeechEngine(config);
+  }
+
+  _setupSessionListeners() {
+    this.sessionManager.on('sessionStarted', (payload) => {
+      this.logger.info('[VOICE] Session started', payload);
+      this.eventBus.publish(EVENTS.VOICE_SESSION_STARTED, payload);
+      this.emit('sessionStarted', payload);
+    });
+
+    this.sessionManager.on('sessionEnded', (payload) => {
+      this.logger.info('[VOICE] Session ended', payload);
+      this.eventBus.publish(EVENTS.VOICE_SESSION_ENDED, payload);
+      this.emit('sessionEnded', payload);
+    });
+
+    this.sessionManager.on('stateChanged', (payload) => {
+      this.eventBus.publish(EVENTS.VOICE_STATE_CHANGED, payload);
+    });
+
+    this.sessionManager.on('timeout', (payload) => {
+      this.logger.info('No voice activity for 20 seconds. Stopping listening.', {
+        timeoutMs: payload.timeoutMs,
+        reason: payload.reason
+      });
+      this._pauseCaptureStream();
+      this._handleSessionTimeout({
+        mode: this.conversationActive ? 'conversation' : 'command',
+        reason: payload.reason,
+        timeoutMs: payload.timeoutMs,
+        sessionManagerTimeout: true
+      });
     });
   }
 
@@ -130,6 +187,11 @@ class VoiceManager extends EventEmitter {
       };
       const onEvent = (message) => this._handleEngineEvent(message);
       const onError = (error) => {
+        if (this._fallbackToWindowsSapi(error)) {
+          this.workerStartupPromise = null;
+          this._startAudioEngine().then(resolve).catch(reject);
+          return;
+        }
         this.workerStartupPromise = null;
         reject(error);
       };
@@ -142,6 +204,36 @@ class VoiceManager extends EventEmitter {
     });
 
     return this.workerStartupPromise;
+  }
+
+  _fallbackToWindowsSapi(error) {
+    if (this.stt instanceof WindowsSapiSpeechEngine) {
+      return false;
+    }
+
+    this.logger.warn('Primary STT engine unavailable, falling back to Windows SAPI', {
+      provider: this.config?.voice?.stt?.provider || 'unknown',
+      error: error?.message || String(error || 'unknown error')
+    });
+
+    try {
+      this.stt.removeAllListeners();
+      this.stt.shutdown?.();
+    } catch (shutdownError) {
+      this.logger.debug('Failed to shutdown unavailable STT engine', shutdownError.message);
+    }
+
+    this.stt = new WindowsSapiSpeechEngine({
+      ...this.config,
+      voice: {
+        ...(this.config?.voice || {}),
+        stt: {
+          ...(this.config?.voice?.stt || {}),
+          provider: 'windows-sapi'
+        }
+      }
+    });
+    return true;
   }
 
   _handleEngineEvent(message) {
@@ -160,11 +252,22 @@ class VoiceManager extends EventEmitter {
         break;
 
       case 'stt_session_activated':
-        this.logger.info(`Listening for ${message.mode || 'command'} speech`, {
-          startSpeechTimeoutMs: message.startSpeechTimeoutMs,
-          maxDurationMs: message.maxDurationMs || null,
-          timeoutMs: message.timeoutMs || null
+        this.logger.info(`Listening for ${message.mode || 'command'} speech. I will stop after ${this._formatMs(message.timeoutMs || message.startSpeechTimeoutMs)} of silence.`, {
+          silenceTimeoutMs: message.timeoutMs || message.startSpeechTimeoutMs,
+          backend: message.backend || 'unknown',
+          timeoutPolicy: message.timeoutPolicy || 'session'
         });
+        break;
+
+      case 'partial_result':
+      case 'partialTranscript':
+        this.sessionManager.touch(this._getVoiceInactivityTimeoutMs());
+        this.eventBus.publish(EVENTS.VOICE_PARTIAL_TRANSCRIPT, {
+          text: this._normalizeTranscript(message.text || ''),
+          mode: message.mode || 'command',
+          backend: message.backend || 'unknown'
+        });
+        this.emit('partialTranscript', message);
         break;
 
       case 'ignored_speech':
@@ -276,19 +379,35 @@ class VoiceManager extends EventEmitter {
       return;
     }
 
-    this.logger.info('STT transcript accepted', {
+    this.sessionManager.touch(this._getVoiceInactivityTimeoutMs());
+
+    this.logger.info(`Heard: "${normalizedText}"`, {
       mode: data?.mode || 'command',
-      text: normalizedText,
       confidence: selected.confidence,
-      rawText: data?.text || ''
+      backend: data.backend || 'windows-sapi'
     });
 
     this._transitionTo(SPEECH_STATES.TRANSCRIBING);
     this._transitionTo(SPEECH_STATES.THINKING);
+    this.sessionManager.markProcessing({
+      mode: data?.mode || 'command',
+      text: normalizedText
+    });
+    this.eventBus.publish(EVENTS.VOICE_PROCESSING_STARTED, {
+      text: normalizedText,
+      mode: data?.mode || 'command',
+      backend: data.backend || 'windows-sapi'
+    });
     
     this.eventBus.publish(EVENTS.STT_COMPLETED, {
       text: normalizedText,
       confidence: selected.confidence,
+      backend: data.backend || 'windows-sapi'
+    });
+    this.eventBus.publish(EVENTS.VOICE_FINAL_TRANSCRIPT, {
+      text: normalizedText,
+      confidence: selected.confidence,
+      mode: data.mode || 'command',
       backend: data.backend || 'windows-sapi'
     });
     
@@ -307,6 +426,11 @@ class VoiceManager extends EventEmitter {
       mode: data.mode || 'command',
       utterance
     });
+    this.eventBus.publish(EVENTS.VOICE_PROCESSING_FINISHED, {
+      text: normalizedText,
+      mode: data.mode || 'command',
+      backend: data.backend || 'windows-sapi'
+    });
 
     if (!this.conversationActive) {
       this.isActive = false;
@@ -317,12 +441,15 @@ class VoiceManager extends EventEmitter {
   }
 
   _handleSessionTimeout(data) {
-    this.logger.info('Voice listening timed out', {
+    this.logger.info('Voice listening stopped after silence timeout', {
       mode: data?.mode || 'command',
       reason: data?.reason || 'session-timeout',
       timeoutMs: data?.timeoutMs || 0
     });
     this.isActive = false;
+    if (!data?.sessionManagerTimeout) {
+      this.sessionManager.stop(data?.reason || 'session-timeout');
+    }
     if (data?.mode === 'conversation' || data?.mode === 'confirmation') {
       this.conversationActive = false;
       this.conversationIgnoredSpeechCount = 0;
@@ -340,10 +467,11 @@ class VoiceManager extends EventEmitter {
   }
 
   _handleIgnoredSpeech(data) {
-    this.logger.info('Ignored speech input', {
+    this.sessionManager.touch(this._getVoiceInactivityTimeoutMs());
+
+    this.logger.info(`Ignored non-command speech: "${data?.text || ''}"`, {
       mode: data?.mode || 'command',
       reason: data?.reason || 'filtered',
-      text: data?.text || '',
       rawText: data?.rawText || '',
       confidence: data?.confidence ?? null
     });
@@ -391,11 +519,15 @@ class VoiceManager extends EventEmitter {
         ? this.conversationSilenceTimeoutMs
         : undefined;
     this.isActive = true;
-    this._transitionTo(SPEECH_STATES.LISTENING, { mode });
-    this.logger.info('Voice listening started', {
+    this.sessionManager.start({
       mode,
-      startSpeechTimeoutMs: startSpeechTimeoutMs || null,
-      maxDurationMs: options.maxDurationMs || null
+      inactivityTimeoutMs: this._getVoiceInactivityTimeoutMs()
+    });
+    this._transitionTo(SPEECH_STATES.LISTENING, { mode });
+    this.logger.info(`Voice listening started. Speak now; silence timeout is ${this._formatMs(startSpeechTimeoutMs || this._getVoiceInactivityTimeoutMs())}.`, {
+      mode,
+      silenceTimeoutMs: startSpeechTimeoutMs || this._getVoiceInactivityTimeoutMs(),
+      maxUtteranceMs: options.maxDurationMs || null
     });
     this._sendEngineCommand({
       command: 'listen',
@@ -412,6 +544,7 @@ class VoiceManager extends EventEmitter {
     this._pauseCaptureStream();
     this.isActive = false;
     this.emit('deactivated');
+    this.sessionManager.stop('manual-stop');
     this._transitionTo(SPEECH_STATES.IDLE, { reason: 'manual-stop' });
   }
 
@@ -556,11 +689,25 @@ class VoiceManager extends EventEmitter {
     };
   }
 
+  _getVoiceInactivityTimeoutMs() {
+    return Number(this.config?.voice?.inactivityTimeoutMs) > 0
+      ? Number(this.config.voice.inactivityTimeoutMs)
+      : this.conversationSilenceTimeoutMs;
+  }
+
+  _formatMs(value) {
+    const ms = Number(value);
+    if (!Number.isFinite(ms) || ms <= 0) {
+      return 'the configured timeout';
+    }
+    if (ms >= 1000) {
+      return `${Math.round(ms / 1000)} seconds`;
+    }
+    return `${ms} ms`;
+  }
+
   _normalizeTranscript(text) {
-    return String(text || '')
-      .replace(/\s+/g, ' ')
-      .replace(/^[.,!?;:\s]+|[.,!?;:\s]+$/g, '')
-      .trim();
+    return this.transcriptNormalizer.normalize(text);
   }
 
   _assessTranscriptReliability(text, data = {}) {
@@ -582,6 +729,11 @@ class VoiceManager extends EventEmitter {
       && (confidence < commandRecoveryMinConfidence || !commandLike)
     ) {
       return { accepted: false, reason: 'low-transcript-confidence' };
+    }
+
+    const gate = this.confidenceGate.assess(normalized, Number.isFinite(confidence) ? confidence : 0.8);
+    if (gate.action === 'ignore' && !commandLike) {
+      return { accepted: false, reason: gate.reason };
     }
 
     const noSpeechProbability = Number(data?.noSpeechProbability);
@@ -676,12 +828,18 @@ class VoiceManager extends EventEmitter {
       });
     };
 
+    this._buildRecoveredTranscriptVariants(data.text).forEach(variant => {
+      pushCandidate(variant.text, variant.confidence);
+    });
     this._buildNlpTranscriptVariants(data.text).forEach(variant => {
       pushCandidate(variant, Number(data.confidence) > 0 ? Number(data.confidence) : 0.72);
     });
     pushCandidate(data.text, data.confidence);
     if (Array.isArray(data.alternates)) {
       for (const alternate of data.alternates) {
+        this._buildRecoveredTranscriptVariants(alternate?.text).forEach(variant => {
+          pushCandidate(variant.text, variant.confidence);
+        });
         this._buildNlpTranscriptVariants(alternate?.text).forEach(variant => {
           pushCandidate(variant, Number(alternate?.confidence) > 0 ? Number(alternate.confidence) : 0.72);
         });
@@ -690,6 +848,27 @@ class VoiceManager extends EventEmitter {
     }
 
     return candidates;
+  }
+
+  _buildRecoveredTranscriptVariants(text) {
+    const raw = this._normalizeTranscript(text);
+    if (!raw) {
+      return [];
+    }
+
+    try {
+      const recovered = this.recovery.recover(raw);
+      if (!recovered.changed || !recovered.correctedText) {
+        return [];
+      }
+      return [{
+        text: recovered.correctedText,
+        confidence: recovered.confidence
+      }];
+    } catch (error) {
+      this.logger.debug('Voice command recovery failed', error.message);
+      return [];
+    }
   }
 
   _buildNlpTranscriptVariants(text) {
@@ -957,6 +1136,7 @@ class VoiceManager extends EventEmitter {
     this.pendingListenAfterResume = null;
     this.conversationActive = false;
     this.conversationIgnoredSpeechCount = 0;
+    this.sessionManager.terminate('destroy');
     this.tts.destroy();
     this.removeAllListeners();
   }

@@ -37,6 +37,8 @@ const CONFIG = {
     activationShortcut: 'Alt+Space',
     activationFallbackShortcuts: ['Control+Alt+Space', 'Control+Space'],
     allowManualActivation: true,
+    enabled: true,
+    inactivityTimeoutMs: 20000,
     conversationSilenceTimeoutMs: 20000,
     conversationIgnoredSpeechLimit: 1,
     confirmationListenTimeoutMs: 10000,
@@ -52,12 +54,12 @@ const CONFIG = {
     maxUtteranceMs: 12000,
     vadThreshold: 0.015,
     recognition: {
-      provider: 'windows-sapi',
+      provider: 'whisper-stream',
       language: 'en',
       backend: 'node'
     },
     stt: {
-      provider: 'windows-sapi',
+      provider: 'whisper-stream',
       language: 'en',
       maxDurationMs: 20000,
       startSpeechTimeoutMs: 3500,
@@ -66,6 +68,29 @@ const CONFIG = {
       confirmationMinConfidence: 0.45,
       maxNoSpeechProbability: 0.55,
       maxCompressionRatio: 2.4
+    },
+    whisper: {
+      executablePath: 'bin/whisper/whisper-stream.exe',
+      modelPath: 'models/whisper/ggml-small.en.bin',
+      threads: 8,
+      stepMs: 1000,
+      lengthMs: 8000,
+      keepMs: 500,
+      maxTokens: 32,
+      vadThreshold: 0.6,
+      freqThreshold: 100,
+      keepContext: false,
+      language: 'en',
+      finalDebounceMs: 1200,
+      maxRestarts: 3
+    },
+    recovery: {
+      enabled: true,
+      minConfidence: 0.8
+    },
+    confidence: {
+      autoExecuteThreshold: 0.85,
+      confirmationThreshold: 0.6
     },
     tts: {
       rate: -1,
