@@ -86,6 +86,7 @@ class AutomationEngine {
       'folder.open': (entities) => this.folders.open(entities.folderName),
       'browser.open': (entities) => this.browser.open(entities.url),
       'browser.search': (entities) => this.browser.search(entities.query, entities),
+      'browser.openFirstResult': (entities) => this.browser.openFirstResult(entities.query),
       'media.play': (entities) => this.media.play(entities.mediaQuery, entities.mediaPlatform),
       'media.next': () => this.media.next(),
       'media.previous': () => this.media.previous(),
@@ -179,7 +180,7 @@ class AutomationEngine {
     const appEntries = this._normalizeModeAppEntries(mode);
     const apps = appEntries.map(app => app.name).filter(Boolean);
     const appCommands = appEntries.flatMap(app => (
-      app.instructions.map(command => this._contextualizeModeInstruction(app.name, command))
+      app.instructions.flatMap(command => this._contextualizeModeInstruction(app.name, command))
     ));
     const commands = Array.isArray(mode.commands)
       ? mode.commands.map(command => String(command || '').trim()).filter(Boolean)
@@ -259,12 +260,23 @@ class AutomationEngine {
       const appLabel = app.includes('edge') ? 'edge' : app.includes('firefox') ? 'firefox' : 'chrome';
       const openInBrowserMatch = lower.match(/^open\s+(.+?)\s+(?:in|on)\s+(?:chrome|browser|edge|firefox)$/i);
       if (openInBrowserMatch?.[1]) {
-        return `search for ${openInBrowserMatch[1].trim()} in ${appLabel}`;
+        const query = openInBrowserMatch[1].trim();
+        return [`search for ${query} in ${appLabel}`, `open first result for ${query}`];
+      }
+
+      const openWebMatch = lower.match(/^open\s+(.+)$/i);
+      if (openWebMatch?.[1] && !this._looksLikeLocalAppInstruction(openWebMatch[1])) {
+        const query = openWebMatch[1].trim();
+        return [`search for ${query} in ${appLabel}`, `open first result for ${query}`];
       }
 
       const searchMatch = lower.match(/^search\s+(?:for\s+)?(.+)$/i);
       if (searchMatch?.[1] && !/\s+(?:in|on)\s+(?:chrome|browser|edge|firefox)$/i.test(lower)) {
         return `search for ${searchMatch[1].trim()} in ${appLabel}`;
+      }
+
+      if (/^(?:click|open)\s+(?:the\s+)?first\s+(?:link|result|search\s+result)\b/i.test(command)) {
+        return 'open first search result';
       }
     }
 
@@ -276,23 +288,58 @@ class AutomationEngine {
     return command;
   }
 
+  _looksLikeLocalAppInstruction(value) {
+    const target = Normalizer.normalizeText(value);
+    const localAppTargets = new Set([
+      'chrome',
+      'edge',
+      'firefox',
+      'terminal',
+      'cmd',
+      'powershell',
+      'code',
+      'vscode',
+      'visual studio code',
+      'notepad',
+      'paint',
+      'calculator',
+      'whatsapp',
+      'discord',
+      'spotify',
+      'youtube',
+      'photos',
+      'clock',
+      'microsoft store'
+    ]);
+
+    return localAppTargets.has(target);
+  }
+
   _findMode(modeName, modes) {
-    const normalized = Normalizer.normalizeText(modeName);
+    const normalized = this._normalizeModeName(modeName);
     const candidates = modes.filter(mode => mode && mode.name);
-    const exact = candidates.find(mode => Normalizer.normalizeText(mode.name) === normalized);
+    const exact = candidates.find(mode => this._normalizeModeName(mode.name) === normalized);
     if (exact) {
       return exact;
     }
 
-    const fuzzy = Normalizer.findClosestOption(normalized, candidates.map(mode => mode.name), {
-      minSimilarity: 0.72,
-      maxDistance: 2
+    const normalizedCandidates = candidates.map(mode => this._normalizeModeName(mode.name));
+    const fuzzy = Normalizer.findClosestOption(normalized, normalizedCandidates, {
+      minSimilarity: 0.64,
+      maxDistance: 3
     });
     if (!fuzzy) {
       return null;
     }
 
-    return candidates.find(mode => Normalizer.normalizeText(mode.name) === fuzzy.normalizedMatch) || null;
+    return candidates.find(mode => this._normalizeModeName(mode.name) === fuzzy.normalizedMatch) || null;
+  }
+
+  _normalizeModeName(modeName) {
+    return Normalizer.normalizeText(modeName)
+      .replace(/\b(?:developement|deveopemt|devlopement|devlopemt|develpment|dev)\b/g, 'development')
+      .replace(/\s+/g, ' ')
+      .trim();
   }
 }
 

@@ -238,6 +238,14 @@ const INTENT_DEFINITIONS = [
     description: 'Search the web'
   },
   {
+    id: 'browser.openFirstResult',
+    patterns: ['open first result', 'open first link', 'click first result', 'click first link', 'click the first search result'],
+    permissionLevel: 'low',
+    action: 'browser.openFirstResult',
+    entities: [{ name: 'query', type: 'string', required: false }],
+    description: 'Open the first result from the last browser search'
+  },
+  {
     id: 'system.time',
     patterns: ['what time is it', 'current time', 'tell me the time', 'time now'],
     permissionLevel: 'low',

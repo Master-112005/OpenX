@@ -47,6 +47,29 @@ describe('Browser Controller', function() {
     assert.ok(openedUrl.includes('google.com/search'));
   });
 
+  it('should open the first result from the last search query', async function() {
+    const controller = new BrowserController({});
+    let openedUrl = '';
+
+    controller.open = (url) => {
+      openedUrl = url;
+      return { success: true, data: { url } };
+    };
+    controller._searchWebInBackground = async query => ([{
+      title: 'ChatGPT',
+      snippet: `${query} result`,
+      url: 'https://duckduckgo.com/l/?uddg=https%3A%2F%2Fchatgpt.com%2F'
+    }]);
+
+    await controller.search('chatgpt', { openInBrowser: true });
+    const result = await controller.openFirstResult();
+
+    assert.equal(result.success, true);
+    assert.equal(result.data.title, 'ChatGPT');
+    assert.equal(result.data.url, 'https://chatgpt.com/');
+    assert.equal(openedUrl, 'https://chatgpt.com/');
+  });
+
   it('should enhance and extract direct answers for who-won searches', async function() {
     const controller = new BrowserController({});
     let requestedQuery = '';

@@ -20,6 +20,7 @@ class BrowserController {
   constructor(config) {
     this.logger = new Logger({ level: config?.logging?.level || 'info' });
     this.defaultBrowser = this._detectBrowser();
+    this.lastSearch = null;
   }
 
   _detectBrowser() {
@@ -68,11 +69,13 @@ class BrowserController {
     }
 
     const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
+    this.lastSearch = { query, searchUrl, results: [] };
     if (options.openInBrowser) {
       return this.open(searchUrl);
     }
 
     const results = await this._searchWebInBackground(query);
+    this.lastSearch = { query, searchUrl, results };
     const answer = this._deriveAnswer(query, results);
     return {
       success: true,
@@ -84,6 +87,57 @@ class BrowserController {
         answer
       }
     };
+  }
+
+  async openFirstResult(query = null) {
+    const requestedQuery = String(query || this.lastSearch?.query || '').trim();
+    if (!requestedQuery) {
+      return { success: false, error: 'No previous search to open' };
+    }
+
+    const cachedResults = this.lastSearch?.query === requestedQuery && Array.isArray(this.lastSearch.results)
+      ? this.lastSearch.results
+      : [];
+    const results = cachedResults.length > 0
+      ? cachedResults
+      : await this._searchWebInBackground(requestedQuery);
+    const first = results.find(result => result?.url);
+    if (!first) {
+      return { success: false, error: `No search result found for: ${requestedQuery}` };
+    }
+
+    this.lastSearch = {
+      query: requestedQuery,
+      searchUrl: `https://www.google.com/search?q=${encodeURIComponent(requestedQuery)}`,
+      results
+    };
+
+    const url = this._normalizeResultUrl(first.url);
+    const opened = this.open(url);
+    return opened?.success
+      ? {
+          success: true,
+          data: {
+            query: requestedQuery,
+            title: first.title || '',
+            url
+          }
+        }
+      : opened;
+  }
+
+  _normalizeResultUrl(url) {
+    const source = decodeHtml(url);
+    try {
+      const parsed = new URL(source, 'https://duckduckgo.com');
+      const uddg = parsed.searchParams.get('uddg');
+      if (uddg) {
+        return decodeURIComponent(uddg);
+      }
+      return parsed.href;
+    } catch (err) {
+      return source;
+    }
   }
 
   _searchWebInBackground(query) {

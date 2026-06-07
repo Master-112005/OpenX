@@ -547,6 +547,26 @@ describe('Action Router', function() {
     assert.equal(result.data.commandSteps.length, 3);
   });
 
+  it('should execute search then first-result browser follow-up commands', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const executed = [];
+    const stubEngine = {
+      execute(actionId, entities) {
+        executed.push({ actionId, entities });
+        return { success: true, data: { actionId, ...entities, title: 'ChatGPT', url: 'https://chatgpt.com/' } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const result = await router.process('search for chatgpt in chrome and click the first link', 'chat');
+
+    assert.equal(result.intent, 'multi.command');
+    assert.deepEqual(executed.map(step => step.actionId), ['browser.search', 'browser.openFirstResult']);
+    assert.equal(executed[0].entities.query, 'chatgpt');
+    assert.equal(executed[0].entities.openInBrowser, true);
+  });
+
   it('should route web searches to browser.search', async function() {
     const config = {
       permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
@@ -743,7 +763,7 @@ describe('Action Router', function() {
     assert.equal(result.entities.openInBrowser, true);
   });
 
-  it('should route open target in chrome to browser.search instead of app.open', async function() {
+  it('should route open target in chrome to first browser result instead of app.open', async function() {
     const config = {
       permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
     };
@@ -755,6 +775,43 @@ describe('Action Router', function() {
     const router = new ActionRouter(config, stubEngine);
 
     const result = await router.process('open chatgpt in chrome', 'chat');
+
+    assert.equal(result.intent, 'browser.openFirstResult');
+    assert.equal(result.entities.query, 'chatgpt');
+  });
+
+  it('should route known web app opens to the first browser result', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const executed = [];
+    const stubEngine = {
+      execute(actionId, entities) {
+        executed.push({ actionId, entities });
+        return { success: true, data: { actionId, ...entities, title: 'ChatGPT', url: 'https://chatgpt.com/' } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const result = await router.process('open chatgpt', 'chat');
+
+    assert.equal(result.intent, 'browser.openFirstResult');
+    assert.equal(result.entities.query, 'chatgpt');
+    assert.deepEqual(executed.map(step => step.actionId), ['browser.openFirstResult']);
+  });
+
+  it('should route typo search commands to browser.search', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const result = await router.process('serch chatgpt in chrome', 'chat');
 
     assert.equal(result.intent, 'browser.search');
     assert.equal(result.entities.query, 'chatgpt');

@@ -120,6 +120,26 @@ describe('Response Generator', function() {
     assert.ok(result.includes('notes.txt'));
   });
 
+  it('should report failed configured mode commands', function() {
+    const gen = new ResponseGenerator();
+    const result = gen.generate('success', 'mode.start', {
+      result: {
+        data: {
+          modeName: 'development',
+          opened: ['youtube', 'chrome'],
+          failed: [],
+          commandSteps: [
+            { input: 'play liked songs', success: true },
+            { input: 'open chatgpt', success: false }
+          ]
+        }
+      }
+    });
+
+    assert.ok(result.includes('Ran 1 configured command'));
+    assert.ok(result.includes('Failed command: open chatgpt'));
+  });
+
   it('should use formal addressing by default', function() {
     const gen = new ResponseGenerator();
     const result = gen.generate('info', 'idle');

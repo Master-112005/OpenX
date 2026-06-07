@@ -208,19 +208,23 @@ const RESPONSE_BUILDERS = {
       const openedLabel = Array.isArray(opened) && opened.length > 0
         ? opened.join(', ')
         : '';
-      const commandCount = Array.isArray(commandSteps) ? commandSteps.filter(step => step.success).length : 0;
-      const commandLabel = commandCount > 0
-        ? ` Ran ${commandCount} configured command${commandCount === 1 ? '' : 's'}.`
+      const successfulCommands = Array.isArray(commandSteps) ? commandSteps.filter(step => step.success) : [];
+      const failedCommands = Array.isArray(commandSteps) ? commandSteps.filter(step => !step.success) : [];
+      const commandLabel = successfulCommands.length > 0
+        ? ` Ran ${successfulCommands.length} configured command${successfulCommands.length === 1 ? '' : 's'}.`
+        : '';
+      const failedCommandLabel = failedCommands.length > 0
+        ? ` Failed command: ${failedCommands[0].input || failedCommands[0].intent || 'unknown command'}.`
         : '';
       if (Array.isArray(failed) && failed.length > 0) {
         const failedLabel = failed.map(item => item.appName).join(', ');
         return openedLabel
-          ? `Started ${modeName} mode and opened ${openedLabel}. Could not open ${failedLabel}.${commandLabel}`
-          : `I found ${modeName} mode, but could not open its apps.`;
+          ? `Started ${modeName} mode and opened ${openedLabel}. Could not open ${failedLabel}.${commandLabel}${failedCommandLabel}`
+          : `I found ${modeName} mode, but could not open its apps.${failedCommandLabel}`;
       }
       return openedLabel
-        ? `Started ${modeName} mode and opened ${openedLabel}.${commandLabel}`
-        : `Started ${modeName} mode.${commandLabel}`;
+        ? `Started ${modeName} mode and opened ${openedLabel}.${commandLabel}${failedCommandLabel}`
+        : `Started ${modeName} mode.${commandLabel}${failedCommandLabel}`;
     },
     'file.create': context => {
       const filePath = valueFromContext(context, 'path', valueFromContext(context, 'filename'));
@@ -359,6 +363,14 @@ const RESPONSE_BUILDERS = {
         `I looked that up in the background: "${query}".`,
         `I checked the web for "${query}".`
       ]);
+    },
+    'browser.openFirstResult': context => {
+      const title = valueFromContext(context, 'title', '');
+      const url = valueFromContext(context, 'url', '');
+      if (title) {
+        return `Opening the first result: ${title}.`;
+      }
+      return url ? `Opening the first search result: ${url}.` : 'Opening the first search result.';
     },
     'system.time': context => {
       const time = valueFromContext(context, 'time');

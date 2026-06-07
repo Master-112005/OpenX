@@ -84,7 +84,7 @@ describe('Automation Engine', function() {
           name: 'development',
           apps: [
             { name: 'youtube', instructions: ['set volume to 100', 'play liked songs'] },
-            { name: 'chrome', instructions: ['open chatgpt in chrome'] },
+            { name: 'chrome', instructions: ['open chatgpt'] },
             { name: 'terminal', instructions: [] }
           ]
         }
@@ -103,8 +103,22 @@ describe('Automation Engine', function() {
     assert.deepEqual(result.data.commands, [
       'set volume to 100',
       'play liked songs',
-      'search for chatgpt in chrome'
+      'search for chatgpt in chrome',
+      'open first result for chatgpt'
     ]);
+  });
+
+  it('should match heavily misspelled development mode names', async function() {
+    const engine = new AutomationEngine({
+      modes: [
+        { name: 'developement', apps: [], commands: ['set volume to 50'] }
+      ]
+    });
+
+    const result = await engine.execute('mode.start', { modeName: 'deveopemt' });
+
+    assert.equal(result.success, true);
+    assert.deepEqual(result.data.commands, ['set volume to 50']);
   });
 
   it('should allow command-only modes', async function() {

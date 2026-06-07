@@ -86,12 +86,14 @@ class ActionRouter {
       this._resolveExplicitAppIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitWindowIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitCommunicationIntent(rawCommandText, preparedInput) ||
+      this._resolveKnownWebOpenIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitOpenIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitAppOpenIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitReminderIntent(rawCommandText, preparedInput) ||
       this._resolveCalculationIntent(rawCommandText, preparedInput) ||
       this._resolveLocalInfoIntent(rawCommandText, preparedInput) ||
       this._resolveLocalFileListIntent(rawCommandText, preparedInput) ||
+      this._resolveBrowserFollowupIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitSearchIntent(rawCommandText, preparedInput) ||
       this._resolveGeneralQuestionSearchIntent(rawCommandText, preparedInput) ||
       this._matchIntent(preparedInput)
@@ -720,6 +722,59 @@ class ActionRouter {
     return null;
   }
 
+  _resolveKnownWebOpenIntent(rawText, preparedInput) {
+    const input = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
+    const match = input.match(/^(?:open|launch|start|go\s+to|show)\s+(.+?)(?:\s+(?:in|on)\s+(?:chrome|browser|edge|firefox))?$/i);
+    if (!match?.[1]) {
+      return null;
+    }
+
+    const query = this._normalizeKnownWebTarget(match[1]);
+    if (!query) {
+      return null;
+    }
+
+    const intent = this.intentRegistry.get('browser.openFirstResult');
+    return intent
+      ? { intent, confidence: 1, entities: { query } }
+      : null;
+  }
+
+  _normalizeKnownWebTarget(value) {
+    const target = String(value || '')
+      .trim()
+      .replace(/^(?:the|a|an)\s+/i, '')
+      .toLowerCase();
+    const aliases = {
+      chatgpt: 'chatgpt',
+      'chat gpt': 'chatgpt',
+      'open ai chatgpt': 'chatgpt',
+      claude: 'claude ai',
+      gemini: 'google gemini',
+      perplexity: 'perplexity ai',
+      github: 'github',
+      gmail: 'gmail',
+      'google mail': 'gmail',
+      drive: 'google drive',
+      'google drive': 'google drive',
+      docs: 'google docs',
+      'google docs': 'google docs',
+      notion: 'notion',
+      canva: 'canva',
+      figma: 'figma'
+    };
+
+    if (aliases[target]) {
+      return aliases[target];
+    }
+
+    const fuzzy = Normalizer.findClosestOption(target, Object.keys(aliases), {
+      minSimilarity: 0.78,
+      maxDistance: 2
+    });
+    return fuzzy ? aliases[fuzzy.normalizedMatch] : null;
+  }
+
   _resolveExplicitCommunicationIntent(rawText, preparedInput) {
     const input = String(preparedInput?.correctedText || rawText || '').trim();
     if (!input) return null;
@@ -849,13 +904,27 @@ class ActionRouter {
       return fileSearchIntent ? { intent: fileSearchIntent, confidence: 1 } : null;
     }
 
-    if (/^(search for|search the web for|search web|google|look up|find on web)\b/i.test(lower)) {
+    if (/^(search for|search the web for|search web|search|google|look up|find on web)\b/i.test(lower)) {
       return browserSearchIntent
         ? { intent: browserSearchIntent, confidence: 1, entities: this._buildSearchEntities(rawText, preparedInput) }
         : null;
     }
 
     return null;
+  }
+
+  _resolveBrowserFollowupIntent(rawText, preparedInput) {
+    const input = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
+    if (!/^(?:click|open|go\s+to)\s+(?:the\s+)?first\s+(?:link|result|search\s+result)\b/.test(input)) {
+      return null;
+    }
+
+    const intent = this.intentRegistry.get('browser.openFirstResult');
+    const queryMatch = input.match(/\b(?:for|of)\s+(.+)$/i);
+    const query = queryMatch?.[1]
+      ? queryMatch[1].replace(/\s+(?:in|on)\s+(?:chrome|browser|edge|firefox)\s*$/i, '').trim()
+      : '';
+    return intent ? { intent, confidence: 1, entities: query ? { query } : {} } : null;
   }
 
   _resolveExplicitReminderIntent(rawText, preparedInput) {
@@ -1054,11 +1123,15 @@ class ActionRouter {
     const isQuestion = /^(?:what|who|when|where|why|how|which)\b/i.test(corrected || raw);
     let query = isQuestion
       ? (corrected || raw)
-      : (this.entityExtractor._extractQuery(corrected.toLowerCase(), raw) || raw || corrected);
-    const openInBrowser = /\b(?:open|show|search|look\s+up|google).*\b(?:in|on)\s+(?:chrome|browser)\b/i.test(raw)
-      || /\b(?:open|show)\s+(?:it|results?)\s+(?:in|on)\s+(?:chrome|browser)\b/i.test(raw);
+      : (this.entityExtractor._extractQuery(corrected.toLowerCase(), corrected) ||
+        this.entityExtractor._extractQuery(corrected.toLowerCase(), raw) ||
+        raw ||
+        corrected);
+    const browserHintSource = `${raw} ${corrected}`.trim();
+    const openInBrowser = /\b(?:open|show|search|look\s+up|google).*\b(?:in|on)\s+(?:chrome|browser|edge|firefox)\b/i.test(browserHintSource)
+      || /\b(?:open|show)\s+(?:it|results?)\s+(?:in|on)\s+(?:chrome|browser|edge|firefox)\b/i.test(browserHintSource);
 
-    query = String(query || '').replace(/\s+(?:in|on)\s+(?:chrome|browser)\s*$/i, '').trim();
+    query = String(query || '').replace(/\s+(?:in|on)\s+(?:chrome|browser|edge|firefox)\s*$/i, '').trim();
 
     return {
       query,
