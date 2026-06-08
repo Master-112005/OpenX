@@ -90,6 +90,19 @@ describe('Entity Extractor', function() {
     assert.equal(entities.path, 'desktop');
   });
 
+  it('should extract spoken extension filenames for file creation', function() {
+    const extractor = new EntityExtractor({});
+    const intent = {
+      entities: [
+        { name: 'filename', type: 'string', required: true },
+        { name: 'path', type: 'string', required: false }
+      ]
+    };
+    const entities = extractor.extract(intent, 'create a report pdf file on desktop');
+    assert.equal(entities.filename, 'report.pdf');
+    assert.equal(entities.path, 'desktop');
+  });
+
   it('should extract filename and path for file deletion', function() {
     const extractor = new EntityExtractor({});
     const intent = {
@@ -175,6 +188,21 @@ describe('Entity Extractor', function() {
     const entities = extractor.extract(intent, 'say hi to daddy on whatsapp');
     assert.equal(entities.contactName, 'daddy');
     assert.equal(entities.messageText, 'hi');
+    assert.equal(entities.platform, 'whatsapp');
+  });
+
+  it('should extract file-send message details cleanly', function() {
+    const extractor = new EntityExtractor({});
+    const intent = {
+      entities: [
+        { name: 'contactName', type: 'string', required: true },
+        { name: 'messageText', type: 'string', required: true },
+        { name: 'platform', type: 'string', required: false }
+      ]
+    };
+    const entities = extractor.extract(intent, 'send the report.pdf file to mummy on whatsapp');
+    assert.equal(entities.contactName, 'mummy');
+    assert.equal(entities.messageText, 'file report.pdf');
     assert.equal(entities.platform, 'whatsapp');
   });
 

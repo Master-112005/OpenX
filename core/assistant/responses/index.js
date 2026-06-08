@@ -530,6 +530,22 @@ const RESPONSE_BUILDERS = {
         `There are ${count} active processes right now.`
       ]);
     },
+    'system.bluetooth': context => {
+      const enabled = valueFromContext(context, 'enabled', null);
+      const name = valueFromContext(context, 'name', 'Bluetooth');
+      if (enabled === true) {
+        return `${name} is on.`;
+      }
+      if (enabled === false) {
+        return `${name} is off.`;
+      }
+      const status = valueFromContext(context, 'status', '');
+      return status ? `${name} status is ${status}.` : 'Bluetooth status is not available.';
+    },
+    'assistant.identity': context => {
+      const name = valueFromContext(context, 'name', 'JARVIS');
+      return `My name is ${name}.`;
+    },
     'window.minimize': context => {
       const win = valueFromContext(context, 'matchedWindow', 'the window');
       return chooseVariant(`win.minimize:${win}`, [

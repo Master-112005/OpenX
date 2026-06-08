@@ -78,22 +78,27 @@ class ActionRouter {
 
   _resolveIntent(rawCommandText, preparedInput, source) {
     return (
+      this._resolveExplicitReminderIntent(rawCommandText, preparedInput) ||
+      this._resolveSystemSettingsIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitMediaControlIntent(rawCommandText, preparedInput) ||
       this._resolveMediaUnderstandingIntent(rawCommandText, source) ||
       this._resolveExplicitMediaIntent(rawCommandText, preparedInput) ||
+      this._resolveExplicitFileIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitFolderMoveIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitModeIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitAppIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitWindowIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitCommunicationIntent(rawCommandText, preparedInput) ||
       this._resolveBrowserFollowupIntent(rawCommandText, preparedInput) ||
+      this._resolveBrowserTabIntent(rawCommandText, preparedInput) ||
       this._resolveKnownWebOpenIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitOpenIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitAppOpenIntent(rawCommandText, preparedInput) ||
-      this._resolveExplicitReminderIntent(rawCommandText, preparedInput) ||
       this._resolveCalculationIntent(rawCommandText, preparedInput) ||
       this._resolveLocalInfoIntent(rawCommandText, preparedInput) ||
       this._resolveLocalFileListIntent(rawCommandText, preparedInput) ||
+      this._resolveAssistantIdentityIntent(rawCommandText, preparedInput) ||
+      this._resolveLocalFileSearchIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitSearchIntent(rawCommandText, preparedInput) ||
       this._resolveGeneralQuestionSearchIntent(rawCommandText, preparedInput) ||
       this._matchIntent(preparedInput)
@@ -218,6 +223,16 @@ class ActionRouter {
       const corrected = String(prepared.correctedText || clause || '').trim();
       const normalized = corrected.toLowerCase();
       const verbMatch = normalized.match(/^(open|launch|start|run|close|quit|exit|terminate|minimize|maximize|switch|focus|pause|resume|unpause|stop|set)\b/);
+      const standaloneQuestionMatch = normalized.match(/^ask\s+(.+)$/);
+      if (standaloneQuestionMatch?.[1] && /^(?:what|who|when|where|why|how|which)\b/i.test(standaloneQuestionMatch[1].trim())) {
+        carriedVerb = null;
+        return `search for ${standaloneQuestionMatch[1].trim()}`;
+      }
+
+      if (/^(?:ask|tell|message|text|search|google|look\s+up|find|what|who|when|where|why|how|which|remind|set|turn)\b/.test(normalized)) {
+        carriedVerb = null;
+        return corrected;
+      }
 
       if (verbMatch) {
         if (verbsThatCanCarry.has(verbMatch[1])) {
@@ -524,6 +539,10 @@ class ActionRouter {
     if (!input) return null;
 
     const correctedText = String(preparedInput?.correctedText || input).trim().toLowerCase();
+    if (/^(?:remind|set\s+reminder)\b/i.test(correctedText)) {
+      return null;
+    }
+
     const isMediaRequest =
       /^(?:play|stream|listen\s+to|watch|queue)\b/i.test(correctedText) ||
       /\b(?:play|stream|listen|watch|queue)\b/i.test(correctedText);
@@ -539,6 +558,10 @@ class ActionRouter {
   }
 
   _resolveMediaUnderstandingIntent(rawText, source) {
+    if (/^\s*(?:remind|set\s+reminder)\b/i.test(String(rawText || ''))) {
+      return null;
+    }
+
     if (/^\s*(?:close|quit|exit|terminate|stop)\b/i.test(String(rawText || '')) &&
       /\b(?:app|application|chrome|edge|firefox|browser|youtube|spotify|google\s+chat|discord|teams)\b/i.test(String(rawText || ''))) {
       return null;
@@ -614,6 +637,48 @@ class ActionRouter {
     }
 
     return { intent, confidence: 1 };
+  }
+
+  _resolveExplicitFileIntent(rawText, preparedInput) {
+    const input = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
+    if (!input) {
+      return null;
+    }
+
+    if (/\b(?:folder|directory)\b/.test(input)) {
+      return null;
+    }
+
+    const configs = [
+      { intentId: 'file.create', pattern: /^(?:create|new|make)\b/ },
+      { intentId: 'file.delete', pattern: /^(?:delete|remove|erase)\b/ },
+      { intentId: 'file.copy', pattern: /^copy\b/ },
+      { intentId: 'file.move', pattern: /^(?:move|bring)\b/ },
+      { intentId: 'file.search', pattern: /^(?:locate|find|search)\b/ }
+    ];
+
+    if (!/\b(?:file|location|path)\b|[^\s]+\.[A-Za-z0-9]{1,10}\b/i.test(input)) {
+      return null;
+    }
+
+    for (const config of configs) {
+      if (!config.pattern.test(input)) {
+        continue;
+      }
+      const intent = this.intentRegistry.get(config.intentId);
+      if (!intent) {
+        continue;
+      }
+      const rawEntities = this.entityExtractor.extract(intent, rawText);
+      const correctedEntities = this.entityExtractor.extract(intent, input);
+      const entities = { ...correctedEntities, ...rawEntities };
+      const missing = this._checkRequiredEntities(intent, entities);
+      if (missing.length === 0) {
+        return { intent, confidence: 1, entities };
+      }
+    }
+
+    return null;
   }
 
   _resolveExplicitModeIntent(rawText, preparedInput) {
@@ -913,6 +978,59 @@ class ActionRouter {
     return null;
   }
 
+  _resolveBrowserTabIntent(rawText, preparedInput) {
+    const input = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
+    if (!/^(?:open\s+)?(?:a\s+)?new\s+tab(?:\s+(?:in|on)\s+(?:chrome|browser|edge|firefox))?$/.test(input)) {
+      return null;
+    }
+
+    const intent = this.intentRegistry.get('browser.open');
+    return intent
+      ? { intent, confidence: 1, entities: { url: 'about:blank' } }
+      : null;
+  }
+
+  _resolveSystemSettingsIntent(rawText, preparedInput) {
+    const input = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
+    if (!/\b(?:wifi|wi\s*fi|bluetooth|hotspot|mobile\s+hotspot)\b/.test(input)) {
+      return null;
+    }
+
+    if (/\bbluetooth\b/.test(input)) {
+      const intent = this.intentRegistry.get('system.bluetooth');
+      if (!intent) {
+        return null;
+      }
+
+      if (/^(?:(?:turn|switch)\s+on|enable)\b|\bon\b/.test(input) && !/\b(?:what|status|about|is|are)\b/.test(input)) {
+        return { intent, confidence: 1, entities: { enabled: true } };
+      }
+      if (/^(?:(?:turn|switch)\s+off|disable)\b|\boff\b/.test(input) && !/\b(?:what|status|about|is|are)\b/.test(input)) {
+        return { intent, confidence: 1, entities: { enabled: false } };
+      }
+      if (/^(?:what|tell|show|check)\b|\b(?:status|about|is|are)\b/.test(input)) {
+        return { intent, confidence: 1, entities: {} };
+      }
+    }
+
+    const isSettingsLikeRequest =
+      /^(?:turn|switch|enable|disable|open|show|check)\b/.test(input) ||
+      /\b(?:is|are)\s+(?:on|off|enabled|disabled)\b/.test(input);
+    if (!isSettingsLikeRequest) {
+      return null;
+    }
+
+    const target = /\bhotspot|mobile\s+hotspot\b/.test(input)
+      ? 'ms-settings:network-mobilehotspot'
+      : /\bbluetooth\b/.test(input)
+        ? 'ms-settings:bluetooth'
+        : 'ms-settings:network-wifi';
+    const intent = this.intentRegistry.get('app.open');
+    return intent
+      ? { intent, confidence: 1, entities: { appName: target } }
+      : null;
+  }
+
   _resolveBrowserFollowupIntent(rawText, preparedInput) {
     const input = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
     if (!/^(?:click|open|go\s+to)\s+(?:the\s+)?first\s+(?:link|result|search\s+result)\b/.test(input)) {
@@ -943,7 +1061,7 @@ class ActionRouter {
       const fallbackText = input
         .replace(/^remind(?:\s+me)?\s+(?:to\s+)?/i, '')
         .trim();
-      if (fallbackText) {
+      if (fallbackText && !/^(?:me|myself)$/i.test(fallbackText)) {
         entities.reminderText = fallbackText;
       }
     }
@@ -957,6 +1075,10 @@ class ActionRouter {
     const input = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
     const systemTimeIntent = this.intentRegistry.get('system.time');
     const systemDateIntent = this.intentRegistry.get('system.date');
+    const systemStatusIntent = this.intentRegistry.get('system.status');
+    const systemCpuIntent = this.intentRegistry.get('system.cpu');
+    const systemMemoryIntent = this.intentRegistry.get('system.memory');
+    const systemProcessesIntent = this.intentRegistry.get('system.processes');
 
     if (/\b(?:time)\b/.test(input) && /^(?:what|when|tell|current|time)\b/.test(input)) {
       return systemTimeIntent ? { intent: systemTimeIntent, confidence: 1, entities: {} } : null;
@@ -966,7 +1088,36 @@ class ActionRouter {
       return systemDateIntent ? { intent: systemDateIntent, confidence: 1, entities: {} } : null;
     }
 
+    if (/\b(?:cpu|processor)\b/.test(input) && /\b(?:usage|status|use|using|load)\b/.test(input)) {
+      return systemCpuIntent ? { intent: systemCpuIntent, confidence: 1, entities: {} } : null;
+    }
+
+    if (/\b(?:ram|memory)\b/.test(input) && /\b(?:usage|status|use|using|used|available|about)\b/.test(input)) {
+      return systemMemoryIntent ? { intent: systemMemoryIntent, confidence: 1, entities: {} } : null;
+    }
+
+    if (
+      /\b(?:running|open|active)\b/.test(input) &&
+      /\b(?:apps?|applications?|processes|programs?|system)\b/.test(input)
+    ) {
+      return systemProcessesIntent ? { intent: systemProcessesIntent, confidence: 1, entities: {} } : null;
+    }
+
+    if (/\b(?:system|computer|pc|laptop)\b/.test(input) && /\b(?:status|health|usage|running|about|info|information)\b/.test(input)) {
+      return systemStatusIntent ? { intent: systemStatusIntent, confidence: 1, entities: {} } : null;
+    }
+
     return null;
+  }
+
+  _resolveAssistantIdentityIntent(rawText, preparedInput) {
+    const input = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
+    if (!/^(?:what|who)\s+(?:is|are)\s+(?:your|you)\s+(?:name|called)\b|^who\s+are\s+you\b/.test(input)) {
+      return null;
+    }
+
+    const intent = this.intentRegistry.get('assistant.identity');
+    return intent ? { intent, confidence: 1, entities: {} } : null;
   }
 
   _resolveCalculationIntent(rawText, preparedInput) {
@@ -1088,6 +1239,30 @@ class ActionRouter {
       : null;
   }
 
+  _resolveLocalFileSearchIntent(rawText, preparedInput) {
+    const input = String(preparedInput?.correctedText || rawText || '').trim();
+    const lower = input.toLowerCase();
+    if (!/^(?:locate|find|search|where\s+is|where\s+are|what\s+is\s+the\s+location\s+of|show\s+me\s+where)\b/.test(lower)) {
+      return null;
+    }
+    if (!/\b(?:file|folder|directory|location|path)\b|[^\s]+\.[A-Za-z0-9]{1,10}\b/i.test(`${input} ${rawText || ''}`)) {
+      return null;
+    }
+
+    const intent = this.intentRegistry.get('file.search');
+    if (!intent) {
+      return null;
+    }
+
+    const query = input
+      .replace(/^(?:locate|find|search(?:\s+for)?|where\s+is|where\s+are|what\s+is\s+the\s+location\s+of|show\s+me\s+where)\s+/i, '')
+      .replace(/^(?:the|a|an)\s+/i, '')
+      .replace(/\s+(?:file|folder|directory|location|path)$/i, '')
+      .replace(/\b([a-z0-9_-]+)\s+(pdf|txt|docx?|xlsx?|pptx?|csv|json|xml|html?|js|ts|py|java|md|png|jpe?g|gif|webp|mp[34]|mkv|wav|zip|rar)$/i, '$1.$2')
+      .trim();
+    return query ? { intent, confidence: 1, entities: { query } } : null;
+  }
+
   _extractLocalListLocation(input) {
     const locations = ['desktop', 'downloads', 'documents', 'pictures', 'music', 'videos', 'home'];
     for (const location of locations) {
@@ -1129,9 +1304,14 @@ class ActionRouter {
         corrected);
     const browserHintSource = `${raw} ${corrected}`.trim();
     const openInBrowser = /\b(?:open|show|search|look\s+up|google).*\b(?:in|on)\s+(?:chrome|browser|edge|firefox)\b/i.test(browserHintSource)
+      || /\bnew\s+tab\b/i.test(browserHintSource)
       || /\b(?:open|show)\s+(?:it|results?)\s+(?:in|on)\s+(?:chrome|browser|edge|firefox)\b/i.test(browserHintSource);
 
-    query = String(query || '').replace(/\s+(?:in|on)\s+(?:chrome|browser|edge|firefox)\s*$/i, '').trim();
+    query = String(query || '')
+      .replace(/\s+(?:in|on)\s+new\s+tab(?:\s+(?:in|on)\s+(?:chrome|browser|edge|firefox))?\s*$/i, '')
+      .replace(/\s+new\s+tab(?:\s+(?:in|on)\s+(?:chrome|browser|edge|firefox))?\s*$/i, '')
+      .replace(/\s+(?:in|on)\s+(?:chrome|browser|edge|firefox)\s*$/i, '')
+      .trim();
 
     return {
       query,

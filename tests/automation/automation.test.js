@@ -190,6 +190,19 @@ describe('Automation Engine', function() {
     }
   });
 
+  it('should parse human reminder day phrases', function() {
+    const SchedulerController = require('../../core/automation/scheduler/index');
+    const scheduler = new SchedulerController({});
+
+    const tomorrow = scheduler._parseTimeExpression('tomorrow 10pm');
+    const nextSunday = scheduler._parseTimeExpression('next sunday');
+
+    assert.ok(tomorrow instanceof Date);
+    assert.ok(nextSunday instanceof Date);
+    assert.ok(tomorrow.getTime() > Date.now());
+    assert.ok(nextSunday.getTime() > Date.now());
+  });
+
   it('should route media actions correctly', function() {
     const engine = new AutomationEngine({});
     const actions = engine.getActions();

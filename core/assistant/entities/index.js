@@ -36,14 +36,27 @@ const APP_ALIASES = {
   'task manager': 'taskmgr',
   'control panel': 'control',
   'settings': 'ms-settings',
+  'windows settings': 'ms-settings',
+  'system settings': 'ms-settings',
   'spotify': 'spotify',
   'discord': 'discord',
   'google chat': 'google chat',
   'whatsapp': 'whatsapp',
+  'telegram': 'telegram',
+  'telgram': 'telegram',
+  'teligram': 'telegram',
+  'teigam': 'telegram',
   'slack': 'slack',
   'zoom': 'zoom',
   'teams': 'teams',
   'microsoft teams': 'teams',
+  'cloudflare': 'cloudflare warp',
+  'cloudfare': 'cloudflare warp',
+  'cloudfair': 'cloudflare warp',
+  'cloudflare warp': 'cloudflare warp',
+  'cloudflare one': 'cloudflare one',
+  'cloudflare one client': 'cloudflare one',
+  'cloudfair one clint': 'cloudflare one',
   'apple music': 'apple music',
   'apple tv': 'apple tv',
   'youtube': 'youtube',
@@ -54,6 +67,8 @@ const APP_ALIASES = {
   'microsoft photos': 'photos',
   'calendar': 'calendar',
   'clock': 'clock',
+  'timer': 'clock',
+  'timr': 'clock',
   'alarms': 'clock',
   'alarms and clock': 'clock',
   'antigravity': 'antigravity'
@@ -430,6 +445,7 @@ class EntityExtractor {
 
     const patterns = [
       /\b(?:create|new|make)\s+file\s+(.+?)(?=\s+(?:on|in|at|to|from)\b|$)/i,
+      /\b(?:create|new|make)\s+(.+?)\s+file(?=\s+(?:on|in|at|to|from)\b|$)/i,
       /\b(?:delete|remove|erase)\s+file\s+(.+?)(?=\s+(?:on|in|at|to|from)\b|$)/i,
       /\b(?:delete|remove|erase)\s+(.+?)\s+file(?=\s+(?:on|in|at|to|from)\b|$)/i,
       /\b(?:delete|remove|erase)\s+(.+?)(?=\s+(?:on|in|at|from)\b|$)/i,
@@ -506,7 +522,10 @@ class EntityExtractor {
       if (text.includes(p)) {
         const after = raw.split(new RegExp(p, 'i'))[1];
         if (after && after.trim()) {
-          return after.trim();
+          return after
+            .replace(/\s+(?:in|on)\s+new\s+tab(?:\s+(?:in|on)\s+(?:chrome|browser|edge|firefox))?\s*$/i, '')
+            .replace(/\s+new\s+tab(?:\s+(?:in|on)\s+(?:chrome|browser|edge|firefox))?\s*$/i, '')
+            .trim();
         }
       }
     }
@@ -523,6 +542,14 @@ class EntityExtractor {
     if (!source) return null;
 
     const patterns = [
+      {
+        regex: /^(?:send|share)\s+(.+?\.(?:pdf|txt|docx?|xlsx?|pptx?|csv|json|xml|html?|js|ts|py|java|png|jpe?g|gif|webp|mp[34]|mkv|wav|zip|rar))(?:\s+file)?\s+to\s+(.+?)(?:\s+(?:on|via|using)\s+(.+))?$/i,
+        map: match => ({
+          messageText: `file ${cleanEntityName(match[1], { stripTypeWords: true })}`,
+          contactName: match[2],
+          platform: match[3]
+        })
+      },
       {
         regex: /^(?:say|send)\s+(.+?)\s+to\s+(.+?)(?:\s+(?:on|via|using)\s+(.+))?$/i,
         map: match => ({
@@ -707,6 +734,20 @@ class EntityExtractor {
       return reminderMatch[1].trim();
     }
 
+    const relativeReminderMatch = source.match(/\bremind(?: me)?\s+(.+?)\s+to\s+.+$/i);
+    if (relativeReminderMatch && relativeReminderMatch[1]) {
+      const candidate = relativeReminderMatch[1]
+        .replace(/^on\s+/i, '')
+        .replace(/\btommorow\b/gi, 'tomorrow')
+        .trim();
+      if (/\b(?:today|tomorrow|tonight|morning|afternoon|evening|night|monday|tuesday|wednesday|thursday|friday|saturday|sunday|\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\b/i.test(candidate)) {
+        const afterTo = source.split(/\bto\b/i).slice(1).join(' to ');
+        const nestedTimeMatch = afterTo.match(/\bat\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\b/i);
+        const nestedTime = nestedTimeMatch?.[1] ? nestedTimeMatch[1].replace(/\s+/g, '') : '';
+        return nestedTime ? `${candidate} ${nestedTime}` : candidate;
+      }
+    }
+
     const alarmMatch = source.match(/\b(?:set alarm for|alarm for|wake me at)\s+(.+)$/i);
     if (alarmMatch && alarmMatch[1]) {
       return alarmMatch[1].trim();
@@ -719,12 +760,16 @@ class EntityExtractor {
     const source = String(raw || '');
     const toMatch = source.match(/\bto\s+(.+)$/i);
     if (toMatch && toMatch[1]) {
-      return toMatch[1].trim();
+      const cleaned = toMatch[1]
+        .replace(/\s+\bat\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*$/i, '')
+        .trim();
+      return /^(?:me|myself)$/i.test(cleaned) ? null : cleaned;
     }
 
     const forMatch = source.match(/\bset reminder for\s+.+?\s+(.+)$/i);
     if (forMatch && forMatch[1]) {
-      return forMatch[1].trim();
+      const cleaned = forMatch[1].trim();
+      return /^(?:me|myself)$/i.test(cleaned) ? null : cleaned;
     }
 
     return null;

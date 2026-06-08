@@ -401,6 +401,14 @@ const INTENT_DEFINITIONS = [
     description: 'List running processes'
   },
   {
+    id: 'system.bluetooth',
+    patterns: ['bluetooth status', 'what about bluetooth', 'is bluetooth on'],
+    permissionLevel: 'low',
+    action: 'system.bluetooth',
+    entities: [{ name: 'enabled', type: 'boolean', required: false }],
+    description: 'Get or change Bluetooth state'
+  },
+  {
     id: 'window.minimize',
     patterns: ['minimize', 'minimize window', 'minimize all'],
     permissionLevel: 'low',
@@ -423,6 +431,14 @@ const INTENT_DEFINITIONS = [
     action: 'window.close',
     entities: [{ name: 'windowName', type: 'string', required: false }],
     description: 'Close active window'
+  },
+  {
+    id: 'assistant.identity',
+    patterns: ['what is your name', 'who are you', 'what are you called', 'who is your name'],
+    permissionLevel: 'low',
+    action: 'assistant.identity',
+    entities: [],
+    description: 'Tell the assistant identity'
   },
   {
     id: 'help',

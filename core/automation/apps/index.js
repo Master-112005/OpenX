@@ -44,6 +44,9 @@ const KNOWN_APPS = {
 
 const SPECIAL_LAUNCHERS = {
   'ms-settings': { target: 'ms-settings:' },
+  'ms-settings:': { target: 'ms-settings:' },
+  'windows settings': { target: 'ms-settings:' },
+  'system settings': { target: 'ms-settings:' },
   'recycle bin': { target: 'C:\\Windows\\explorer.exe', args: ['shell:RecycleBinFolder'] },
   'microsoft store': { target: 'ms-windows-store:' },
   'photos': { target: 'ms-photos:' },
@@ -86,6 +89,11 @@ class AppController {
         }
       }
 
+      const specialLaunch = this._launchSpecialApp(name);
+      if (specialLaunch.success) {
+        return specialLaunch;
+      }
+
       const startApp = this._resolveStartApp(name);
       if (startApp) {
         this._launchStartApp(startApp);
@@ -97,11 +105,6 @@ class AppController {
             appId: startApp.appId
           }
         };
-      }
-
-      const specialLaunch = this._launchSpecialApp(name);
-      if (specialLaunch.success) {
-        return specialLaunch;
       }
 
       if (app?.cmd && this._commandExists(app.cmd)) {
@@ -308,6 +311,18 @@ class AppController {
   }
 
   _launchSpecialApp(name) {
+    if (/^ms-settings:/i.test(String(name || ''))) {
+      launchTarget(name);
+      return {
+        success: true,
+        data: {
+          app: name,
+          launchMethod: 'settings-protocol',
+          target: name
+        }
+      };
+    }
+
     const launcher = SPECIAL_LAUNCHERS[name];
     if (!launcher) {
       return { success: false };

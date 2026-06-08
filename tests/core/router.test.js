@@ -737,6 +737,8 @@ describe('Action Router', function() {
     const whichWinner = await router.process('which team is the winner of ipl 2020', 'chat');
     const compactWinner = await router.process('who is the winner of ipl2020', 'chat');
     const captain = await router.process('who is the capatin of indian cricket team in 2026', 'chat');
+    const capital = await router.process('what is the capitol of india', 'chat');
+    const suv = await router.process('what is the cost of a suv in india', 'chat');
 
     assert.equal(whichWinner.intent, 'browser.search');
     assert.equal(whichWinner.entities.query, 'which team is the winner of ipl 2020');
@@ -744,6 +746,8 @@ describe('Action Router', function() {
     assert.equal(compactWinner.entities.query, 'who is the winner of ipl 2020');
     assert.equal(captain.intent, 'browser.search');
     assert.equal(captain.entities.query, 'who is the captain of indian cricket team in 2026');
+    assert.equal(capital.entities.query, 'what is the capital of india');
+    assert.equal(suv.entities.query, 'what is the cost of a suv in india');
   });
 
   it('should mark search queries for browser opening only when explicit', async function() {
@@ -1142,6 +1146,184 @@ describe('Action Router', function() {
     const result = await router.process('youtube maximize please', 'chat');
     assert.equal(result.intent, 'window.maximize');
     assert.equal(result.entities.windowName, 'youtube');
+  });
+
+  it('should route local system questions without web search', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...entities, count: 12, cpu: 10, ram: 50 } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const running = await router.process('what apps are running', 'chat');
+    const cpu = await router.process('what is the cpu usage', 'chat');
+    const ram = await router.process('what is the ram usage', 'chat');
+    const followUpMemory = await router.process('what about memory', 'chat');
+    const laptop = await router.process('tell about this laptop', 'chat');
+
+    assert.equal(running.intent, 'system.processes');
+    assert.equal(cpu.intent, 'system.cpu');
+    assert.equal(ram.intent, 'system.memory');
+    assert.equal(followUpMemory.intent, 'system.memory');
+    assert.equal(laptop.intent, 'system.status');
+  });
+
+  it('should answer assistant identity locally', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId) {
+        return { success: true, data: { actionId, name: 'JARVIS' } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const result = await router.process('what is your name', 'chat');
+
+    assert.equal(result.intent, 'assistant.identity');
+    assert.match(result.response, /JARVIS/);
+  });
+
+  it('should keep reminder requests ahead of media routing', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const result = await router.process('remind me tommorow to watch wwdc2026 at 10 pm', 'chat');
+
+    assert.equal(result.intent, 'reminder.set');
+    assert.equal(result.entities.reminderText, 'watch wwdc2026');
+    assert.equal(result.entities.timeExpression, 'tomorrow 10pm');
+  });
+
+  it('should route human reminder date phrases with scheduler-friendly time expressions', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const result = await router.process('remind me on next sunday to watch the sunshine movie', 'chat');
+
+    assert.equal(result.intent, 'reminder.set');
+    assert.equal(result.entities.timeExpression, 'next sunday');
+    assert.equal(result.entities.reminderText, 'watch the sunshine movie');
+  });
+
+  it('should not accept bare remind me as a valid reminder', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute() {
+        throw new Error('should not execute');
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const result = await router.process('remind me', 'chat');
+
+    assert.equal(result.success, false);
+  });
+
+  it('should route new tab and new-tab searches without polluting the query', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const tab = await router.process('open a new tab in chrome', 'chat');
+    const search = await router.process('search for latest cricket news in new tab in chrome', 'chat');
+
+    assert.equal(tab.intent, 'browser.open');
+    assert.equal(tab.entities.url, 'about:blank');
+    assert.equal(search.intent, 'browser.search');
+    assert.equal(search.entities.query, 'latest cricket news');
+    assert.equal(search.entities.openInBrowser, true);
+  });
+
+  it('should not carry open into ask-style follow-up clauses', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const executed = [];
+    const stubEngine = {
+      execute(actionId, entities) {
+        executed.push({ actionId, entities });
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const result = await router.process('open copilot and ask what is the weather', 'chat');
+
+    assert.equal(result.intent, 'multi.command');
+    assert.deepEqual(executed.map(step => step.actionId), ['app.open', 'browser.search']);
+    assert.equal(executed[1].entities.query, 'what is the weather');
+  });
+
+  it('should route hotspot and bluetooth phrases to Windows settings pages', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const hotspot = await router.process('turn on mobile hotspot', 'chat');
+    const bluetooth = await router.process('bluetooth is on', 'chat');
+    const bluetoothOff = await router.process('turn off the bluetooth', 'chat');
+    const bluetoothQuestion = await router.process('what about the bluetooth', 'chat');
+
+    assert.equal(hotspot.intent, 'app.open');
+    assert.equal(hotspot.entities.appName, 'ms-settings:network-mobilehotspot');
+    assert.equal(bluetooth.intent, 'system.bluetooth');
+    assert.deepEqual(bluetooth.entities, {});
+    assert.equal(bluetoothOff.intent, 'system.bluetooth');
+    assert.equal(bluetoothOff.entities.enabled, false);
+    assert.equal(bluetoothQuestion.intent, 'system.bluetooth');
+  });
+
+  it('should route file creation and location commands locally', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...entities, results: [] } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const create = await router.process('create a report pdf file on desktop', 'chat');
+    const location = await router.process('what is the location of report.md', 'chat');
+    const locate = await router.process('locate the report.pdf', 'chat');
+
+    assert.equal(create.intent, 'file.create');
+    assert.equal(create.entities.filename, 'report.pdf');
+    assert.equal(create.entities.path, 'desktop');
+    assert.equal(location.intent, 'file.search');
+    assert.equal(location.entities.query, 'report.md');
+    assert.equal(locate.intent, 'file.search');
+    assert.equal(locate.entities.query, 'report.pdf');
   });
 
   it('should return error for unknown commands', async function() {

@@ -64,7 +64,11 @@ class SchedulerController {
   }
 
   _parseTimeExpression(input) {
-    const value = String(input || '').trim().toLowerCase();
+    const value = String(input || '')
+      .trim()
+      .toLowerCase()
+      .replace(/^on\s+/, '')
+      .replace(/\s+/g, ' ');
     if (!value) return null;
 
     const durationMatch = value.match(/(\d+)\s*(seconds?|secs?|minutes?|mins?|hours?|hrs?)/i);
@@ -81,15 +85,67 @@ class SchedulerController {
       return new Date(Date.now() + (minutes * 60 * 1000));
     }
 
+    const relativeDayMatch = value.match(/^(today|tomorrow|tonight)$/i);
+    if (relativeDayMatch) {
+      const dueAt = new Date();
+      dueAt.setSeconds(0, 0);
+      dueAt.setHours(relativeDayMatch[1] === 'tonight' ? 20 : 9, 0, 0, 0);
+      if (relativeDayMatch[1] === 'tomorrow' || dueAt.getTime() <= Date.now()) {
+        dueAt.setDate(dueAt.getDate() + 1);
+      }
+      return dueAt;
+    }
+
+    const weekdayMatch = value.match(/^(?:(next)\s+)?(monday|tuesday|wednesday|thursday|friday|saturday|sunday)(?:\s+(?:at\s+)?)?(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)?$/i);
+    if (weekdayMatch) {
+      const weekdays = ['sunday', 'monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday'];
+      const targetDay = weekdays.indexOf(weekdayMatch[2].toLowerCase());
+      const dueAt = new Date();
+      dueAt.setSeconds(0, 0);
+      const timeParts = this._parseClockParts(weekdayMatch[3] || '9 am');
+      if (!timeParts) {
+        return null;
+      }
+      dueAt.setHours(timeParts.hours, timeParts.minutes, 0, 0);
+      let daysUntil = (targetDay - dueAt.getDay() + 7) % 7;
+      if (daysUntil === 0 || weekdayMatch[1]) {
+        daysUntil = daysUntil === 0 ? 7 : daysUntil;
+      }
+      dueAt.setDate(dueAt.getDate() + daysUntil);
+      return dueAt;
+    }
+
     const match = value.match(/^(tomorrow\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i);
     if (!match) {
       return null;
     }
 
     const isTomorrow = Boolean(match[1]);
-    let hours = parseInt(match[2], 10);
-    const minutes = parseInt(match[3] || '0', 10);
-    const meridiem = match[4] ? match[4].toLowerCase() : null;
+    const parsedClock = this._parseClockParts(`${match[2]}${match[3] ? `:${match[3]}` : ''}${match[4] || ''}`);
+    if (!parsedClock) {
+      return null;
+    }
+
+    const dueAt = new Date();
+    dueAt.setSeconds(0, 0);
+    dueAt.setHours(parsedClock.hours, parsedClock.minutes, 0, 0);
+
+    if (isTomorrow || dueAt.getTime() <= Date.now()) {
+      dueAt.setDate(dueAt.getDate() + 1);
+    }
+
+    return dueAt;
+  }
+
+  _parseClockParts(value) {
+    const match = String(value || '').trim().match(/^(\d{1,2})(?::(\d{2}))?\s*(am|pm)?$/i);
+    if (!match) {
+      return null;
+    }
+
+    let hours = parseInt(match[1], 10);
+    const minutes = parseInt(match[2] || '0', 10);
+    const meridiem = match[3] ? match[3].toLowerCase() : null;
 
     if (meridiem) {
       if (hours === 12) {
@@ -103,15 +159,7 @@ class SchedulerController {
       return null;
     }
 
-    const dueAt = new Date();
-    dueAt.setSeconds(0, 0);
-    dueAt.setHours(hours, minutes, 0, 0);
-
-    if (isTomorrow || dueAt.getTime() <= Date.now()) {
-      dueAt.setDate(dueAt.getDate() + 1);
-    }
-
-    return dueAt;
+    return { hours, minutes };
   }
 
   _scheduleNotification({ kind, title, message, dueAt }) {

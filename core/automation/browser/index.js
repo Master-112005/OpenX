@@ -47,7 +47,11 @@ class BrowserController {
     }
 
     let formattedUrl = url.trim();
-    if (!formattedUrl.startsWith('http://') && !formattedUrl.startsWith('https://')) {
+    if (
+      !formattedUrl.startsWith('http://') &&
+      !formattedUrl.startsWith('https://') &&
+      !/^(?:about|chrome|edge|file):/i.test(formattedUrl)
+    ) {
       formattedUrl = 'https://' + formattedUrl;
     }
 

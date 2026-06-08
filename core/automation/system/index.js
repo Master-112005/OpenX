@@ -1,5 +1,5 @@
 const os = require('os');
-const { execSync } = require('child_process');
+const { execFileSync, execSync } = require('child_process');
 const Logger = require('../../shared/index').Logger;
 
 class SystemController {
@@ -296,6 +296,73 @@ class SystemController {
       return { success: true, data: { count: isNaN(count) ? 0 : count } };
     } catch (err) {
       return { success: false, error: err.message };
+    }
+  }
+
+  bluetooth(enabled = undefined) {
+    if (enabled === true || enabled === false) {
+      return this._setBluetoothState(enabled);
+    }
+
+    return this._getBluetoothState();
+  }
+
+  _getBluetoothState() {
+    try {
+      const output = execFileSync('powershell.exe', [
+        '-NoProfile',
+        '-Command',
+        [
+          "$devices = Get-PnpDevice -Class Bluetooth -ErrorAction SilentlyContinue |",
+          "Where-Object { $_.FriendlyName -and $_.FriendlyName -notmatch 'Enumerator|Protocol|Service|Generic Attribute|RFCOMM' };",
+          "$device = $devices | Sort-Object { if ($_.Status -eq 'OK') { 0 } else { 1 } } | Select-Object -First 1;",
+          "if (-not $device) { @{ available = $false } | ConvertTo-Json -Compress; exit }",
+          "@{ available = $true; enabled = ($device.Status -eq 'OK'); status = $device.Status; name = $device.FriendlyName } | ConvertTo-Json -Compress"
+        ].join(' ')
+      ], {
+        encoding: 'utf8',
+        timeout: 8000
+      });
+      const data = JSON.parse(output || '{}');
+      if (!data.available) {
+        return { success: false, error: 'Bluetooth device not found' };
+      }
+      return { success: true, data };
+    } catch (err) {
+      return { success: false, error: 'Bluetooth status is not available' };
+    }
+  }
+
+  _setBluetoothState(enabled) {
+    const verb = enabled ? 'Enable-PnpDevice' : 'Disable-PnpDevice';
+    try {
+      const output = execFileSync('powershell.exe', [
+        '-NoProfile',
+        '-Command',
+        [
+          "$devices = Get-PnpDevice -Class Bluetooth -ErrorAction SilentlyContinue |",
+          "Where-Object { $_.FriendlyName -and $_.FriendlyName -notmatch 'Enumerator|Protocol|Service|Generic Attribute|RFCOMM' };",
+          "if (-not $devices) { @{ success = $false; error = 'Bluetooth device not found' } | ConvertTo-Json -Compress; exit }",
+          `$devices | ${verb} -Confirm:$false -ErrorAction Stop;`,
+          "$after = Get-PnpDevice -Class Bluetooth -ErrorAction SilentlyContinue |",
+          "Where-Object { $_.FriendlyName -and $_.FriendlyName -notmatch 'Enumerator|Protocol|Service|Generic Attribute|RFCOMM' } |",
+          "Sort-Object { if ($_.Status -eq 'OK') { 0 } else { 1 } } | Select-Object -First 1;",
+          `@{ success = $true; enabled = ${enabled ? '$true' : '$false'}; status = $after.Status; name = $after.FriendlyName } | ConvertTo-Json -Compress`
+        ].join(' ')
+      ], {
+        encoding: 'utf8',
+        timeout: 15000
+      });
+      const data = JSON.parse(output || '{}');
+      if (!data.success) {
+        return { success: false, error: data.error || 'Bluetooth could not be changed' };
+      }
+      return { success: true, data };
+    } catch (err) {
+      return {
+        success: false,
+        error: 'Bluetooth could not be changed. Windows may require administrator permission or may not expose a Bluetooth radio'
+      };
     }
   }
 

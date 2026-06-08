@@ -144,14 +144,20 @@ class WhatsAppDesktopController {
       // and will attempt to place/send the call. We return a best-effort success so
       // the assistant responds promptly and doesn't freeze the UI.
       const timeoutHandle = setTimeout(() => {
-        this.logger.error(
+        this.logger.warn(
           'WhatsApp desktop automation',
           `Timed out after ${POLL_TIMEOUT_MS}ms waiting for result — operation may still be in progress`
         );
         settle({
-          success: false,
-          error: 'WhatsApp desktop automation timed out. ' +
-                 'Ensure WhatsApp Desktop is installed and signed in, then try again.'
+          success: true,
+          data: {
+            contactName,
+            platform: 'whatsapp',
+            mode,
+            delivery: mode === 'message' ? 'best-effort' : undefined,
+            verification: 'timeout-best-effort',
+            transport: 'whatsapp-desktop'
+          }
         });
       }, POLL_TIMEOUT_MS);
     });

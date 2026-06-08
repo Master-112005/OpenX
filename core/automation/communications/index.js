@@ -1,5 +1,6 @@
 const { Logger } = require('../../shared/index');
 const BrowserController = require('../browser/index');
+const FileController = require('../files/index');
 const { launchTarget } = require('../common/launcher');
 const { ContactStore } = require('./contact-store');
 const WhatsAppDesktopController = require('./whatsapp-desktop');
@@ -9,6 +10,7 @@ class CommunicationsController {
     this.config = config;
     this.logger = new Logger({ level: config?.logging?.level || 'info' });
     this.browser = new BrowserController(config);
+    this.files = new FileController(config);
     this.contactStore = new ContactStore(config);
     this.whatsAppDesktop = new WhatsAppDesktopController(config);
   }
@@ -22,9 +24,10 @@ class CommunicationsController {
       return { success: false, error: 'No message text provided' };
     }
 
+    const preparedMessageText = this._prepareOutgoingMessageText(messageText);
     const contact = this.contactStore.findContact(contactName);
     if (!contact) {
-      const fallbackResult = await this._composeWhatsAppDesktopMessage(contactName, messageText, platform);
+      const fallbackResult = await this._composeWhatsAppDesktopMessage(contactName, preparedMessageText, platform);
       if (fallbackResult?.success) {
         return fallbackResult;
       }
@@ -44,15 +47,15 @@ class CommunicationsController {
     }
 
     if (!contact.phone) {
-      return this.whatsAppDesktop.sendMessage(contact.name, messageText);
+      return this.whatsAppDesktop.sendMessage(contact.name, preparedMessageText);
     }
 
-    const desktopMessageResult = await this._composeWhatsAppDesktopMessage(contact.name, messageText, platform);
+    const desktopMessageResult = await this._composeWhatsAppDesktopMessage(contact.name, preparedMessageText, platform);
     if (desktopMessageResult?.success) {
       return desktopMessageResult;
     }
 
-    const url = this._buildWhatsAppComposeUrl(contact.phone, messageText);
+    const url = this._buildWhatsAppComposeUrl(contact.phone, preparedMessageText);
     const result = this.browser.open(url);
     if (!result.success) {
       return result;
@@ -62,7 +65,7 @@ class CommunicationsController {
       success: true,
       data: {
         contactName: contact.name,
-        messageText,
+        messageText: preparedMessageText,
         platform: 'whatsapp',
         phone: contact.phone,
         url,
@@ -169,6 +172,23 @@ class CommunicationsController {
   _buildWhatsAppComposeUrl(phoneNumber, messageText) {
     const digits = String(phoneNumber || '').replace(/[^\d]/g, '');
     return `https://wa.me/${digits}?text=${encodeURIComponent(messageText)}`;
+  }
+
+  _prepareOutgoingMessageText(messageText) {
+    const source = String(messageText || '').trim();
+    const fileMatch = source.match(/^file\s+(.+)$/i);
+    if (!fileMatch?.[1]) {
+      return source;
+    }
+
+    const fileName = fileMatch[1].trim();
+    const searchResult = this.files.search(fileName);
+    const firstPath = Array.isArray(searchResult?.data?.results)
+      ? searchResult.data.results[0]
+      : null;
+    return firstPath
+      ? `File path: ${firstPath}`
+      : `File requested: ${fileName}`;
   }
 
   _launchUri(uri) {

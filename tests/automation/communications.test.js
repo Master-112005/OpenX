@@ -93,6 +93,36 @@ describe('Communications Controller', function() {
     assert.equal(result.data.delivery, 'sent');
   });
 
+  it('should clean file-send phrases into a shareable file path message', async function() {
+    const { controller } = createController({});
+    controller.files.search = () => ({
+      success: true,
+      data: { results: ['C:\\Users\\rakes\\Desktop\\report.pdf'] }
+    });
+    let captured = null;
+    controller.whatsAppDesktop.sendMessage = async (contactName, messageText) => {
+      captured = { contactName, messageText };
+      return {
+        success: true,
+        data: {
+          contactName,
+          messageText,
+          platform: 'whatsapp',
+          delivery: 'sent',
+          transport: 'whatsapp-desktop'
+        }
+      };
+    };
+
+    const result = await controller.composeMessage('mummy', 'file report.pdf', 'whatsapp');
+
+    assert.equal(result.success, true);
+    assert.deepEqual(captured, {
+      contactName: 'mummy',
+      messageText: 'File path: C:\\Users\\rakes\\Desktop\\report.pdf'
+    });
+  });
+
   it('should start a whatsapp desktop call when the contact book is empty', async function() {
     const { controller } = createController({});
     let captured = null;
