@@ -3,3 +3,4 @@ graphify-out/
 .cursor/
 .codex/
 .code-review-graph/
+models/whisper/*.bin
