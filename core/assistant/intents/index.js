@@ -270,6 +270,14 @@ const INTENT_DEFINITIONS = [
     description: 'Calculate a simple arithmetic expression'
   },
   {
+    id: 'system.screenshot',
+    patterns: ['take screenshot', 'take a screenshot', 'capture screen', 'screen capture', 'screenshot'],
+    permissionLevel: 'low',
+    action: 'system.screenshot',
+    entities: [],
+    description: 'Take a screenshot'
+  },
+  {
     id: 'message.send',
     patterns: ['send message to', 'send a message to', 'send text to', 'message', 'text', 'ask', 'tell', 'msg'],
     permissionLevel: 'low',

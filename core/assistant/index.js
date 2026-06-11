@@ -81,6 +81,7 @@ class Assistant extends EventEmitter {
     this.responses = new ResponseGenerator(config);
     this.isProcessing = false;
     this.pendingConfirmation = null;
+    this.pendingClarification = null;
   }
 
   async processCommand(input, source = 'chat') {
@@ -102,8 +103,14 @@ class Assistant extends EventEmitter {
         return confirmationResult;
       }
 
-      const result = await this.router.process(input, source);
-      this.context.record(input, {}, result);
+      const clarificationResult = await this._handlePendingClarification(input, source);
+      if (clarificationResult) {
+        return clarificationResult;
+      }
+
+      const routedInput = this._resolveContextualFollowUp(input) || input;
+      const result = await this.router.process(routedInput, source);
+      this.context.record(input, result.entities || {}, result);
 
       let response = result.response || '';
       response = this.personality.applyToResponse(response);
@@ -115,8 +122,17 @@ class Assistant extends EventEmitter {
           entities: { ...(result.entities || {}) },
           source
         };
+      } else if (result.needsClarification) {
+        this.pendingClarification = {
+          commandId: result.commandId,
+          intentId: result.intent,
+          entities: { ...(result.entities || {}) },
+          data: result.data || {},
+          response
+        };
       } else if (result.success) {
         this.pendingConfirmation = null;
+        this.pendingClarification = null;
       }
 
       if (result.intent) {
@@ -222,6 +238,7 @@ class Assistant extends EventEmitter {
     return {
       isProcessing: this.isProcessing,
       awaitingConfirmation: Boolean(this.pendingConfirmation),
+      awaitingClarification: Boolean(this.pendingClarification),
       recentCommands: this.context.getRecentCommands(),
       conversation: this.context.getConversationSummary()
     };
@@ -272,6 +289,145 @@ class Assistant extends EventEmitter {
         this.responses.generate('confirmation', 'awaitingDecision')
       )
     };
+  }
+
+  async _handlePendingClarification(input, source) {
+    if (!this.pendingClarification) {
+      return null;
+    }
+
+    const normalized = this._normalizeConfirmationText(input);
+    if (this._isCancelPhrase(normalized)) {
+      this.pendingClarification = null;
+      return {
+        success: true,
+        cancelled: true,
+        source,
+        response: this.personality.applyToResponse(
+          this.responses.generate('confirmation', 'cancelled')
+        )
+      };
+    }
+
+    const pending = this.pendingClarification;
+    if (pending.data?.confirmEntities && this._isConfirmPhrase(normalized)) {
+      this.pendingClarification = null;
+      const result = await this.router.confirmAndExecute(
+        pending.commandId,
+        pending.intentId,
+        {
+          ...pending.entities,
+          ...pending.data.confirmEntities
+        }
+      );
+      const response = this.personality.applyToResponse(result.response || '');
+      return {
+        ...result,
+        response,
+        source
+      };
+    }
+
+    const choice = this._resolveClarificationChoice(normalized, pending.data?.choices || []);
+    if (!choice) {
+      return {
+        success: false,
+        needsClarification: true,
+        source,
+        commandId: pending.commandId,
+        intent: pending.intentId,
+        entities: { ...pending.entities },
+        data: pending.data,
+        response: pending.response || 'Please say the number or title of the window to close.'
+      };
+    }
+
+    this.pendingClarification = null;
+    const result = await this.router.confirmAndExecute(
+      pending.commandId,
+      pending.intentId,
+      this._buildClarifiedEntities(pending.entities, choice)
+    );
+    const response = this.personality.applyToResponse(result.response || '');
+    return {
+      ...result,
+      response,
+      source
+    };
+  }
+
+  _resolveClarificationChoice(input, choices) {
+    const normalized = String(input || '').trim().toLowerCase();
+    const list = Array.isArray(choices) ? choices : [];
+    if (!normalized || list.length === 0) {
+      return null;
+    }
+
+    const numeric = normalized.match(/\b(?:number\s*)?(\d+)\b/);
+    if (numeric) {
+      const index = parseInt(numeric[1], 10);
+      const byIndex = list.find(choice => Number(choice.index) === index);
+      if (byIndex) {
+        return byIndex;
+      }
+    }
+
+    return list.find(choice => {
+      const title = Normalizer.normalizeText(choice.title || '');
+      const choicePath = Normalizer.normalizeText(choice.path || '');
+      return (title && (title.includes(normalized) || normalized.includes(title))) ||
+        (choicePath && (choicePath.includes(normalized) || normalized.includes(choicePath)));
+    }) || null;
+  }
+
+  _buildClarifiedEntities(baseEntities, choice) {
+    const entities = {
+      ...(baseEntities || {}),
+      ...(choice.entities || {})
+    };
+
+    if (choice.id) {
+      entities.targetProcessId = choice.id;
+    }
+    if (choice.title) {
+      entities.targetWindowTitle = choice.title;
+    }
+    if (choice.path) {
+      entities.selectedPath = choice.path;
+    }
+
+    return entities;
+  }
+
+  _resolveContextualFollowUp(input) {
+    const normalized = Normalizer.normalizeText(String(input || '').trim());
+    if (!normalized) {
+      return '';
+    }
+
+    const listFollowUp = /^(?:list|show|tell|display|open)?\s*(?:them|those|these|it|that)(?:\s+again)?$/.test(normalized) ||
+      /^(?:list|show|tell|display)\s+(?:them|those|these|it|that)\b/.test(normalized);
+    if (!listFollowUp) {
+      return '';
+    }
+
+    const lastFileList = this.context.getHistory(8)
+      .slice()
+      .reverse()
+      .find(entry => entry?.success && entry?.intent === 'file.list' && entry?.entities?.path);
+
+    if (!lastFileList) {
+      return '';
+    }
+
+    const entities = lastFileList.entities || {};
+    const type = String(entities.fileType || '').trim();
+    const path = String(entities.path || '').trim();
+    if (!path) {
+      return '';
+    }
+
+    return `list ${type ? `${type} ` : ''}files in ${path}`;
   }
 
   _isConfirmPhrase(text) {

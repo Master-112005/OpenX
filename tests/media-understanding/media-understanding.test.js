@@ -19,6 +19,7 @@ describe('Media Understanding', function() {
 
     assert.equal(mapper.normalizePlatform('you tube').platform, 'youtube');
     assert.equal(mapper.normalizePlatform('spoti fy').platform, 'spotify');
+    assert.equal(mapper.normalizePlatform('apple musix').platform, 'apple music');
   });
 
   it('should infer Spotify from running apps and YouTube by default', function() {
@@ -64,6 +65,19 @@ describe('Media Understanding', function() {
     assert.equal(parsed.genre, 'punjabi');
     assert.equal(parsed.query, 'punjabi songs');
     assert.equal(parsed.platform, 'youtube');
+  });
+
+  it('should keep Apple Music playback requests on Apple Music', function() {
+    const { MediaParser } = require('../../core/media-understanding/parser');
+    const parser = new MediaParser();
+
+    const spaced = parser.parse('play songs on apple music');
+    const compact = parser.parse('play songs on applemusic');
+
+    assert.equal(spaced.intent, 'media.play');
+    assert.equal(spaced.query, 'music');
+    assert.equal(spaced.platform, 'apple music');
+    assert.equal(compact.platform, 'apple music');
   });
 
   it('should parse media controls and malformed input safely', function() {

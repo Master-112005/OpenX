@@ -1,10 +1,10 @@
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
 const Logger = require('../../shared/index').Logger;
 const Normalizer = require('../../shared/index').Normalizer;
 const Validator = require('../../shared/index').Validator;
 const {
+  findEntriesByName,
   findEntryByName,
   getHomeDirectory,
   getSpecialFolders,
@@ -34,7 +34,7 @@ class FileController {
 
     const source = splitNameAndLocation(filename);
     const safeName = Validator.sanitizePath(source.name || filename);
-    const explicitDirectory = targetPath || source.location;
+    const explicitDirectory = typeof targetPath === 'string' ? targetPath : source.location;
 
     if (explicitDirectory) {
       const dir = resolveDirectory(explicitDirectory, { mustExist: true });
@@ -99,6 +99,34 @@ class FileController {
     }
 
     try {
+      const selectedPath = targetPath?.selectedPath || targetPath?.targetPath;
+      if (selectedPath && path.isAbsolute(selectedPath) && fs.existsSync(selectedPath) && fs.statSync(selectedPath).isFile()) {
+        launchTarget(selectedPath);
+        return { success: true, data: { path: selectedPath, filename: path.basename(selectedPath) } };
+      }
+
+      const matches = this._findFileMatches(filename, targetPath);
+      if (matches.length > 1) {
+        const choices = matches.slice(0, 8).map((filePath, index) => ({
+          index: index + 1,
+          title: `${path.basename(filePath)} - ${filePath}`,
+          path: filePath,
+          entities: { selectedPath: filePath, path: null }
+        }));
+
+        return {
+          success: false,
+          needsClarification: true,
+          error: this._buildAmbiguousFileMessage(filename, choices),
+          data: {
+            clarificationType: 'file.open',
+            filename,
+            matchCount: matches.length,
+            choices
+          }
+        };
+      }
+
       const fullPath = this._resolveFilePath(filename, targetPath);
       if (!fullPath) {
         return { success: false, error: 'File not found' };
@@ -223,45 +251,30 @@ class FileController {
       return { success: false, error: 'No search query provided' };
     }
 
+    const cleanQuery = this._cleanSearchQuery(query);
     const results = [];
-    const searchDirs = SEARCH_ROOTS().slice(0, 4);
+    const searchDirs = SEARCH_ROOTS();
+    const lowerQuery = cleanQuery.toLowerCase();
 
     for (const dir of searchDirs) {
       if (!dir || !fs.existsSync(dir)) continue;
       try {
-        const entries = fs.readdirSync(dir, { withFileTypes: true });
-        for (const entry of entries) {
-          if (entry.name.toLowerCase().includes(query.toLowerCase())) {
-            results.push(path.join(dir, entry.name));
-          }
-        }
+        this._searchDirectoryRecursive(dir, lowerQuery, results, {
+          maxDepth: 8,
+          maxDirectories: 8000,
+          maxResults: 40
+        });
       } catch (err) {
         continue;
       }
     }
 
-    try {
-      const result = execSync(
-        `powershell -Command "Get-ChildItem -Path '${searchDirs[0]}' -Filter '*${query}*' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty FullName"`,
-        { encoding: 'utf8', timeout: 10000 }
-      );
-      const powerShellResults = result.trim().split('\n').filter(Boolean);
-      powerShellResults.forEach(found => {
-        const trimmed = found.trim();
-        if (!results.includes(trimmed)) {
-          results.push(trimmed);
-        }
-      });
-    } catch (err) {
-      // PowerShell search failed, keep the direct search results.
-    }
-
     return {
       success: true,
       data: {
-        results: results.slice(0, 20),
+        results: Array.from(new Set(results)).slice(0, 20),
         count: results.length,
-        query
+        query: cleanQuery
       }
     };
   }
@@ -383,6 +396,135 @@ class FileController {
     }
 
     return path.join(dir, matches[0].entry.name);
+  }
+
+  _findFileMatches(filename, targetPath = null) {
+    if (!filename) {
+      return [];
+    }
+
+    const selectedPath = targetPath?.selectedPath || targetPath?.targetPath;
+    if (selectedPath && path.isAbsolute(selectedPath) && fs.existsSync(selectedPath) && fs.statSync(selectedPath).isFile()) {
+      return [path.resolve(selectedPath)];
+    }
+
+    if (path.isAbsolute(filename) && fs.existsSync(filename) && fs.statSync(filename).isFile()) {
+      return [path.resolve(filename)];
+    }
+
+    const source = splitNameAndLocation(filename);
+    const safeName = Validator.sanitizePath(source.name || filename);
+    const explicitDirectory = typeof targetPath === 'string' ? targetPath : source.location;
+    if (explicitDirectory) {
+      const resolved = this._resolveFilePath(filename, explicitDirectory);
+      return resolved ? [resolved] : [];
+    }
+
+    const exactMatches = findEntriesByName(safeName, {
+      roots: SEARCH_ROOTS(),
+      type: 'file',
+      maxDepth: 8,
+      maxDirectories: 8000,
+      maxMatches: 12
+    }) || [];
+    if (exactMatches.length > 1) {
+      return exactMatches;
+    }
+
+    if (exactMatches.length === 1) {
+      return exactMatches;
+    }
+
+    const fuzzyMatches = [];
+    for (const root of SEARCH_ROOTS()) {
+      this._searchDirectoryRecursive(root, path.basename(safeName).toLowerCase(), fuzzyMatches, {
+        maxDepth: 8,
+        maxDirectories: 8000,
+        maxResults: 12,
+        filesOnly: true,
+        fuzzyName: safeName
+      });
+    }
+    return Array.from(new Set(fuzzyMatches)).slice(0, 12);
+  }
+
+  _searchDirectoryRecursive(root, lowerQuery, results, options = {}) {
+    if (!root || !fs.existsSync(root) || results.length >= (options.maxResults || 40)) {
+      return;
+    }
+
+    const queue = [{ directory: root, depth: 0 }];
+    const maxDepth = options.maxDepth ?? 6;
+    const maxDirectories = options.maxDirectories ?? 1500;
+    let visited = 0;
+
+    while (queue.length > 0 && visited < maxDirectories && results.length < (options.maxResults || 40)) {
+      const { directory, depth } = queue.shift();
+      visited += 1;
+
+      let entries = [];
+      try {
+        entries = fs.readdirSync(directory, { withFileTypes: true });
+      } catch (err) {
+        continue;
+      }
+
+      for (const entry of entries) {
+        const entryPath = path.join(directory, entry.name);
+        const entryName = entry.name.toLowerCase();
+        const isMatch = options.fuzzyName
+          ? this._fileNameLooksLike(entry.name, options.fuzzyName)
+          : entryName.includes(lowerQuery);
+
+        if (isMatch && (!options.filesOnly || entry.isFile())) {
+          results.push(entryPath);
+          if (results.length >= (options.maxResults || 40)) {
+            break;
+          }
+        }
+
+        if (depth < maxDepth && entry.isDirectory() && !entry.name.startsWith('.')) {
+          queue.push({ directory: entryPath, depth: depth + 1 });
+        }
+      }
+    }
+  }
+
+  _fileNameLooksLike(entryName, requestedName) {
+    const requestedExt = path.extname(requestedName).toLowerCase();
+    const entryExt = path.extname(entryName).toLowerCase();
+    if (requestedExt && requestedExt !== entryExt) {
+      return false;
+    }
+
+    const requestedBase = path.basename(requestedName, requestedExt).toLowerCase();
+    const entryBase = path.basename(entryName, entryExt).toLowerCase();
+    if (!requestedBase) {
+      return false;
+    }
+
+    if (entryBase.includes(requestedBase) || requestedBase.includes(entryBase)) {
+      return true;
+    }
+
+    return Boolean(Normalizer.findClosestOption(requestedBase, [entryBase], {
+      minSimilarity: 0.72,
+      maxDistance: requestedBase.length >= 8 ? 3 : 2
+    }));
+  }
+
+  _cleanSearchQuery(query) {
+    return String(query || '')
+      .trim()
+      .replace(/^(?:the|a|an)\s+/i, '')
+      .replace(/\s+(?:file|folder|directory|location|path)$/i, '')
+      .replace(/\b([a-z0-9_-]+)\s+(pdf|txt|docx?|xlsx?|pptx?|csv|json|xml|html?|js|ts|py|java|md|png|jpe?g|gif|webp|mp[34]|mkv|wav|zip|rar)$/i, '$1.$2')
+      .trim();
+  }
+
+  _buildAmbiguousFileMessage(filename, choices) {
+    const labels = choices.map(choice => `${choice.index}. ${choice.path}`).join('; ');
+    return `I found multiple files named "${filename}". Please say which one to open: ${labels}`;
   }
 }
 

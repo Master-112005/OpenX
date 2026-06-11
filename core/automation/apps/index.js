@@ -73,7 +73,7 @@ class AppController {
     this._startAppsCacheExpiresAt = 0;
   }
 
-  open(appName) {
+  open(appName, options = {}) {
     if (!appName) {
       return { success: false, error: 'No application name provided' };
     }
@@ -82,6 +82,13 @@ class AppController {
     const app = KNOWN_APPS[name];
 
     try {
+      if (!options.forceNewWindow && !options.skipAlreadyOpenCheck) {
+        const alreadyOpen = this._buildAlreadyOpenClarification(name);
+        if (alreadyOpen) {
+          return alreadyOpen;
+        }
+      }
+
       if (app && app.path) {
         if (require('fs').existsSync(app.path)) {
           launchTarget(app.path);
@@ -119,7 +126,7 @@ class AppController {
     }
   }
 
-  close(appName) {
+  close(appName, options = {}) {
     if (!appName) {
       return { success: false, error: 'No application name provided' };
     }
@@ -127,6 +134,11 @@ class AppController {
     const name = appName.toLowerCase().trim();
     const app = KNOWN_APPS[name];
     try {
+      const selectedClose = this._closeSelectedProcess(name, options);
+      if (selectedClose) {
+        return selectedClose;
+      }
+
       if (app?.closeStrategy === 'window') {
         const windowClose = this._closeAppWindow(name, app);
         if (windowClose.success) {
@@ -142,6 +154,11 @@ class AppController {
       );
 
       if (runningProcesses.length > 0) {
+        const ambiguity = this._buildCloseAmbiguity(name, runningProcesses);
+        if (ambiguity) {
+          return ambiguity;
+        }
+
         const requestedCloseCount = runningProcesses.length;
         this._closeProcessesGracefully(runningProcesses);
         this._sleep(900);
@@ -452,6 +469,145 @@ class AppController {
     });
   }
 
+  _buildCloseAmbiguity(name, processes) {
+    const visibleTargets = this._visibleCloseTargets(processes);
+    if (visibleTargets.length <= 1) {
+      return null;
+    }
+
+    const choices = visibleTargets.slice(0, 8).map((process, index) => ({
+      index: index + 1,
+      id: Number(process?.Id) || null,
+      title: String(process?.MainWindowTitle || '').trim() || String(process?.ProcessName || name),
+      processName: String(process?.ProcessName || '').trim()
+    }));
+
+    return {
+      success: false,
+      needsClarification: true,
+      error: this._buildAmbiguousCloseMessage(name, choices),
+      data: {
+        app: name,
+        matchCount: visibleTargets.length,
+        choices
+      }
+    };
+  }
+
+  _closeSelectedProcess(name, options = {}) {
+    const processId = Number(options.processId || options.targetProcessId);
+    const title = String(options.windowTitle || options.targetWindowTitle || '').trim().toLowerCase();
+    if ((!Number.isFinite(processId) || processId <= 0) && !title) {
+      return null;
+    }
+
+    const processNames = this._resolveProcessCandidates(name);
+    const candidates = this._filterCloseTargets(
+      name,
+      this._findRunningProcesses(name, processNames)
+    );
+    const target = candidates.find(process => {
+      if (Number.isFinite(processId) && processId > 0 && Number(process?.Id) === processId) {
+        return true;
+      }
+      return title && String(process?.MainWindowTitle || '').trim().toLowerCase().includes(title);
+    });
+
+    if (!target) {
+      return { success: false, error: `Could not find the selected ${name} window` };
+    }
+
+    this._closeProcessesGracefully([target]);
+    this._sleep(900);
+
+    const stillRunning = this._findRunningProcesses(name, processNames)
+      .some(process => Number(process?.Id) === Number(target.Id));
+    if (stillRunning && !this._isBrowserAppName(name)) {
+      this._forceTerminateProcesses([target]);
+      this._sleep(700);
+    }
+
+    return {
+      success: true,
+      data: {
+        app: name,
+        closedCount: 1,
+        closeMethod: 'window',
+        matchedWindow: String(target.MainWindowTitle || '').trim() || null,
+        processName: String(target.ProcessName || '').trim() || null
+      }
+    };
+  }
+
+  _visibleCloseTargets(processes) {
+    const unique = new Map();
+    (Array.isArray(processes) ? processes : []).forEach(process => {
+      const id = Number(process?.Id);
+      const title = String(process?.MainWindowTitle || '').trim();
+      const handle = Number(process?.MainWindowHandle || 0);
+      if (!title && handle === 0) {
+        return;
+      }
+      const key = Number.isFinite(id) && id > 0 ? `id:${id}` : `${process?.ProcessName || ''}:${title}`;
+      if (!unique.has(key)) {
+        unique.set(key, process);
+      }
+    });
+    return Array.from(unique.values());
+  }
+
+  _buildAmbiguousCloseMessage(name, choices) {
+    const labels = choices.map(choice => `${choice.index}. ${choice.title}`).join('; ');
+    return `Multiple ${name} windows are open. Please say which one to close: ${labels}`;
+  }
+
+  _buildAlreadyOpenClarification(name) {
+    const app = KNOWN_APPS[name];
+    const processNames = this._resolveProcessCandidates(name);
+    const visibleTargets = this._visibleCloseTargets(
+      this._filterCloseTargets(name, this._findRunningProcesses(name, processNames))
+    );
+
+    if (visibleTargets.length === 0 && app?.closeStrategy === 'window') {
+      const existingWindow = this.windowSession.findWindow(app.windowQuery || name, {
+        preferredTitleTokens: app.preferredTitleTokens || [name],
+        preferredProcessNames: app.preferredProcessNames || []
+      });
+      if (existingWindow) {
+        visibleTargets.push({
+          Id: existingWindow.id,
+          ProcessName: existingWindow.processName,
+          MainWindowTitle: existingWindow.title,
+          MainWindowHandle: existingWindow.handle
+        });
+      }
+    }
+
+    if (visibleTargets.length === 0) {
+      return null;
+    }
+
+    const choices = visibleTargets.slice(0, 4).map((process, index) => ({
+      index: index + 1,
+      id: Number(process?.Id) || null,
+      title: String(process?.MainWindowTitle || '').trim() || String(process?.ProcessName || name),
+      processName: String(process?.ProcessName || '').trim()
+    }));
+
+    return {
+      success: false,
+      needsClarification: true,
+      error: `${name} is already open. Do you want me to open another window?`,
+      data: {
+        clarificationType: 'app.open.alreadyOpen',
+        app: name,
+        matchCount: visibleTargets.length,
+        choices,
+        confirmEntities: { forceNewWindow: true, skipAlreadyOpenCheck: true }
+      }
+    };
+  }
+
   _isBrowserAppName(name) {
     return BROWSER_APP_NAMES.has(String(name || '').trim().toLowerCase());
   }
@@ -520,11 +676,6 @@ class AppController {
         .map(process => Number(process?.Id))
         .filter(id => Number.isFinite(id) && id > 0)
     ));
-    const names = Array.from(new Set(
-      processes
-        .map(process => String(process?.ProcessName || '').trim())
-        .filter(Boolean)
-    ));
     let terminated = false;
 
     if (ids.length > 0) {
@@ -553,18 +704,6 @@ class AppController {
           continue;
         }
       } catch (err) {}
-    }
-
-    for (const processName of names) {
-      try {
-        execFileSync('taskkill.exe', ['/IM', `${processName}.exe`, '/T', '/F'], {
-          timeout: 8000,
-          stdio: 'ignore'
-        });
-        terminated = true;
-      } catch (err) {
-        continue;
-      }
     }
 
     return terminated;

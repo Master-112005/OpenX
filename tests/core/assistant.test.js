@@ -43,6 +43,172 @@ describe('Assistant Confirmation Flow', function() {
     assert.equal(assistant.getStatus().awaitingConfirmation, false);
   });
 
+  it('should close a selected window after an ambiguity prompt', async function() {
+    let selectedEntities = null;
+    const router = {
+      process: async () => ({
+        commandId: 'cmd-select',
+        success: false,
+        needsClarification: true,
+        intent: 'app.close',
+        entities: { appName: 'chrome' },
+        data: {
+          choices: [
+            { index: 1, id: 101, title: 'Project A - Google Chrome' },
+            { index: 2, id: 202, title: 'Project B - Google Chrome' }
+          ]
+        },
+        response: 'Multiple chrome windows are open. Please say which one to close: 1. Project A - Google Chrome; 2. Project B - Google Chrome'
+      }),
+      confirmAndExecute: async (commandId, intentId, entities) => {
+        selectedEntities = entities;
+        return {
+          commandId,
+          success: true,
+          intent: intentId,
+          entities,
+          response: 'Closed Project B - Google Chrome.'
+        };
+      }
+    };
+
+    const assistant = new Assistant({}, {
+      router,
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    const first = await assistant.processCommand('close chrome');
+    assert.equal(first.needsClarification, true);
+
+    const second = await assistant.processCommand('2');
+    assert.equal(second.success, true);
+    assert.equal(selectedEntities.appName, 'chrome');
+    assert.equal(selectedEntities.targetProcessId, 202);
+  });
+
+  it('should execute a yes/no clarification with confirm entities', async function() {
+    let selectedEntities = null;
+    const router = {
+      process: async () => ({
+        commandId: 'cmd-new-window',
+        success: false,
+        needsClarification: true,
+        intent: 'app.open',
+        entities: { appName: 'chrome' },
+        data: {
+          clarificationType: 'app.open.alreadyOpen',
+          confirmEntities: { forceNewWindow: true }
+        },
+        response: 'chrome is already open. Do you want me to open another window?'
+      }),
+      confirmAndExecute: async (commandId, intentId, entities) => {
+        selectedEntities = entities;
+        return {
+          commandId,
+          success: true,
+          intent: intentId,
+          entities,
+          response: 'Opening chrome now.'
+        };
+      }
+    };
+
+    const assistant = new Assistant({}, {
+      router,
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    const first = await assistant.processCommand('open chrome');
+    assert.equal(first.needsClarification, true);
+
+    const second = await assistant.processCommand('yes');
+    assert.equal(second.success, true);
+    assert.equal(selectedEntities.appName, 'chrome');
+    assert.equal(selectedEntities.forceNewWindow, true);
+  });
+
+  it('should open a selected folder after an ambiguity prompt', async function() {
+    let selectedEntities = null;
+    const router = {
+      process: async () => ({
+        commandId: 'cmd-folder',
+        success: false,
+        needsClarification: true,
+        intent: 'folder.open',
+        entities: { folderName: 'screenshots' },
+        data: {
+          choices: [
+            { index: 1, title: 'Screenshots - C:\\A\\Screenshots', path: 'C:\\A\\Screenshots' },
+            { index: 2, title: 'Screenshots - C:\\B\\Screenshots', path: 'C:\\B\\Screenshots' }
+          ]
+        },
+        response: 'I found multiple folders named "screenshots". Please say which one to open.'
+      }),
+      confirmAndExecute: async (commandId, intentId, entities) => {
+        selectedEntities = entities;
+        return {
+          commandId,
+          success: true,
+          intent: intentId,
+          entities,
+          response: 'Opening screenshots.'
+        };
+      }
+    };
+
+    const assistant = new Assistant({}, {
+      router,
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    await assistant.processCommand('open screenshots folder');
+    const second = await assistant.processCommand('2');
+
+    assert.equal(second.success, true);
+    assert.equal(selectedEntities.selectedPath, 'C:\\B\\Screenshots');
+  });
+
+  it('should keep file-list context for follow-up references like list them', async function() {
+    const seenInputs = [];
+    const router = {
+      process: async input => {
+        seenInputs.push(input);
+        if (seenInputs.length === 1) {
+          return {
+            commandId: 'cmd-list-1',
+            success: true,
+            intent: 'file.list',
+            entities: { path: 'desktop', fileType: null },
+            response: 'Desktop contains 3 folders.'
+          };
+        }
+
+        return {
+          commandId: 'cmd-list-2',
+          success: true,
+          intent: 'file.list',
+          entities: { path: 'desktop', fileType: null },
+          response: 'Desktop contains 3 folders.'
+        };
+      }
+    };
+
+    const assistant = new Assistant({}, {
+      router,
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    await assistant.processCommand('what folders on desktop');
+    const second = await assistant.processCommand('list them');
+
+    assert.equal(second.success, true);
+    assert.equal(seenInputs[1], 'list files in desktop');
+  });
+
   it('should refuse unrelated follow-up speech until confirmation is resolved', async function() {
     const router = {
       process: async () => ({

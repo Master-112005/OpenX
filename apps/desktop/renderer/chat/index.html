@@ -1210,8 +1210,6 @@
     const modeUsageEl = document.getElementById('mode-usage');
     const modeAddBtn = document.getElementById('mode-add-btn');
 
-    const CONFIRM_WORDS = ['proceed', 'yes', 'confirm', 'do it', 'go ahead', 'yeah', 'yep', 'sure', 'continue', 'okay', 'ok'];
-    const CANCEL_WORDS = ['no', 'cancel', 'stop', 'never mind', 'abort', 'dont'];
     const CONTACT_LIMIT = 10;
     const MODE_LIMIT = 5;
     const MODE_APP_LIMIT = 5;
@@ -1292,74 +1290,18 @@
       }
     }
 
-    function isConfirmWord(text) {
-      const lower = String(text || '').trim().toLowerCase();
-      return CONFIRM_WORDS.some(word => lower === word || lower.startsWith(`${word} `));
-    }
-
-    function isCancelWord(text) {
-      const lower = String(text || '').trim().toLowerCase();
-      return CANCEL_WORDS.some(word => lower === word || lower.startsWith(`${word} `));
-    }
-
-    function addConfirmationButtons(result) {
+    function addConfirmationPrompt(result) {
       pendingConfirmation = {
         commandId: result.commandId,
         intent: result.intent,
         entities: result.entities
       };
 
-      const msgDiv = addMessage(
+      addMessage(
         result.response || `Please confirm this action, ${getHonorific()}.`,
         'system',
         `${getAssistantDisplayName()} - confirmation required`
       );
-
-      const row = document.createElement('div');
-      row.className = 'confirm-actions';
-
-      const proceedBtn = document.createElement('button');
-      proceedBtn.className = 'primary-btn';
-      proceedBtn.textContent = 'Proceed';
-      proceedBtn.addEventListener('click', executeConfirmed);
-
-      const cancelBtn = document.createElement('button');
-      cancelBtn.className = 'danger-btn';
-      cancelBtn.textContent = 'Cancel';
-      cancelBtn.addEventListener('click', cancelConfirmation);
-
-      row.appendChild(proceedBtn);
-      row.appendChild(cancelBtn);
-      msgDiv.appendChild(row);
-    }
-
-    async function executeConfirmed() {
-      if (!pendingConfirmation) {
-        return;
-      }
-
-      const { commandId, intent, entities } = pendingConfirmation;
-      pendingConfirmation = null;
-      isProcessing = true;
-      showTyping();
-
-      try {
-        const result = await window.jarvis.confirmAction(commandId, intent, entities);
-        hideTyping();
-        addMessage(result.response || `Operation completed, ${getHonorific()}.`, 'assistant', assistantMeta());
-      } catch (err) {
-        hideTyping();
-        addMessage(`Unable to complete that action, ${getHonorific()}.`, 'system', assistantMeta('error'));
-      } finally {
-        isProcessing = false;
-        inputBox.focus();
-      }
-    }
-
-    function cancelConfirmation() {
-      pendingConfirmation = null;
-      addMessage(`Action cancelled, ${getHonorific()}.`, 'assistant', assistantMeta('cancelled'));
-      inputBox.focus();
     }
 
     async function sendCommand(text) {
@@ -1369,12 +1311,24 @@
 
       if (pendingConfirmation) {
         addMessage(text, 'user', 'You - just now');
-        if (isConfirmWord(text)) {
-          await executeConfirmed();
-        } else if (isCancelWord(text)) {
-          cancelConfirmation();
-        } else {
-          addMessage(`Please reply with Proceed or Cancel, ${getHonorific()}.`, 'system', assistantMeta());
+        pendingConfirmation = null;
+        isProcessing = true;
+        showTyping();
+
+        try {
+          const result = await window.jarvis.processCommand(text, 'chat');
+          hideTyping();
+          if (result.requiresConfirmation) {
+            addConfirmationPrompt(result);
+          } else {
+            addMessage(result.response || `Operation completed, ${getHonorific()}.`, 'assistant', assistantMeta());
+          }
+        } catch (err) {
+          hideTyping();
+          addMessage(`Unable to complete that action, ${getHonorific()}.`, 'system', assistantMeta('error'));
+        } finally {
+          isProcessing = false;
+          inputBox.focus();
         }
         return;
       }
@@ -1389,7 +1343,7 @@
         hideTyping();
 
         if (result.requiresConfirmation) {
-          addConfirmationButtons(result);
+          addConfirmationPrompt(result);
           return;
         }
 
@@ -2076,7 +2030,7 @@
         addMessage(payload.transcript, 'user', 'Voice - just now');
 
         if (payload.result.requiresConfirmation) {
-          addConfirmationButtons(payload.result);
+          addConfirmationPrompt(payload.result);
           return;
         }
 

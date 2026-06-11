@@ -11,6 +11,7 @@ const CommunicationsController = require('./communications/index');
 const SystemController = require('./system/index');
 const WindowsController = require('./windows/index');
 const SchedulerController = require('./scheduler/index');
+const ScreenshotController = require('./screenshot/index');
 
 class AutomationEngine {
   constructor(config) {
@@ -28,6 +29,7 @@ class AutomationEngine {
     this.system = new SystemController(config);
     this.windows = new WindowsController(config);
     this.scheduler = new SchedulerController(config);
+    this.screenshot = new ScreenshotController(config);
 
     this._actionMap = {
       'volume.up': (entities) => entities.value ? this.volume.setVolume(entities.value) : this.volume.increaseVolume(),
@@ -50,12 +52,12 @@ class AutomationEngine {
         return { success: true, data: { value: current } };
       },
       'app.open': async (entities) => {
-        const appResult = await this.apps.open(entities.appName);
+        const appResult = await this.apps.open(entities.appName, entities);
         if (appResult?.success) {
           return appResult;
         }
 
-        const folderResult = this.folders.open(entities.appName);
+        const folderResult = this.folders.open(entities.appName, entities);
         if (folderResult?.success) {
           return {
             success: true,
@@ -66,14 +68,17 @@ class AutomationEngine {
             }
           };
         }
+        if (folderResult?.needsClarification) {
+          return folderResult;
+        }
 
         return appResult;
       },
-      'app.close': (entities) => this.apps.close(entities.appName),
+      'app.close': (entities) => this.apps.close(entities.appName, entities),
       'app.switch': (entities) => this.apps.switchTo(entities.appName),
       'mode.start': (entities) => this._startMode(entities.modeName),
       'file.create': (entities) => this.files.create(entities.filename, entities.path),
-      'file.open': (entities) => this.files.open(entities.filename, entities.path),
+      'file.open': (entities) => this.files.open(entities.filename, entities),
       'file.delete': (entities) => this.files.delete(entities.filename, entities.path),
       'file.rename': (entities) => this.files.rename(entities.oldName, entities.newName),
       'file.copy': (entities) => this.files.copy(entities.source, entities.destination),
@@ -83,7 +88,7 @@ class AutomationEngine {
       'folder.create': (entities) => this.folders.create(entities.folderName, entities.path),
       'folder.delete': (entities) => this.folders.delete(entities.folderName, entities.path),
       'folder.move': (entities) => this.folders.move(entities.source, entities.destination),
-      'folder.open': (entities) => this.folders.open(entities.folderName),
+      'folder.open': (entities) => this.folders.open(entities.folderName, entities),
       'browser.open': (entities) => this.browser.open(entities.url),
       'browser.search': (entities) => this.browser.search(entities.query, entities),
       'browser.openFirstResult': (entities) => this.browser.openFirstResult(entities.query),
@@ -117,6 +122,7 @@ class AutomationEngine {
       'system.time': () => this.system.getTime(),
       'system.date': () => this.system.getDate(),
       'system.calculate': (entities) => this.system.calculate(entities.expression),
+      'system.screenshot': () => this.screenshot.capture(),
       'system.cpu': () => this.system.getCPUUsage(),
       'system.memory': () => this.system.getMemoryUsage(),
       'system.battery': () => this.system.getBatteryStatus(),

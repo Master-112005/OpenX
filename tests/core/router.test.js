@@ -243,6 +243,24 @@ describe('Action Router', function() {
     assert.ok(result.confidence >= 0.5);
   });
 
+  it('should route misspelled screenshot commands', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const executed = [];
+    const stubEngine = {
+      execute(actionId, entities) {
+        executed.push({ actionId, entities });
+        return { success: true, data: { filePath: 'C:\\Users\\user\\Pictures\\Screenshots\\JARVIS-test.png' } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const result = await router.process('take a screenshort', 'chat');
+
+    assert.equal(result.intent, 'system.screenshot');
+    assert.deepEqual(executed.map(step => step.actionId), ['system.screenshot']);
+  });
+
   it('should tolerate spelling mistakes in app names', async function() {
     const config = {
       permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
@@ -406,6 +424,27 @@ describe('Action Router', function() {
     const result = await router.process('open farmcat pdf', 'chat');
     assert.equal(result.intent, 'file.open');
     assert.equal(result.entities.filename, 'farmcat.pdf');
+  });
+
+  it('should keep absolute paths and local media files on file.open', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const image = await router.process('open C:\\Users\\rakes\\Pictures\\Screenshots\\JARVIS-test.png', 'chat');
+    const video = await router.process('play The_Gray_Man.mkv on vlc', 'chat');
+
+    assert.equal(image.intent, 'file.open');
+    assert.equal(image.entities.filename, 'C:\\Users\\rakes\\Pictures\\Screenshots\\JARVIS-test.png');
+    assert.equal(video.intent, 'file.open');
+    assert.equal(video.entities.filename, 'The_Gray_Man.mkv');
+    assert.equal(video.entities.path, null);
   });
 
   it('should route special folders in open commands to folder.open', async function() {
@@ -1188,6 +1227,42 @@ describe('Action Router', function() {
     assert.match(result.response, /JARVIS/);
   });
 
+  it('should answer assistant conversation and capability questions locally', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId) {
+        return { success: true, data: { actionId } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const status = await router.process('how are you', 'chat');
+    const work = await router.process('what is your work', 'chat');
+    const help = await router.process('how do you help me', 'chat');
+
+    assert.equal(status.intent, 'greeting');
+    assert.equal(work.intent, 'help');
+    assert.equal(help.intent, 'help');
+  });
+
+  it('should route personal photo requests to the photo library instead of web search', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const result = await router.process('find a pic with my classmetes in the photos', 'chat');
+
+    assert.equal(result.intent, 'browser.openFirstResult');
+    assert.equal(result.entities.query, 'google photos');
+  });
+
   it('should keep reminder requests ahead of media routing', async function() {
     const config = {
       permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
@@ -1324,6 +1399,27 @@ describe('Action Router', function() {
     assert.equal(location.entities.query, 'report.md');
     assert.equal(locate.intent, 'file.search');
     assert.equal(locate.entities.query, 'report.pdf');
+  });
+
+  it('should not treat file names containing resume as media resume', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const typoQuestion = await router.process('whare i the Resume.docx file', 'chat');
+    const move = await router.process('bring The_Gray_Man.mkv to downlodes', 'chat');
+
+    assert.equal(typoQuestion.intent, 'file.search');
+    assert.equal(typoQuestion.entities.query, 'resume.docx');
+    assert.equal(move.intent, 'file.move');
+    assert.equal(move.entities.source, 'The_Gray_Man.mkv');
+    assert.equal(move.entities.destination, 'downloads');
   });
 
   it('should return error for unknown commands', async function() {

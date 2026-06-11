@@ -3,6 +3,7 @@ const path = require('path');
 const Logger = require('../../shared/index').Logger;
 const Validator = require('../../shared/index').Validator;
 const {
+  findEntriesByName,
   findEntryByName,
   getHomeDirectory,
   getSpecialFolders,
@@ -137,12 +138,40 @@ class FolderController {
     }
   }
 
-  open(folderName) {
+  open(folderName, options = {}) {
     if (!folderName) {
       return { success: false, error: 'No folder name provided' };
     }
 
     try {
+      const selectedPath = options.selectedPath || options.targetPath;
+      if (selectedPath && path.isAbsolute(selectedPath) && fs.existsSync(selectedPath) && fs.statSync(selectedPath).isDirectory()) {
+        launchTarget(selectedPath);
+        return { success: true, data: { path: selectedPath, folderName: path.basename(selectedPath) } };
+      }
+
+      const matches = this._findFolderMatches(folderName);
+      if (matches.length > 1) {
+        const choices = matches.slice(0, 8).map((folderPath, index) => ({
+          index: index + 1,
+          title: `${path.basename(folderPath)} - ${folderPath}`,
+          path: folderPath,
+          entities: { selectedPath: folderPath }
+        }));
+
+        return {
+          success: false,
+          needsClarification: true,
+          error: this._buildAmbiguousFolderMessage(folderName, choices),
+          data: {
+            clarificationType: 'folder.open',
+            folderName,
+            matchCount: matches.length,
+            choices
+          }
+        };
+      }
+
       const fullPath = this._resolveFolderPath(folderName);
       if (!fullPath) {
         return { success: false, error: 'Folder not found' };
@@ -154,6 +183,43 @@ class FolderController {
       this.logger.error('Failed to open folder', err);
       return { success: false, error: err.message };
     }
+  }
+
+  _findFolderMatches(folderName) {
+    if (!folderName) {
+      return [];
+    }
+
+    if (path.isAbsolute(folderName) && fs.existsSync(folderName) && fs.statSync(folderName).isDirectory()) {
+      return [path.resolve(folderName)];
+    }
+
+    const parsed = splitNameAndLocation(folderName);
+    const requestedName = parsed.name || folderName;
+    if (parsed.location) {
+      const resolved = this._resolveFolderPath(folderName);
+      return resolved ? [resolved] : [];
+    }
+
+    const specialFolders = getSpecialFolders();
+    const asSpecialFolder = specialFolders[normalizeLocation(requestedName)];
+    if (asSpecialFolder && fs.existsSync(asSpecialFolder)) {
+      return [asSpecialFolder];
+    }
+
+    const safeName = Validator.sanitizePath(requestedName);
+    return findEntriesByName(safeName, {
+      roots: [process.cwd(), getHomeDirectory(), ...Object.values(getSpecialFolders())],
+      type: 'directory',
+      maxDepth: 8,
+      maxDirectories: 8000,
+      maxMatches: 12
+    }) || [];
+  }
+
+  _buildAmbiguousFolderMessage(folderName, choices) {
+    const labels = choices.map(choice => `${choice.index}. ${choice.path}`).join('; ');
+    return `I found multiple folders named "${folderName}". Please say which one to open: ${labels}`;
   }
 }
 

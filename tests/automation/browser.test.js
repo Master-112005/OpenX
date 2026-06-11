@@ -123,8 +123,14 @@ describe('Browser Controller', function() {
     };
 
     const result = await controller.search('which team is the winner of ipl 2020');
+    const result2011 = await controller.search('who won the ipl 2011');
+    const result2021 = await controller.search('who won the ipl 2021');
+    const result2022 = await controller.search('who won the ipl 2022');
 
     assert.ok(requestedQuery.includes('IPL cricket final winner champion result'));
     assert.equal(result.data.answer.text, 'Mumbai Indians won IPL 2020.');
+    assert.equal(result2011.data.answer.text, 'Chennai Super Kings won IPL 2011.');
+    assert.equal(result2021.data.answer.text, 'Chennai Super Kings won IPL 2021.');
+    assert.equal(result2022.data.answer.text, 'Gujarat Titans won IPL 2022.');
   });
 });

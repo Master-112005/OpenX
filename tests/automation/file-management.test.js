@@ -220,4 +220,54 @@ describe('File Management Automation', function() {
     assert.equal(fs.existsSync(destinationPath), true);
     assert.equal(fs.existsSync(path.join(destinationPath, 'keep.txt')), true);
   });
+
+  it('should ask which same-name folder to open across subfolders', function() {
+    const firstPath = path.join(tempProfile, 'Documents', 'Projects', 'Screenshots');
+    const secondPath = path.join(tempProfile, 'Pictures', 'Archive', 'Screenshots');
+    fs.mkdirSync(firstPath, { recursive: true });
+    fs.mkdirSync(secondPath, { recursive: true });
+
+    const result = engine.folders.open('Screenshots');
+
+    assert.equal(result.success, false);
+    assert.equal(result.needsClarification, true);
+    assert.equal(result.data.matchCount, 2);
+    assert.deepEqual(
+      result.data.choices.map(choice => choice.path).sort(),
+      [firstPath, secondPath].sort()
+    );
+  });
+
+  it('should search files recursively inside common folders', function() {
+    const nested = path.join(tempProfile, 'Documents', 'Projects', 'Reports');
+    fs.mkdirSync(nested, { recursive: true });
+    const target = path.join(nested, 'Resume.docx');
+    fs.writeFileSync(target, 'resume', 'utf8');
+
+    const result = engine.files.search('Resume.docx');
+
+    assert.equal(result.success, true);
+    assert.ok(result.data.results.includes(target));
+  });
+
+  it('should ask which same-name file to open across subfolders', function() {
+    const firstDir = path.join(tempProfile, 'Documents', 'Jobs');
+    const secondDir = path.join(tempProfile, 'Downloads', 'Backup');
+    fs.mkdirSync(firstDir, { recursive: true });
+    fs.mkdirSync(secondDir, { recursive: true });
+    const firstPath = path.join(firstDir, 'Resume.docx');
+    const secondPath = path.join(secondDir, 'Resume.docx');
+    fs.writeFileSync(firstPath, 'one', 'utf8');
+    fs.writeFileSync(secondPath, 'two', 'utf8');
+
+    const result = engine.files.open('Resume.docx');
+
+    assert.equal(result.success, false);
+    assert.equal(result.needsClarification, true);
+    assert.equal(result.data.matchCount, 2);
+    assert.deepEqual(
+      result.data.choices.map(choice => choice.path).sort(),
+      [firstPath, secondPath].sort()
+    );
+  });
 });

@@ -58,6 +58,7 @@ const APP_ALIASES = {
   'cloudflare one client': 'cloudflare one',
   'cloudfair one clint': 'cloudflare one',
   'apple music': 'apple music',
+  'applemusic': 'apple music',
   'apple tv': 'apple tv',
   'youtube': 'youtube',
   'recycle bin': 'recycle bin',
@@ -449,7 +450,7 @@ class EntityExtractor {
       /\b(?:delete|remove|erase)\s+file\s+(.+?)(?=\s+(?:on|in|at|to|from)\b|$)/i,
       /\b(?:delete|remove|erase)\s+(.+?)\s+file(?=\s+(?:on|in|at|to|from)\b|$)/i,
       /\b(?:delete|remove|erase)\s+(.+?)(?=\s+(?:on|in|at|from)\b|$)/i,
-      /\b(?:open|show)\s+(?:file\s+)?(.+?)(?=\s+(?:on|in|at|from)\b|$)/i,
+      /\b(?:open|show|play|watch)\s+(?:file\s+)?(.+?)(?=\s+(?:on|in|at|from|with|using)\b|$)/i,
       /\b(?:rename|copy|move)\s+file\s+(.+?)(?=\s+(?:to|into|in|on|from)\b|$)/i
     ];
 
@@ -551,7 +552,7 @@ class EntityExtractor {
         })
       },
       {
-        regex: /^(?:say|send)\s+(.+?)\s+to\s+(.+?)(?:\s+(?:on|via|using)\s+(.+))?$/i,
+        regex: /^(?:say|send)\s+(.+?)\s+to\s+(.+?)(?:\s+(?:on|in|via|using)\s+(.+))?$/i,
         map: match => ({
           messageText: match[1],
           contactName: match[2],
@@ -559,7 +560,7 @@ class EntityExtractor {
         })
       },
       {
-        regex: /^(?:ask|tell|message|text|msg|massage)\s+(.+?)(?:\s+(?:on|via|using)\s+(.+?))?\s+to\s+(.+)$/i,
+        regex: /^(?:ask|tell|message|text|msg|massage)\s+(.+?)(?:\s+(?:on|in|via|using)\s+(.+?))?\s+to\s+(.+)$/i,
         map: match => ({
           contactName: match[1],
           platform: match[2],
@@ -567,7 +568,7 @@ class EntityExtractor {
         })
       },
       {
-        regex: /^(?:send(?:\s+a)?\s+(?:message|text))\s+to\s+(.+?)(?:\s+(?:on|via|using)\s+(.+?))?\s+(?:saying|that)\s+(.+)$/i,
+        regex: /^(?:send(?:\s+a)?\s+(?:message|text))\s+to\s+(.+?)(?:\s+(?:on|in|via|using)\s+(.+?))?\s+(?:saying|that)\s+(.+)$/i,
         map: match => ({
           contactName: match[1],
           platform: match[2],
@@ -575,7 +576,7 @@ class EntityExtractor {
         })
       },
       {
-        regex: /^(?:message|text)\s+(.+?)(?:\s+(?:on|via|using)\s+(.+?))?\s+(?:saying|that)\s+(.+)$/i,
+        regex: /^(?:message|text)\s+(.+?)(?:\s+(?:on|in|via|using)\s+(.+?))?\s+(?:saying|that)\s+(.+)$/i,
         map: match => ({
           contactName: match[1],
           platform: match[2],
@@ -675,7 +676,7 @@ class EntityExtractor {
   }
 
   _extractSource(text, raw) {
-    const match = raw.match(/\b(?:copy|move)(?:\s+(?:file|folder|directory))?\s+(.+?)(?=\s+(?:to|into)\b|$)/i);
+    const match = raw.match(/\b(?:copy|move|bring)(?:\s+(?:file|folder|directory))?\s+(.+?)(?=\s+(?:to|into)\b|$)/i);
     return match ? cleanEntityName(match[1], { stripTypeWords: true }) : null;
   }
 
@@ -779,12 +780,17 @@ class EntityExtractor {
     const match = raw.match(/\b(?:on|in|at|from)\s+(.+?)(?=$|\s+(?:called|named)\b)/i);
     if (!match) return null;
 
-    return match[1]
+    const cleaned = match[1]
       .trim()
       .replace(/^["']|["']$/g, '')
       .replace(/^(?:the|my)\s+/i, '')
       .replace(/\s+(?:folder|directory|path)$/i, '')
       .trim();
+    if (/^(?:vlc|spotify|youtube|apple\s+music|windows\s+media\s+player)$/i.test(cleaned)) {
+      return null;
+    }
+
+    return cleaned;
   }
 
   /**

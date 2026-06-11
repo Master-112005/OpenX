@@ -41,7 +41,11 @@ class ActionRouter {
     }
 
     const initialPreparedInput = this.nlp.prepare(parseResult.commandText);
-    const useNoisyRepair = this._shouldUseNoisyRepair(initialPreparedInput, parseResult.commandText, source);
+    const useNoisyRepair = this._shouldUseNoisyRepair(
+      initialPreparedInput,
+      parseResult.rawCommandText || parseResult.commandText,
+      source
+    );
     const effectiveCommandText = useNoisyRepair
       ? String(initialPreparedInput.repairedCommandText || '').trim()
       : String(parseResult.commandText || '').trim();
@@ -80,11 +84,12 @@ class ActionRouter {
     return (
       this._resolveExplicitReminderIntent(rawCommandText, preparedInput) ||
       this._resolveSystemSettingsIntent(rawCommandText, preparedInput) ||
+      this._resolveScreenshotIntent(rawCommandText, preparedInput) ||
+      this._resolveExplicitFileIntent(rawCommandText, preparedInput) ||
+      this._resolveExplicitFolderMoveIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitMediaControlIntent(rawCommandText, preparedInput) ||
       this._resolveMediaUnderstandingIntent(rawCommandText, source) ||
       this._resolveExplicitMediaIntent(rawCommandText, preparedInput) ||
-      this._resolveExplicitFileIntent(rawCommandText, preparedInput) ||
-      this._resolveExplicitFolderMoveIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitModeIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitAppIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitWindowIntent(rawCommandText, preparedInput) ||
@@ -97,8 +102,9 @@ class ActionRouter {
       this._resolveCalculationIntent(rawCommandText, preparedInput) ||
       this._resolveLocalInfoIntent(rawCommandText, preparedInput) ||
       this._resolveLocalFileListIntent(rawCommandText, preparedInput) ||
-      this._resolveAssistantIdentityIntent(rawCommandText, preparedInput) ||
+      this._resolveAssistantConversationIntent(rawCommandText, preparedInput) ||
       this._resolveLocalFileSearchIntent(rawCommandText, preparedInput) ||
+      this._resolvePersonalPhotoIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitSearchIntent(rawCommandText, preparedInput) ||
       this._resolveGeneralQuestionSearchIntent(rawCommandText, preparedInput) ||
       this._matchIntent(preparedInput)
@@ -371,10 +377,13 @@ class ActionRouter {
       return {
         commandId,
         success: result.success && modeCommandSteps.every(step => step.success),
+        needsClarification: Boolean(result.needsClarification),
         intent: intentResult.intent.id,
         confidence: intentResult.confidence,
         entities,
-        response: result.success
+        response: result.needsClarification
+          ? (result.error || 'Please clarify which target to use.')
+          : result.success
           ? this._buildResponse('success', intentResult.intent.id, {
               entities,
               result: responseResult,
@@ -384,7 +393,7 @@ class ActionRouter {
               error: result.error,
               intent: intentResult.intent
             }),
-        data: responseData || null
+        data: responseData || result.data || null
       };
     } catch (err) {
       this.logger.error(`Execution error: ${commandId}`, err);
@@ -491,6 +500,10 @@ class ActionRouter {
     const textToUse = (preparedInput?.correctedText || rawText || '').trim().toLowerCase();
     if (!textToUse) return null;
 
+    if (/\.[A-Za-z0-9]{1,10}\b/.test(String(rawText || ''))) {
+      return null;
+    }
+
     if (/\b(?:open|close|launch|start|run|quit|exit|terminate)\b/.test(textToUse)) {
       return null;
     }
@@ -539,6 +552,9 @@ class ActionRouter {
     if (!input) return null;
 
     const correctedText = String(preparedInput?.correctedText || input).trim().toLowerCase();
+    if (/\.[A-Za-z0-9]{1,10}\b/.test(input)) {
+      return null;
+    }
     if (/^(?:remind|set\s+reminder)\b/i.test(correctedText)) {
       return null;
     }
@@ -558,6 +574,10 @@ class ActionRouter {
   }
 
   _resolveMediaUnderstandingIntent(rawText, source) {
+    if (/\.[A-Za-z0-9]{1,10}\b/.test(String(rawText || ''))) {
+      return null;
+    }
+
     if (/^\s*(?:remind|set\s+reminder)\b/i.test(String(rawText || ''))) {
       return null;
     }
@@ -616,6 +636,20 @@ class ActionRouter {
     return null;
   }
 
+  _resolveScreenshotIntent(rawText, preparedInput) {
+    const input = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
+    if (!input) {
+      return null;
+    }
+
+    if (!/\b(?:screenshot|screen\s+shot|capture\s+screen|screen\s+capture|snap\s+screen)\b/.test(input)) {
+      return null;
+    }
+
+    const intent = this.intentRegistry.get('system.screenshot');
+    return intent ? { intent, confidence: 1, entities: {} } : null;
+  }
+
   _resolveExplicitFolderMoveIntent(rawText, preparedInput) {
     const correctedText = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
     if (!correctedText) {
@@ -641,6 +675,7 @@ class ActionRouter {
 
   _resolveExplicitFileIntent(rawText, preparedInput) {
     const input = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
+    const rawLower = String(rawText || '').trim().toLowerCase();
     if (!input) {
       return null;
     }
@@ -650,6 +685,7 @@ class ActionRouter {
     }
 
     const configs = [
+      { intentId: 'file.open', pattern: /^(?:open|show|play|watch)\b/ },
       { intentId: 'file.create', pattern: /^(?:create|new|make)\b/ },
       { intentId: 'file.delete', pattern: /^(?:delete|remove|erase)\b/ },
       { intentId: 'file.copy', pattern: /^copy\b/ },
@@ -657,12 +693,12 @@ class ActionRouter {
       { intentId: 'file.search', pattern: /^(?:locate|find|search)\b/ }
     ];
 
-    if (!/\b(?:file|location|path)\b|[^\s]+\.[A-Za-z0-9]{1,10}\b/i.test(input)) {
+    if (!/\b(?:file|location|path)\b|[^\s]+\.[A-Za-z0-9]{1,10}\b/i.test(`${input} ${rawText || ''}`)) {
       return null;
     }
 
     for (const config of configs) {
-      if (!config.pattern.test(input)) {
+      if (!config.pattern.test(input) && !config.pattern.test(rawLower)) {
         continue;
       }
       const intent = this.intentRegistry.get(config.intentId);
@@ -672,6 +708,12 @@ class ActionRouter {
       const rawEntities = this.entityExtractor.extract(intent, rawText);
       const correctedEntities = this.entityExtractor.extract(intent, input);
       const entities = { ...correctedEntities, ...rawEntities };
+      if (correctedEntities.destination && correctedEntities.destination !== rawEntities.destination) {
+        entities.destination = correctedEntities.destination;
+      }
+      if (correctedEntities.path && correctedEntities.path !== rawEntities.path) {
+        entities.path = correctedEntities.path;
+      }
       const missing = this._checkRequiredEntities(intent, entities);
       if (missing.length === 0) {
         return { intent, confidence: 1, entities };
@@ -778,9 +820,14 @@ class ActionRouter {
 
     const folderIntent = this.intentRegistry.get('folder.open');
     if (folderIntent && this._looksLikeFolderOpenRequest(rawText)) {
-      const folderEntities = this.entityExtractor.extract(folderIntent, rawText);
+      const rawFolderEntities = this.entityExtractor.extract(folderIntent, rawText);
+      const correctedFolderEntities = this.entityExtractor.extract(folderIntent, input);
+      const folderEntities = { ...correctedFolderEntities, ...rawFolderEntities };
+      if (correctedFolderEntities.folderName && correctedFolderEntities.folderName !== rawFolderEntities.folderName) {
+        folderEntities.folderName = correctedFolderEntities.folderName;
+      }
       if (folderEntities.folderName) {
-        return { intent: folderIntent, confidence: 0.98 };
+        return { intent: folderIntent, confidence: 0.98, entities: folderEntities };
       }
     }
 
@@ -820,6 +867,10 @@ class ActionRouter {
       github: 'github',
       gmail: 'gmail',
       'google mail': 'gmail',
+      maps: 'google maps',
+      'google maps': 'google maps',
+      photos: 'google photos',
+      'google photos': 'google photos',
       drive: 'google drive',
       'google drive': 'google drive',
       docs: 'google docs',
@@ -867,6 +918,10 @@ class ActionRouter {
   _resolveExplicitAppOpenIntent(rawText, preparedInput) {
     const correctedText = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
     if (!correctedText || !this._containsActionVerb(correctedText, ['open', 'launch', 'start', 'run'])) {
+      return null;
+    }
+
+    if (/^(?:what|who|when|where|why|how|which)\b/.test(correctedText)) {
       return null;
     }
 
@@ -1110,14 +1165,33 @@ class ActionRouter {
     return null;
   }
 
-  _resolveAssistantIdentityIntent(rawText, preparedInput) {
-    const input = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
-    if (!/^(?:what|who)\s+(?:is|are)\s+(?:your|you)\s+(?:name|called)\b|^who\s+are\s+you\b/.test(input)) {
-      return null;
+  _resolveAssistantConversationIntent(rawText, preparedInput) {
+    const corrected = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
+    const raw = String(rawText || corrected || '').trim().toLowerCase();
+    const combined = `${raw} ${corrected}`.trim();
+
+    if (/^(?:what|who)\s+(?:is|are)\s+(?:your|you)\s+(?:name|called)\b|^who\s+are\s+you\b/.test(combined)) {
+      const intent = this.intentRegistry.get('assistant.identity');
+      return intent ? { intent, confidence: 1, entities: {} } : null;
     }
 
-    const intent = this.intentRegistry.get('assistant.identity');
-    return intent ? { intent, confidence: 1, entities: {} } : null;
+    if (
+      /^(?:how\s+are\s+you|how\s+do\s+you\s+do|are\s+you\s+(?:ok|okay|ready))\b/.test(combined) ||
+      /^(?:hello|hi|hey|good\s+(?:morning|afternoon|evening))\b/.test(combined)
+    ) {
+      const intent = this.intentRegistry.get('greeting');
+      return intent ? { intent, confidence: 1, entities: {} } : null;
+    }
+
+    if (
+      /\b(?:what\s+can\s+you\s+do|what\s+can\s+i\s+say|show\s+help|help\s+me|how\s+do\s+you\s+help\s+me)\b/.test(combined) ||
+      /\b(?:your\s+(?:work|job|role|purpose|capabilities|commands)|you\s+do\s+for\s+me)\b/.test(combined)
+    ) {
+      const intent = this.intentRegistry.get('help');
+      return intent ? { intent, confidence: 1, entities: {} } : null;
+    }
+
+    return null;
   }
 
   _resolveCalculationIntent(rawText, preparedInput) {
@@ -1261,6 +1335,33 @@ class ActionRouter {
       .replace(/\b([a-z0-9_-]+)\s+(pdf|txt|docx?|xlsx?|pptx?|csv|json|xml|html?|js|ts|py|java|md|png|jpe?g|gif|webp|mp[34]|mkv|wav|zip|rar)$/i, '$1.$2')
       .trim();
     return query ? { intent, confidence: 1, entities: { query } } : null;
+  }
+
+  _resolvePersonalPhotoIntent(rawText, preparedInput) {
+    const corrected = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
+    const raw = String(rawText || corrected || '').trim().toLowerCase();
+    const input = `${raw} ${corrected}`
+      .replace(/\bclassmetes\b/g, 'classmates')
+      .replace(/\bclassm[eai]tes\b/g, 'classmates')
+      .replace(/\bpics?\b/g, 'photos')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (!/\b(?:find|show|open|search|look)\b/.test(input)) {
+      return null;
+    }
+
+    if (!/\b(?:photos?|pictures?|images?)\b/.test(input)) {
+      return null;
+    }
+
+    const personalCue = /\b(?:my|me|mine|class|classmates|friends?|family|recent|memories|google\s+photos?|photos\s+app|in\s+the\s+photos?)\b/.test(input);
+    if (!personalCue) {
+      return null;
+    }
+
+    const intent = this.intentRegistry.get('browser.openFirstResult');
+    return intent ? { intent, confidence: 0.95, entities: { query: 'google photos' } } : null;
   }
 
   _extractLocalListLocation(input) {

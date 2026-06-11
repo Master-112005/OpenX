@@ -29,6 +29,7 @@ describe('Automation Engine', function() {
     assert.ok(actions.includes('system.time'));
     assert.ok(actions.includes('system.date'));
     assert.ok(actions.includes('system.calculate'));
+    assert.ok(actions.includes('system.screenshot'));
     assert.ok(actions.includes('system.shutdown'));
     assert.ok(actions.includes('window.minimize'));
     assert.ok(actions.includes('help'));

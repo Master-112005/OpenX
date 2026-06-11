@@ -17,6 +17,31 @@ const PLATFORMS = Object.freeze([
     aliases: ['spotify', 'spoti fy', 'spotyfy', 'spotifie']
   },
   {
+    id: 'apple music',
+    name: 'Apple Music',
+    aliases: ['apple music', 'applemusic', 'apple musix', 'apple muzik', 'apple']
+  },
+  {
+    id: 'amazon music',
+    name: 'Amazon Music',
+    aliases: ['amazon music', 'amazonmusic', 'amazon']
+  },
+  {
+    id: 'soundcloud',
+    name: 'SoundCloud',
+    aliases: ['soundcloud', 'sound cloud']
+  },
+  {
+    id: 'gaana',
+    name: 'Gaana',
+    aliases: ['gaana', 'gana']
+  },
+  {
+    id: 'jiosaavn',
+    name: 'JioSaavn',
+    aliases: ['jiosaavn', 'jio saavn', 'saavn', 'jio music']
+  },
+  {
     id: 'local',
     name: 'local media',
     aliases: ['local', 'local media', 'my music', 'offline music']
@@ -102,6 +127,9 @@ class PlatformMapper {
       if (appText.includes('spotify')) {
         return { platform: 'spotify', confidence: 0.88, reason: 'media-mode-spotify' };
       }
+      if (appText.includes('apple music') || appText.includes('applemusic')) {
+        return { platform: 'apple music', confidence: 0.88, reason: 'media-mode-apple-music' };
+      }
       if (appText.includes('youtube') || appText.includes('chrome') || appText.includes('msedge')) {
         return { platform: 'youtube', confidence: 0.86, reason: 'media-mode-browser' };
       }
@@ -109,6 +137,10 @@ class PlatformMapper {
 
     if (appText.includes('spotify')) {
       return { platform: 'spotify', confidence: 0.86, reason: 'running-app' };
+    }
+
+    if (appText.includes('apple music') || appText.includes('applemusic')) {
+      return { platform: 'apple music', confidence: 0.86, reason: 'running-app' };
     }
 
     if (activeApp.includes('chrome') || activeApp.includes('msedge') || activeApp.includes('firefox')) {

@@ -58,6 +58,7 @@ function humanizeError(error) {
     const appName = message.split(':').slice(1).join(':').trim();
     return appName ? `I cannot find the ${appName} app` : 'I cannot find that app';
   }
+  if (lowered.includes('multiple') && lowered.includes('windows are open')) return message;
   if (lowered.includes('mode not found')) return 'I cannot find that mode in settings';
   if (lowered.includes('mode has no apps or commands configured')) return 'That mode does not have any apps or commands configured yet';
   if (lowered.includes('mode has no apps configured')) return 'That mode does not have any apps configured yet';
@@ -385,6 +386,10 @@ const RESPONSE_BUILDERS = {
       return result !== '' && result !== null && result !== undefined
         ? `The answer is ${result}.`
         : 'I could not calculate that.';
+    },
+    'system.screenshot': context => {
+      const filePath = valueFromContext(context, 'filePath');
+      return filePath ? `Screenshot saved to ${filePath}.` : 'Screenshot captured.';
     },
     'media.play': context => {
       const query = valueFromContext(context, 'query', valueFromContext(context, 'mediaQuery', ''));

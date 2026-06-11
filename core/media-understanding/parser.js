@@ -44,6 +44,8 @@ function cleanup(input) {
     .toLowerCase()
     .replace(/\bspoti\s+fy\b/g, 'spotify')
     .replace(/\byou\s+tube\b/g, 'youtube')
+    .replace(/\bapple\s+musix\b/g, 'apple music')
+    .replace(/\bapplemusic\b/g, 'apple music')
     .replace(/\bplay\s+nexr\s+sony\b/g, 'play next song')
     .replace(/\bsony\b/g, 'song')
     .replace(/[^a-z0-9\s.-]/g, ' ')
@@ -60,7 +62,7 @@ function stripPoliteNoise(input) {
 
 function removePlatformClause(input) {
   return String(input || '')
-    .replace(/\b(?:on|in|via|using)\s+(?:youtube|spotify|you tube|spoti fy|browser|chrome|edge|firefox|local media|local)\b/g, ' ')
+    .replace(/\b(?:on|in|via|using)\s+(?:youtube|spotify|apple music|amazon music|soundcloud|gaana|jiosaavn|saavn|you tube|spoti fy|browser|chrome|edge|firefox|local media|local)\b/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }
@@ -184,12 +186,12 @@ class MediaParser {
 
   _extractPlatformText(input) {
     const source = cleanup(input);
-    const match = source.match(/\b(?:on|in|via|using|open)\s+([a-z\s]+?)(?=\s+(?:and|play|music|songs?|tracks?|$)|$)/);
+    const match = source.match(/\b(?:on|in|via|using|open)\s+([a-z\s]+?)(?=\s+(?:and|play|songs?|tracks?|$)|$)/);
     if (match && match[1]) {
       return match[1].trim();
     }
 
-    for (const platform of ['youtube', 'you tube', 'spotify', 'spoti fy', 'chrome', 'browser', 'local media']) {
+    for (const platform of ['apple music', 'amazon music', 'soundcloud', 'jiosaavn', 'saavn', 'youtube', 'you tube', 'spotify', 'spoti fy', 'gaana', 'chrome', 'browser', 'local media']) {
       if (source.includes(platform)) {
         return platform;
       }

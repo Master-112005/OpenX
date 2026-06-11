@@ -122,6 +122,11 @@ function splitNameAndLocation(value) {
 }
 
 function findEntryByName(name, options = {}) {
+  const matches = findEntriesByName(name, options);
+  return matches[0] || null;
+}
+
+function findEntriesByName(name, options = {}) {
   if (!name) return null;
 
   const {
@@ -131,6 +136,8 @@ function findEntryByName(name, options = {}) {
 
   const wantedDirectory = type === 'directory';
   const wantedName = name.toLowerCase();
+  const maxMatches = options.maxMatches ?? 20;
+  const matches = [];
   const candidateRoots = dedupe(roots.length > 0 ? roots : [
     process.cwd(),
     getHomeDirectory(),
@@ -145,7 +152,8 @@ function findEntryByName(name, options = {}) {
 
     const stats = fs.statSync(candidate);
     if (wantedDirectory ? stats.isDirectory() : stats.isFile()) {
-      return candidate;
+      matches.push(candidate);
+      if (matches.length >= maxMatches) return dedupe(matches);
     }
   }
 
@@ -173,7 +181,8 @@ function findEntryByName(name, options = {}) {
 
       if (entryName === wantedName) {
         if (wantedDirectory ? entry.isDirectory() : entry.isFile()) {
-          return entryPath;
+          matches.push(entryPath);
+          if (matches.length >= maxMatches) return dedupe(matches);
         }
       }
 
@@ -187,7 +196,7 @@ function findEntryByName(name, options = {}) {
     }
   }
 
-  return null;
+  return dedupe(matches);
 }
 
 function resolveDestinationPath(destination, sourcePath, options = {}) {
@@ -228,6 +237,7 @@ function resolveDestinationPath(destination, sourcePath, options = {}) {
 }
 
 module.exports = {
+  findEntriesByName,
   findEntryByName,
   getHomeDirectory,
   getSpecialFolders,

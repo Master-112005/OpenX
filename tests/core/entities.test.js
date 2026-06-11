@@ -191,6 +191,21 @@ describe('Entity Extractor', function() {
     assert.equal(entities.platform, 'whatsapp');
   });
 
+  it('should treat in whatsapp as a message platform, not part of the contact', function() {
+    const extractor = new EntityExtractor({});
+    const intent = {
+      entities: [
+        { name: 'contactName', type: 'string', required: true },
+        { name: 'messageText', type: 'string', required: true },
+        { name: 'platform', type: 'string', required: false }
+      ]
+    };
+    const entities = extractor.extract(intent, 'say hi to mummy in whatsapp');
+    assert.equal(entities.contactName, 'mummy');
+    assert.equal(entities.messageText, 'hi');
+    assert.equal(entities.platform, 'whatsapp');
+  });
+
   it('should extract file-send message details cleanly', function() {
     const extractor = new EntityExtractor({});
     const intent = {

@@ -312,6 +312,85 @@ describe('App Controller', function() {
     assert.equal(forcedTerminationUsed, false);
   });
 
+  it('should ask before closing when multiple matching app windows are open', function() {
+    const controller = new AppController({});
+    let closeAttempted = false;
+
+    controller._getRunningProcessDetails = () => ([
+      {
+        Id: 200,
+        ProcessName: 'chrome',
+        MainWindowTitle: 'Project A - Google Chrome',
+        MainWindowHandle: 789,
+        Path: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
+      },
+      {
+        Id: 201,
+        ProcessName: 'chrome',
+        MainWindowTitle: 'Project B - Google Chrome',
+        MainWindowHandle: 790,
+        Path: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
+      }
+    ]);
+    controller._closeProcessesGracefully = () => {
+      closeAttempted = true;
+      return true;
+    };
+    controller._sleep = () => {};
+
+    const result = controller.close('chrome');
+
+    assert.equal(result.success, false);
+    assert.equal(result.needsClarification, true);
+    assert.equal(result.data.matchCount, 2);
+    assert.equal(closeAttempted, false);
+  });
+
+  it('should ask before opening another window when the app is already open', function() {
+    const controller = new AppController({});
+
+    controller._getRunningProcessDetails = () => ([{
+      Id: 300,
+      ProcessName: 'SampleApp',
+      MainWindowTitle: 'Sample App',
+      MainWindowHandle: 123,
+      Path: 'C:\\Program Files\\SampleApp\\SampleApp.exe'
+    }]);
+    controller._launchSpecialApp = () => ({ success: false });
+    controller._resolveStartApp = () => null;
+    controller._commandExists = () => true;
+    controller._sleep = () => {};
+
+    const result = controller.open('sample app');
+
+    assert.equal(result.success, false);
+    assert.equal(result.needsClarification, true);
+    assert.equal(result.data.confirmEntities.forceNewWindow, true);
+  });
+
+  it('should open when the user confirms a new app window', function() {
+    const controller = new AppController({});
+    let launched = null;
+
+    controller._getRunningProcessDetails = () => ([{
+      Id: 300,
+      ProcessName: 'SampleApp',
+      MainWindowTitle: 'Sample App',
+      MainWindowHandle: 123,
+      Path: 'C:\\Program Files\\SampleApp\\SampleApp.exe'
+    }]);
+    controller._launchSpecialApp = () => ({ success: false });
+    controller._resolveStartApp = () => ({ name: 'Sample App', appId: 'Sample.App' });
+    controller._launchStartApp = (startApp) => {
+      launched = startApp;
+    };
+
+    const result = controller.open('sample app', { forceNewWindow: true });
+
+    assert.equal(result.success, true);
+    assert.equal(launched.appId, 'Sample.App');
+  });
+
   it('should exclude YouTube windows from Chrome window fallback', function() {
     const controller = new AppController({});
     let fallbackOptions = null;
