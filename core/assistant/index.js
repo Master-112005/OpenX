@@ -8,6 +8,7 @@ const {
 const ActionRouter = require('./router/index');
 const AutomationEngine = require('../automation/index');
 const ContextManager = require('./context/index');
+const ActiveLearningStore = require('./learning/index');
 const Personality = require('./personality/index');
 const ResponseGenerator = require('./responses/index');
 
@@ -74,14 +75,24 @@ class Assistant extends EventEmitter {
     this.logger = new Logger({ level: config?.logging?.level || 'info' });
     this.config = config;
     this.eventBus = dependencies.eventBus || config?.eventBus || new AssistantEventBus();
+    this.learning = dependencies.learning || new ActiveLearningStore(config);
+    const routerConfig = {
+      ...(config || {}),
+      learningStore: this.learning
+    };
     this.automation = dependencies.automation || new AutomationEngine(config);
-    this.router = dependencies.router || new ActionRouter(config, this.automation);
+    this.router = dependencies.router || new ActionRouter(routerConfig, this.automation);
+    if (this.router && !this.router.learningStore) {
+      this.router.learningStore = this.learning;
+    }
     this.context = new ContextManager(config);
     this.personality = new Personality(config);
     this.responses = new ResponseGenerator(config);
     this.isProcessing = false;
     this.pendingConfirmation = null;
     this.pendingClarification = null;
+    this.pendingFeedback = null;
+    this.pendingLearningCorrection = null;
   }
 
   async processCommand(input, source = 'chat') {
@@ -108,11 +119,18 @@ class Assistant extends EventEmitter {
         return clarificationResult;
       }
 
-      const routedInput = this._resolveContextualFollowUp(input) || input;
+      const learningResult = await this._handleLearningInput(input, source);
+      if (learningResult) {
+        return learningResult;
+      }
+
+      const routedInput = this._buildRoutedInput(input);
       const result = await this.router.process(routedInput, source);
       this.context.record(input, result.entities || {}, result);
+      this._recordLearningOutcome(input, routedInput, result);
 
       let response = result.response || '';
+      response = this._appendLearningPrompt(response, input, routedInput, result);
       response = this.personality.applyToResponse(response);
 
       if (result.requiresConfirmation) {
@@ -239,9 +257,234 @@ class Assistant extends EventEmitter {
       isProcessing: this.isProcessing,
       awaitingConfirmation: Boolean(this.pendingConfirmation),
       awaitingClarification: Boolean(this.pendingClarification),
+      awaitingFeedback: Boolean(this.pendingFeedback),
+      awaitingLearningCorrection: Boolean(this.pendingLearningCorrection),
       recentCommands: this.context.getRecentCommands(),
       conversation: this.context.getConversationSummary()
     };
+  }
+
+  _buildRoutedInput(input) {
+    const contextual = this._resolveContextualFollowUp(input) || input;
+    const learned = this.learning?.findCorrection?.(contextual);
+    return learned?.correction || contextual;
+  }
+
+  async _handleLearningInput(input, source) {
+    const raw = String(input || '').trim();
+    if (!raw || !this.learning?.enabled) {
+      return null;
+    }
+
+    if (this.pendingLearningCorrection) {
+      const pending = this.pendingLearningCorrection;
+      this.pendingLearningCorrection = null;
+      const correction = this._extractCorrectionCommand(raw) || raw;
+      const rule = this.learning.rememberCorrection(pending.input, correction, {
+        source: 'negative-feedback',
+        reason: 'post-action-correction'
+      });
+      this.learning.recordFeedback({
+        ...pending,
+        rating: 'negative',
+        correction
+      });
+      const result = await this.processCommand(correction, source);
+      return {
+        ...result,
+        learned: true,
+        learningRule: rule,
+        response: this.personality.applyToResponse(
+          `I learned the correction. ${result.response || ''}`.trim()
+        )
+      };
+    }
+
+    if (this.pendingFeedback) {
+      const feedback = this._classifyFeedback(raw);
+      if (feedback === 'positive') {
+        const pending = this.pendingFeedback;
+        this.pendingFeedback = null;
+        this.learning.recordFeedback({
+          ...pending,
+          rating: 'positive'
+        });
+        return {
+          success: true,
+          learned: true,
+          source,
+          response: this.personality.applyToResponse('Thanks. I will remember that this worked.')
+        };
+      }
+
+      if (feedback === 'negative') {
+        const pending = this.pendingFeedback;
+        this.pendingFeedback = null;
+        const correction = this._extractCorrectionCommand(raw);
+        if (correction) {
+          const rule = this.learning.rememberCorrection(pending.input, correction, {
+            source: 'negative-feedback',
+            reason: 'embedded-correction'
+          });
+          this.learning.recordFeedback({
+            ...pending,
+            rating: 'negative',
+            correction
+          });
+          const result = await this.processCommand(correction, source);
+          return {
+            ...result,
+            learned: true,
+            learningRule: rule,
+            response: this.personality.applyToResponse(
+              `I learned the correction. ${result.response || ''}`.trim()
+            )
+          };
+        }
+
+        this.pendingLearningCorrection = pending;
+        return {
+          success: false,
+          learned: false,
+          source,
+          response: this.personality.applyToResponse(
+            `What should I do next time when you say "${pending.input}"?`
+          )
+        };
+      }
+
+      this.pendingFeedback = null;
+    }
+
+    const correction = this._extractCorrectionCommand(raw);
+    if (correction && this._looksLikeCorrectiveUtterance(raw)) {
+      const lastFailed = this._getLastFailedLearningTarget();
+      let rule = null;
+      if (lastFailed?.input) {
+        rule = this.learning.rememberCorrection(lastFailed.input, correction, {
+          source: 'corrective-command',
+          reason: 'last-failed-command'
+        });
+        this.learning.recordFeedback({
+          input: lastFailed.input,
+          routedInput: lastFailed.routedInput || lastFailed.input,
+          intent: lastFailed.intent || null,
+          success: false,
+          rating: 'negative',
+          correction
+        });
+      }
+      const result = await this.processCommand(correction, source);
+      return rule
+        ? {
+            ...result,
+            learned: true,
+            learningRule: rule,
+            response: this.personality.applyToResponse(
+              `I learned the correction. ${result.response || ''}`.trim()
+            )
+          }
+        : result;
+    }
+
+    const explicitLearning = this.learning.learnFromText(raw);
+    if (explicitLearning) {
+      return {
+        success: true,
+        learned: true,
+        source,
+        response: this.personality.applyToResponse(explicitLearning.response)
+      };
+    }
+
+    return null;
+  }
+
+  _appendLearningPrompt(response, input, routedInput, result) {
+    if (!this._shouldAskForLearningFeedback(result)) {
+      return response;
+    }
+
+    this.pendingFeedback = {
+      input: String(input || '').trim(),
+      routedInput: String(routedInput || input || '').trim(),
+      intent: result.intent || null,
+      success: Boolean(result.success)
+    };
+    return `${response} Did that work correctly?`;
+  }
+
+  _shouldAskForLearningFeedback(result) {
+    if (!this.learning?.enabled || !this.learning?.askForFeedback) {
+      return false;
+    }
+    if (!result?.success || result.requiresConfirmation || result.needsClarification || !result.intent) {
+      return false;
+    }
+
+    return /^(?:app|file|folder|browser\.open|browser\.openFirstResult|media|message|call|mode|window)\./.test(result.intent) ||
+      ['system.bluetooth', 'system.screenshot'].includes(result.intent);
+  }
+
+  _recordLearningOutcome(input, routedInput, result) {
+    if (!this.learning?.enabled || !result) {
+      return;
+    }
+    if (result.success) {
+      return;
+    }
+    this.learning.recordFeedback({
+      input,
+      routedInput,
+      intent: result.intent || null,
+      success: false,
+      rating: 'negative',
+      note: result.error || result.response || ''
+    });
+  }
+
+  _classifyFeedback(input) {
+    const normalized = this._normalizeConfirmationText(input);
+    if (!normalized) {
+      return null;
+    }
+    if (/^(?:yes|yeah|yep|correct|right|good|worked|it worked|that worked|done|perfect|properly)\b/.test(normalized) ||
+      /\b(?:worked|correct|right|perfect|good job)\b/.test(normalized)) {
+      return 'positive';
+    }
+    if (/^(?:no|nope|wrong|incorrect|bad|failed|not done|did not work|didnt work|that was wrong)\b/.test(normalized) ||
+      /\b(?:wrong|incorrect|failed|did not work|didnt work|not what i wanted|mistake)\b/.test(normalized)) {
+      return 'negative';
+    }
+    return null;
+  }
+
+  _extractCorrectionCommand(input) {
+    const text = String(input || '').trim();
+    if (!text) {
+      return '';
+    }
+
+    const stripped = text
+      .replace(/^(?:no|nope|nah|wrong|incorrect|that\s+was\s+wrong|it\s+was\s+wrong|not\s+that|not\s+correct)\s*,?\s*/i, '')
+      .replace(/^(?:i\s+said\s+to\s+|i\s+said\s+|i\s+meant\s+to\s+|i\s+meant\s+|you\s+should\s+have\s+|you\s+should\s+|next\s+time\s+|instead\s+|please\s+)/i, '')
+      .replace(/^(open|close|search|find|play|set|turn|start|launch|show|list|send|call)\s+the\s+/i, '$1 ')
+      .trim();
+    if (!stripped || stripped === text && !/^(?:open|close|search|find|play|set|turn|start|launch|show|list|send|call)\b/i.test(stripped)) {
+      return '';
+    }
+    return stripped;
+  }
+
+  _looksLikeCorrectiveUtterance(input) {
+    return /^(?:i\s+said|i\s+meant|you\s+should\s+have|not\s+that|wrong|incorrect|nope|no,?\s+(?:open|close|search|find|play|set|turn|start|launch|show|list|send|call))\b/i.test(String(input || '').trim());
+  }
+
+  _getLastFailedLearningTarget() {
+    return this.context.getHistory(8)
+      .slice()
+      .reverse()
+      .find(entry => entry && entry.success === false && entry.input && entry.intent);
   }
 
   async _handlePendingConfirmation(input, source) {
@@ -408,7 +651,7 @@ class Assistant extends EventEmitter {
     const listFollowUp = /^(?:list|show|tell|display|open)?\s*(?:them|those|these|it|that)(?:\s+again)?$/.test(normalized) ||
       /^(?:list|show|tell|display)\s+(?:them|those|these|it|that)\b/.test(normalized);
     if (!listFollowUp) {
-      return '';
+      return this._resolveVoiceReference(input);
     }
 
     const lastFileList = this.context.getHistory(8)
@@ -417,14 +660,14 @@ class Assistant extends EventEmitter {
       .find(entry => entry?.success && entry?.intent === 'file.list' && entry?.entities?.path);
 
     if (!lastFileList) {
-      return '';
+      return this._resolveVoiceReference(input);
     }
 
     const entities = lastFileList.entities || {};
     const type = String(entities.fileType || '').trim();
     const path = String(entities.path || '').trim();
     if (!path) {
-      return '';
+      return this._resolveVoiceReference(input);
     }
 
     return `list ${type ? `${type} ` : ''}files in ${path}`;
@@ -520,6 +763,9 @@ class Assistant extends EventEmitter {
 
     return normalized
       .replace(/\b(?:it|that|same)\b/g, target)
+      .replace(/^(?:can|could|would)\s+(?:you\s+)?(?:please\s+)?/i, '')
+      .replace(/^please\s+/i, '')
+      .replace(/\bthe\s+([a-z0-9][a-z0-9 ._-]*)$/i, '$1')
       .replace(/\s+/g, ' ')
       .trim();
   }

@@ -191,6 +191,32 @@ describe('Automation Engine', function() {
     }
   });
 
+  it('should execute visible app listing separately from process count', async function() {
+    const SystemController = require('../../core/automation/system/index');
+    const system = new SystemController({});
+    system.getRunningApps = () => ({
+      success: true,
+      data: {
+        target: 'apps',
+        count: 2,
+        names: ['chrome', 'spotify']
+      }
+    });
+
+    const engine = new AutomationEngine({});
+    engine.system = system;
+    engine._actionMap['system.processes'] = (entities) => entities?.target === 'apps'
+      ? engine.system.getRunningApps()
+      : engine.system.getProcessCount();
+
+    const result = await engine.execute('system.processes', { target: 'apps' });
+
+    assert.equal(result.success, true);
+    assert.equal(result.data.target, 'apps');
+    assert.equal(result.data.count, 2);
+    assert.deepEqual(result.data.names, ['chrome', 'spotify']);
+  });
+
   it('should parse human reminder day phrases', function() {
     const SchedulerController = require('../../core/automation/scheduler/index');
     const scheduler = new SchedulerController({});

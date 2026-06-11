@@ -529,6 +529,17 @@ const RESPONSE_BUILDERS = {
     },
     'system.processes': context => {
       const count = valueFromContext(context, 'count');
+      const target = valueFromContext(context, 'target', '');
+      const names = valueFromContext(context, 'names', []);
+      if (target === 'apps') {
+        if (!count) {
+          return 'I do not see any visible apps open right now.';
+        }
+        const list = Array.isArray(names) && names.length > 0
+          ? `: ${names.join(', ')}`
+          : '';
+        return `I see ${count} visible app${count === 1 ? '' : 's'} running${list}.`;
+      }
       return chooseVariant(`sys.proc:${count}`, [
         `There are currently ${count} active processes running.`,
         `You've got ${count} active processes at the moment.`,

@@ -461,4 +461,168 @@ describe('Assistant Confirmation Flow', function() {
     assert.equal(result.success, true);
     assert.deepEqual(routedInputs, ['close youtube', 'open youtube']);
   });
+
+  it('should ask for feedback after actionable commands and record positive feedback', async function() {
+    const feedback = [];
+    const learning = {
+      enabled: true,
+      askForFeedback: true,
+      findCorrection: () => null,
+      learnFromText: () => null,
+      recordFeedback: entry => feedback.push(entry)
+    };
+    const router = {
+      process: async () => ({
+        commandId: 'cmd-feedback',
+        success: true,
+        intent: 'app.open',
+        confidence: 1,
+        entities: { appName: 'chrome' },
+        response: 'Opened chrome.'
+      })
+    };
+
+    const assistant = new Assistant({}, {
+      router,
+      learning,
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    const first = await assistant.processCommand('open chrome');
+    const second = await assistant.processCommand('yes');
+
+    assert.match(first.response, /Did that work correctly/i);
+    assert.equal(second.learned, true);
+    assert.equal(feedback[0].rating, 'positive');
+    assert.equal(assistant.getStatus().awaitingFeedback, false);
+  });
+
+  it('should learn a correction from negative feedback and reuse it later', async function() {
+    const corrections = new Map();
+    const learning = {
+      enabled: true,
+      askForFeedback: true,
+      findCorrection: input => {
+        const key = input.toLowerCase();
+        return corrections.has(key) ? { correction: corrections.get(key) } : null;
+      },
+      rememberCorrection: (input, correction) => {
+        corrections.set(input.toLowerCase(), correction);
+        return { input, correction };
+      },
+      learnFromText: () => null,
+      recordFeedback: () => {}
+    };
+    const routedInputs = [];
+    const router = {
+      process: async input => {
+        routedInputs.push(input);
+        return {
+          commandId: `cmd-${routedInputs.length}`,
+          success: true,
+          intent: input.includes('google photos') ? 'browser.openFirstResult' : 'app.open',
+          confidence: 1,
+          entities: input.includes('google photos') ? { query: 'google photos' } : { appName: 'photos' },
+          response: input.includes('google photos') ? 'Opened Google Photos.' : 'Opened Photos.'
+        };
+      }
+    };
+
+    const assistant = new Assistant({}, {
+      router,
+      learning,
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    await assistant.processCommand('open photos');
+    await assistant.processCommand('no, open google photos');
+    await assistant.processCommand('open photos');
+
+    assert.deepEqual(routedInputs, ['open photos', 'open google photos', 'open google photos']);
+  });
+
+  it('should resolve polite references like close that to the last app target', async function() {
+    const routedInputs = [];
+    const router = {
+      process: async input => {
+        routedInputs.push(input);
+        return {
+          commandId: `cmd-ref-${routedInputs.length}`,
+          success: true,
+          intent: input.startsWith('close') ? 'app.close' : 'app.open',
+          confidence: 1,
+          entities: { appName: 'instagram' },
+          response: input.startsWith('close') ? 'Closed instagram.' : 'Opened instagram.'
+        };
+      }
+    };
+
+    const assistant = new Assistant({}, {
+      router,
+      learning: { enabled: false },
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    await assistant.processCommand('can you please open instagram');
+    await assistant.processCommand('can please close that');
+
+    assert.deepEqual(routedInputs, ['can you please open instagram', 'close instagram']);
+  });
+
+  it('should learn corrective phrasing against the last failed command', async function() {
+    const learnedRules = [];
+    const routedInputs = [];
+    const learning = {
+      enabled: true,
+      askForFeedback: false,
+      findCorrection: () => null,
+      learnFromText: () => null,
+      rememberCorrection: (input, correction) => {
+        learnedRules.push({ input, correction });
+        return { input, correction };
+      },
+      recordFeedback: () => {}
+    };
+    const router = {
+      process: async input => {
+        routedInputs.push(input);
+        if (input === 'can please close that') {
+          return {
+            commandId: 'cmd-failed-close',
+            success: false,
+            intent: 'app.close',
+            confidence: 0.99,
+            entities: { appName: 'can' },
+            response: 'Could not close can.'
+          };
+        }
+        return {
+          commandId: 'cmd-fixed-close',
+          success: true,
+          intent: 'app.close',
+          confidence: 1,
+          entities: { appName: 'instagram' },
+          response: 'Closed instagram.'
+        };
+      }
+    };
+
+    const assistant = new Assistant({}, {
+      router,
+      learning,
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    await assistant.processCommand('can please close that');
+    const fixed = await assistant.processCommand('i said to close the instagram');
+
+    assert.equal(fixed.success, true);
+    assert.equal(fixed.learned, true);
+    assert.deepEqual(routedInputs, ['can please close that', 'close instagram']);
+    assert.deepEqual(learnedRules, [{ input: 'can please close that', correction: 'close instagram' }]);
+  });
 });

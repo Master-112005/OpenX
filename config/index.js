@@ -119,6 +119,12 @@ const CONFIG = {
     }
   },
 
+  activeLearning: {
+    enabled: true,
+    askForFeedback: true,
+    storePath: ''
+  },
+
   permissions: {
     levels: {
       low: { requiresConfirmation: false, requiresAuth: false },

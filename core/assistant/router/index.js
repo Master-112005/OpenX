@@ -20,6 +20,7 @@ class ActionRouter {
     this.permissionValidator = new PermissionValidator(config);
     this.automationEngine = automationEngine;
     this.nlp = new NlpProcessor(this.intentRegistry);
+    this.learningStore = config?.learningStore || null;
     this.mediaUnderstanding = new MediaUnderstandingRouter({
       logging: config?.logging,
       contextProvider: config?.contextEngine || config?.contextProvider || null
@@ -112,10 +113,16 @@ class ActionRouter {
   }
 
   async _completeIntent(commandId, intentResult, rawCommandText, source) {
-    const entities = intentResult.entities || this.entityExtractor.extract(
+    let entities = intentResult.entities || this.entityExtractor.extract(
       intentResult.intent,
       rawCommandText
     );
+    if (this.learningStore?.adaptEntities) {
+      entities = this.learningStore.adaptEntities(intentResult.intent.id, entities, {
+        rawCommandText,
+        source
+      });
+    }
     const missingRequired = this._checkRequiredEntities(intentResult.intent, entities);
 
     if (missingRequired.length > 0) {
@@ -1155,7 +1162,10 @@ class ActionRouter {
       /\b(?:running|open|active)\b/.test(input) &&
       /\b(?:apps?|applications?|processes|programs?|system)\b/.test(input)
     ) {
-      return systemProcessesIntent ? { intent: systemProcessesIntent, confidence: 1, entities: {} } : null;
+      const target = /\b(?:apps?|applications?|programs?)\b/.test(input) && !/\bprocesses\b/.test(input)
+        ? 'apps'
+        : 'processes';
+      return systemProcessesIntent ? { intent: systemProcessesIntent, confidence: 1, entities: { target } } : null;
     }
 
     if (/\b(?:system|computer|pc|laptop)\b/.test(input) && /\b(?:status|health|usage|running|about|info|information)\b/.test(input)) {

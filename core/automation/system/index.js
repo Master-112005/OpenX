@@ -299,6 +299,46 @@ class SystemController {
     }
   }
 
+  getRunningApps() {
+    try {
+      const output = execFileSync('powershell.exe', [
+        '-NoProfile',
+        '-Command',
+        [
+          "$apps = Get-Process |",
+          "Where-Object { $_.MainWindowTitle -and $_.MainWindowTitle.Trim().Length -gt 0 } |",
+          "Select-Object ProcessName, MainWindowTitle, Id |",
+          "Sort-Object ProcessName, MainWindowTitle -Unique;",
+          "$apps | ConvertTo-Json -Compress"
+        ].join(' ')
+      ], {
+        encoding: 'utf8',
+        timeout: 5000
+      });
+      const parsed = JSON.parse(output || '[]');
+      const rows = Array.isArray(parsed) ? parsed : (parsed ? [parsed] : []);
+      const apps = rows
+        .map(row => ({
+          name: String(row.ProcessName || '').trim(),
+          title: String(row.MainWindowTitle || '').trim(),
+          id: Number(row.Id || 0)
+        }))
+        .filter(row => row.name && row.title);
+
+      return {
+        success: true,
+        data: {
+          target: 'apps',
+          count: apps.length,
+          apps,
+          names: Array.from(new Set(apps.map(app => app.name))).slice(0, 8)
+        }
+      };
+    } catch (err) {
+      return { success: false, error: 'Running apps are not available' };
+    }
+  }
+
   bluetooth(enabled = undefined) {
     if (enabled === true || enabled === false) {
       return this._setBluetoothState(enabled);

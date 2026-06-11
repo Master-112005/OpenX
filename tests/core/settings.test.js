@@ -84,6 +84,10 @@ describe('Settings Service', function() {
       system: {
         permissionLevel: 'critical'
       },
+      activeLearning: {
+        enabled: false,
+        askForFeedback: false
+      },
       modes: [
         {
           name: 'gaming',
@@ -105,6 +109,8 @@ describe('Settings Service', function() {
     assert.equal(saved.chat.themeId, 'forest');
     assert.equal(saved.chat.maxHistory, 900);
     assert.equal(saved.system.permissionLevel, 'critical');
+    assert.equal(saved.activeLearning.enabled, false);
+    assert.equal(saved.activeLearning.askForFeedback, false);
     assert.equal(saved.modes.length, 2);
     assert.deepEqual(saved.modes[0].apps, [
       { name: 'chrome', instructions: ['search for games'] },
@@ -124,6 +130,8 @@ describe('Settings Service', function() {
     assert.equal(runtimeConfig.assistant.userProfile.email, 'rakesh@example.com');
     assert.equal(runtimeConfig.chat.activeTheme, 'forest');
     assert.equal(runtimeConfig.system.permissionLevel, 'critical');
+    assert.equal(runtimeConfig.activeLearning.enabled, false);
+    assert.equal(runtimeConfig.activeLearning.askForFeedback, false);
     assert.deepEqual(runtimeConfig.modes[0], saved.modes[0]);
   });
 

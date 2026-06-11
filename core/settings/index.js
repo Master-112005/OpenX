@@ -297,6 +297,10 @@ class SettingsService {
         volumeStep: clampNumber(baseConfig?.system?.volumeStep, 1, 20, 5),
         permissionLevel: 'medium'
       },
+      activeLearning: {
+        enabled: baseConfig?.activeLearning?.enabled !== false,
+        askForFeedback: baseConfig?.activeLearning?.askForFeedback !== false
+      },
       chat: {
         themeId: String(baseConfig?.chat?.activeTheme || 'midnight').trim(),
         maxHistory: clampNumber(baseConfig?.chat?.maxHistory, 50, 2000, 500)
@@ -397,6 +401,10 @@ class SettingsService {
     runtimeConfig.system.volumeStep = settings.system.volumeStep;
     runtimeConfig.system.permissionLevel = settings.system.permissionLevel;
 
+    runtimeConfig.activeLearning = runtimeConfig.activeLearning || {};
+    runtimeConfig.activeLearning.enabled = settings.activeLearning.enabled;
+    runtimeConfig.activeLearning.askForFeedback = settings.activeLearning.askForFeedback;
+
     runtimeConfig.chat = runtimeConfig.chat || {};
     runtimeConfig.chat.maxHistory = settings.chat.maxHistory;
     runtimeConfig.chat.activeTheme = settings.chat.themeId;
@@ -452,6 +460,10 @@ class SettingsService {
         permissionLevel: ['low', 'medium', 'high', 'critical'].includes(String(source.system?.permissionLevel || '').trim().toLowerCase())
           ? String(source.system.permissionLevel).trim().toLowerCase()
           : this.defaults.system.permissionLevel
+      },
+      activeLearning: {
+        enabled: source.activeLearning?.enabled !== false,
+        askForFeedback: source.activeLearning?.askForFeedback !== false
       },
       chat: {
         themeId,

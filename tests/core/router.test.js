@@ -622,6 +622,32 @@ describe('Action Router', function() {
     assert.equal(result.entities.query, 'yesterdays ipl score');
   });
 
+  it('should apply learned browser search preferences before execution', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } },
+      learningStore: {
+        adaptEntities(intentId, entities) {
+          if (intentId === 'browser.search') {
+            return { ...entities, openInBrowser: true };
+          }
+          return entities;
+        }
+      }
+    };
+    let executed = null;
+    const stubEngine = {
+      execute(actionId, entities) {
+        executed = { actionId, entities };
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const result = await router.process('search for chatgpt', 'chat');
+
+    assert.equal(result.intent, 'browser.search');
+    assert.equal(executed.entities.openInBrowser, true);
+  });
+
   it('should route question-style queries to browser.search', async function() {
     const config = {
       permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
@@ -1199,12 +1225,16 @@ describe('Action Router', function() {
     const router = new ActionRouter(config, stubEngine);
 
     const running = await router.process('what apps are running', 'chat');
+    const processes = await router.process('what processes are running', 'chat');
     const cpu = await router.process('what is the cpu usage', 'chat');
     const ram = await router.process('what is the ram usage', 'chat');
     const followUpMemory = await router.process('what about memory', 'chat');
     const laptop = await router.process('tell about this laptop', 'chat');
 
     assert.equal(running.intent, 'system.processes');
+    assert.equal(running.entities.target, 'apps');
+    assert.equal(processes.intent, 'system.processes');
+    assert.equal(processes.entities.target, 'processes');
     assert.equal(cpu.intent, 'system.cpu');
     assert.equal(ram.intent, 'system.memory');
     assert.equal(followUpMemory.intent, 'system.memory');

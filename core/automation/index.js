@@ -127,7 +127,9 @@ class AutomationEngine {
       'system.memory': () => this.system.getMemoryUsage(),
       'system.battery': () => this.system.getBatteryStatus(),
       'system.disk': () => this.system.getDiskSpace(),
-      'system.processes': () => this.system.getProcessCount(),
+      'system.processes': (entities) => entities?.target === 'apps'
+        ? this.system.getRunningApps()
+        : this.system.getProcessCount(),
       'system.bluetooth': (entities) => this.system.bluetooth(entities.enabled),
       'assistant.identity': () => ({ success: true, data: { name: 'JARVIS' } }),
       'window.minimize': (entities) => this.windows.minimizeWindow(entities.windowName),

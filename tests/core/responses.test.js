@@ -120,6 +120,24 @@ describe('Response Generator', function() {
     assert.ok(result.includes('notes.txt'));
   });
 
+  it('should describe visible apps separately from raw process counts', function() {
+    const gen = new ResponseGenerator();
+    const result = gen.generate('success', 'system.processes', {
+      result: {
+        data: {
+          target: 'apps',
+          count: 2,
+          names: ['chrome', 'spotify']
+        }
+      }
+    });
+
+    assert.ok(result.includes('2 visible apps'));
+    assert.ok(result.includes('chrome'));
+    assert.ok(result.includes('spotify'));
+    assert.ok(!result.toLowerCase().includes('active processes'));
+  });
+
   it('should report failed configured mode commands', function() {
     const gen = new ResponseGenerator();
     const result = gen.generate('success', 'mode.start', {
