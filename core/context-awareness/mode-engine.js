@@ -1,12 +1,6 @@
 const Logger = require('../shared/index').Logger;
 const signals = require('./signals');
 const contextEngineModule = require('./context-engine');
-const devMode = require('../modes/dev-mode');
-const streamMode = require('../modes/stream-mode');
-const gameMode = require('../modes/game-mode');
-const mediaMode = require('../modes/media-mode');
-const workMode = require('../modes/work-mode');
-const focusMode = require('../modes/focus-mode');
 
 const MODES = Object.freeze({
   DEV_MODE: 'DEV_MODE',
@@ -17,14 +11,138 @@ const MODES = Object.freeze({
   FOCUS_MODE: 'FOCUS_MODE'
 });
 
-const MODE_HANDLERS = Object.freeze({
-  [MODES.DEV_MODE]: devMode,
-  [MODES.STREAM_MODE]: streamMode,
-  [MODES.GAME_MODE]: gameMode,
-  [MODES.MEDIA_MODE]: mediaMode,
-  [MODES.WORK_MODE]: workMode,
-  [MODES.FOCUS_MODE]: focusMode
+const FOCUS_ACTIVITY_MS = 30 * 60 * 1000;
+
+function normalizedSet(values) {
+  return new Set((values || []).map(value => String(value || '').toLowerCase()));
+}
+
+function hasApp(apps, candidates) {
+  const normalized = normalizedSet(apps);
+  return candidates.some(candidate => normalized.has(String(candidate || '').toLowerCase()));
+}
+
+function scoreFromProfile(profile, context = {}) {
+  const runningApps = context.runningApps || [];
+  const activeApp = String(context.activeApp || '').toLowerCase();
+  const title = String(context.activeTitle || '').toLowerCase();
+  let value = 0;
+
+  for (const rule of profile.rules || []) {
+    if (rule.activeApps?.includes(activeApp)) value += rule.score;
+    if (rule.runningApps && hasApp(runningApps, rule.runningApps)) value += rule.score;
+    if (rule.titlePattern?.test(title)) value += rule.score;
+    if (rule.when?.(context, { activeApp, title, runningApps })) value += rule.score;
+  }
+
+  return Math.min(100, value);
+}
+
+const MODE_PROFILES = Object.freeze({
+  [MODES.DEV_MODE]: Object.freeze({
+    rules: Object.freeze([
+      Object.freeze({ activeApps: Object.freeze(['code.exe', 'devenv.exe', 'webstorm.exe']), score: 45 }),
+      Object.freeze({ activeApps: Object.freeze(['windowsterminal.exe', 'cmd.exe', 'powershell.exe']), score: 30 }),
+      Object.freeze({ runningApps: Object.freeze(['Code.exe', 'WindowsTerminal.exe', 'cmd.exe', 'powershell.exe']), score: 20 }),
+      Object.freeze({ runningApps: Object.freeze(['docker desktop.exe']), score: 20 }),
+      Object.freeze({ titlePattern: /\b(openx|git|npm|node|terminal|powershell|visual studio code)\b/, score: 10 })
+    ]),
+    behavior: Object.freeze({
+      preloadCodingCommands: true,
+      prioritizeTerminalIntents: true,
+      verbosity: 'reduced',
+      developerShortcuts: true,
+      prioritizeSystemAutomation: true,
+      suppressSpeech: false,
+      overlayNotifications: true
+    })
+  }),
+  [MODES.STREAM_MODE]: Object.freeze({
+    rules: Object.freeze([
+      Object.freeze({ activeApps: Object.freeze(['obs64.exe', 'streamlabs.exe']), score: 60 }),
+      Object.freeze({ runningApps: Object.freeze(['obs64.exe', 'streamlabs.exe']), score: 45 }),
+      Object.freeze({ when: context => Boolean(context.microphoneActive), score: 20 }),
+      Object.freeze({ when: (context, derived) => Boolean(context.fullscreen) && /stream|record|broadcast|obs/.test(derived.title), score: 15 })
+    ]),
+    behavior: Object.freeze({
+      muteAssistantSpeech: true,
+      overlayNotificationsOnly: true,
+      suppressInterruptions: true,
+      noisyFeedback: false,
+      silentExecutionConfirmations: true,
+      reducePolling: false
+    })
+  }),
+  [MODES.GAME_MODE]: Object.freeze({
+    rules: Object.freeze([
+      Object.freeze({ when: context => Boolean(context.fullscreen), score: 35 }),
+      Object.freeze({ activeApps: Object.freeze(['steam.exe', 'game.exe', 'valorant.exe', 'cs2.exe', 'fortniteclient-win64-shipping.exe']), score: 50 }),
+      Object.freeze({ runningApps: Object.freeze(['steam.exe']), score: 25 }),
+      Object.freeze({ titlePattern: /\b(game|steam|valorant|counter-strike|fortnite)\b/, score: 15 })
+    ]),
+    behavior: Object.freeze({
+      reducePollingFrequency: true,
+      disableOverlays: true,
+      suspendHeavyStt: true,
+      suppressSpeech: true,
+      minimizeCpuUsage: true
+    })
+  }),
+  [MODES.MEDIA_MODE]: Object.freeze({
+    rules: Object.freeze([
+      Object.freeze({ activeApps: Object.freeze(['spotify.exe']), score: 55 }),
+      Object.freeze({ when: (context, derived) => derived.activeApp === 'chrome.exe' && /\b(youtube|music|spotify)\b/.test(derived.title), score: 50 }),
+      Object.freeze({ runningApps: Object.freeze(['Spotify.exe', 'chrome.exe']), score: 15 }),
+      Object.freeze({ when: context => Boolean(context.audioDevice), score: 10 })
+    ]),
+    behavior: Object.freeze({
+      prioritizeMediaCommands: true,
+      optimizeVolumeControls: true,
+      reduceNotifications: true,
+      suppressSpeech: false,
+      overlayNotifications: true
+    })
+  }),
+  [MODES.WORK_MODE]: Object.freeze({
+    rules: Object.freeze([
+      Object.freeze({ activeApps: Object.freeze(['teams.exe', 'outlook.exe', 'zoom.exe', 'winword.exe', 'excel.exe']), score: 55 }),
+      Object.freeze({ runningApps: Object.freeze(['Teams.exe', 'OUTLOOK.EXE', 'Zoom.exe']), score: 30 }),
+      Object.freeze({ titlePattern: /\b(meeting|calendar|inbox|document|spreadsheet|presentation)\b/, score: 15 }),
+      Object.freeze({ when: (context, derived) => Boolean(context.microphoneActive) && ['teams.exe', 'zoom.exe'].includes(derived.activeApp), score: 15 })
+    ]),
+    behavior: Object.freeze({
+      reduceInterruptions: true,
+      suppressUnnecessarySpeech: true,
+      productivityShortcuts: true,
+      overlayNotifications: true,
+      verbosity: 'reduced'
+    })
+  }),
+  [MODES.FOCUS_MODE]: Object.freeze({
+    rules: Object.freeze([
+      Object.freeze({ when: context => Boolean(context.fullscreen && context.activeApp), score: 35 }),
+      Object.freeze({ when: context => Number(context.uninterruptedActivityMs || 0) >= FOCUS_ACTIVITY_MS, score: 65 }),
+      Object.freeze({ when: context => Boolean(context.manualFocusRequested), score: 100 })
+    ]),
+    behavior: Object.freeze({
+      minimizeResponses: true,
+      suppressNonEssentialNotifications: true,
+      reduceVisualInterruptions: true,
+      suppressSpeech: true,
+      verbosity: 'minimal'
+    })
+  })
 });
+
+const MODE_HANDLERS = Object.freeze(
+  Object.fromEntries(Object.entries(MODE_PROFILES).map(([mode, profile]) => [
+    mode,
+    Object.freeze({
+      score: context => scoreFromProfile(profile, context),
+      getBehavior: () => ({ ...profile.behavior })
+    })
+  ]))
+);
 
 const DEFAULT_SCORES = Object.freeze({
   [MODES.DEV_MODE]: 0,
@@ -277,8 +395,10 @@ const defaultEngine = new ModeEngine();
 
 module.exports = {
   MODES,
+  MODE_PROFILES,
   MODE_HANDLERS,
   DEFAULT_SCORES,
+  FOCUS_ACTIVITY_MS,
   ModeEngine,
   createEngine: options => new ModeEngine(options),
   start: defaultEngine.start.bind(defaultEngine),

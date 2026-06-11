@@ -56,6 +56,10 @@ class WindowsController {
     return this.session.closeWindow(windowName);
   }
 
+  sendKeys(windowName, keys, options = {}) {
+    return this.session.sendKeys(windowName, keys, options);
+  }
+
   hibernate() {
     try {
       execSync('shutdown /h', { timeout: 3000 });

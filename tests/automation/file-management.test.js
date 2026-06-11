@@ -250,6 +250,32 @@ describe('File Management Automation', function() {
     assert.ok(result.data.results.includes(target));
   });
 
+  it('should match compact and spaced file search names', function() {
+    const nested = path.join(tempProfile, 'Documents', 'College');
+    fs.mkdirSync(nested, { recursive: true });
+    const target = path.join(nested, 'DLNLP Lab Manual.docx');
+    fs.writeFileSync(target, 'manual', 'utf8');
+
+    const compact = engine.files.search('dlnlp labmanual');
+    const spaced = engine.files.search('dlnlp lab manual.docx');
+
+    assert.equal(compact.success, true);
+    assert.ok(compact.data.results.includes(target));
+    assert.equal(compact.data.entries.find(entry => entry.path === target).type, 'file');
+    assert.ok(spaced.data.results.includes(target));
+  });
+
+  it('should fuzzy match unique folder open requests without exact folder names', function() {
+    const target = path.join(tempProfile, 'Documents', 'Projects', 'DLNLP Node Folder');
+    fs.mkdirSync(target, { recursive: true });
+
+    const result = engine.folders.open('dlnlpnode');
+
+    assert.equal(result.success, true);
+    assert.equal(result.data.path, target);
+    assert.equal(result.data.folderName, 'DLNLP Node Folder');
+  });
+
   it('should ask which same-name file to open across subfolders', function() {
     const firstDir = path.join(tempProfile, 'Documents', 'Jobs');
     const secondDir = path.join(tempProfile, 'Downloads', 'Backup');

@@ -20,6 +20,7 @@ describe('Automation Engine', function() {
     assert.ok(actions.includes('folder.move'));
     assert.ok(actions.includes('browser.open'));
     assert.ok(actions.includes('browser.search'));
+    assert.ok(actions.includes('browser.closeTab'));
     assert.ok(actions.includes('message.compose'));
     assert.ok(actions.includes('call.start'));
     assert.ok(actions.includes('timer.set'));
@@ -159,6 +160,7 @@ describe('Automation Engine', function() {
     assert.ok(actions.includes('system.battery'));
     assert.ok(actions.includes('system.disk'));
     assert.ok(actions.includes('system.processes'));
+    assert.ok(actions.includes('system.bluetooth'));
     assert.ok(actions.includes('system.time'));
     assert.ok(actions.includes('system.date'));
     assert.ok(actions.includes('system.calculate'));
@@ -194,27 +196,31 @@ describe('Automation Engine', function() {
   it('should execute visible app listing separately from process count', async function() {
     const SystemController = require('../../core/automation/system/index');
     const system = new SystemController({});
-    system.getRunningApps = () => ({
+    system.getRunningApps = (entities) => ({
       success: true,
       data: {
         target: 'apps',
         count: 2,
-        names: ['chrome', 'spotify']
+        names: ['chrome', 'spotify'],
+        queryApp: entities?.queryApp,
+        isOpen: entities?.queryApp === 'chrome'
       }
     });
 
     const engine = new AutomationEngine({});
     engine.system = system;
     engine._actionMap['system.processes'] = (entities) => entities?.target === 'apps'
-      ? engine.system.getRunningApps()
+      ? engine.system.getRunningApps(entities)
       : engine.system.getProcessCount();
 
-    const result = await engine.execute('system.processes', { target: 'apps' });
+    const result = await engine.execute('system.processes', { target: 'apps', queryApp: 'chrome' });
 
     assert.equal(result.success, true);
     assert.equal(result.data.target, 'apps');
     assert.equal(result.data.count, 2);
     assert.deepEqual(result.data.names, ['chrome', 'spotify']);
+    assert.equal(result.data.queryApp, 'chrome');
+    assert.equal(result.data.isOpen, true);
   });
 
   it('should parse human reminder day phrases', function() {

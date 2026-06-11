@@ -92,6 +92,7 @@ class AutomationEngine {
       'browser.open': (entities) => this.browser.open(entities.url),
       'browser.search': (entities) => this.browser.search(entities.query, entities),
       'browser.openFirstResult': (entities) => this.browser.openFirstResult(entities.query),
+      'browser.closeTab': (entities) => this._closeBrowserTab(entities),
       'media.play': (entities) => this.media.play(entities.mediaQuery, entities.mediaPlatform),
       'media.next': () => this.media.next(),
       'media.previous': () => this.media.previous(),
@@ -128,7 +129,7 @@ class AutomationEngine {
       'system.battery': () => this.system.getBatteryStatus(),
       'system.disk': () => this.system.getDiskSpace(),
       'system.processes': (entities) => entities?.target === 'apps'
-        ? this.system.getRunningApps()
+        ? this.system.getRunningApps(entities)
         : this.system.getProcessCount(),
       'system.bluetooth': (entities) => this.system.bluetooth(entities.enabled),
       'assistant.identity': () => ({ success: true, data: { name: 'JARVIS' } }),
@@ -156,6 +157,50 @@ class AutomationEngine {
       this.logger.error(`Action execution failed: ${actionId}`, err);
       return { success: false, error: err.message };
     }
+  }
+
+  _closeBrowserTab(entities = {}) {
+    const requested = Normalizer.normalizeText(entities.browserName || 'browser');
+    const browserMap = {
+      browser: {
+        windowName: 'browser',
+        preferredProcessNames: ['chrome', 'msedge', 'firefox'],
+        preferredTitleTokens: []
+      },
+      chrome: {
+        windowName: 'chrome',
+        preferredProcessNames: ['chrome'],
+        preferredTitleTokens: ['chrome']
+      },
+      edge: {
+        windowName: 'edge',
+        preferredProcessNames: ['msedge'],
+        preferredTitleTokens: ['edge']
+      },
+      firefox: {
+        windowName: 'firefox',
+        preferredProcessNames: ['firefox'],
+        preferredTitleTokens: ['firefox']
+      }
+    };
+    const target = browserMap[requested] || browserMap.browser;
+    const result = this.windows.sendKeys(target.windowName, '^w', {
+      preferredProcessNames: target.preferredProcessNames,
+      preferredTitleTokens: target.preferredTitleTokens
+    });
+
+    if (!result?.success) {
+      return result;
+    }
+
+    return {
+      success: true,
+      data: {
+        ...result.data,
+        action: 'closeTab',
+        browserName: requested
+      }
+    };
   }
 
   registerAction(actionId, handler) {

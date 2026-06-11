@@ -299,7 +299,7 @@ class SystemController {
     }
   }
 
-  getRunningApps() {
+  getRunningApps(options = {}) {
     try {
       const output = execFileSync('powershell.exe', [
         '-NoProfile',
@@ -324,6 +324,14 @@ class SystemController {
           id: Number(row.Id || 0)
         }))
         .filter(row => row.name && row.title);
+      const queryApp = String(options?.queryApp || '').trim().toLowerCase();
+      const matchedApps = queryApp
+        ? apps.filter(app => {
+            const name = app.name.toLowerCase();
+            const title = app.title.toLowerCase();
+            return name.includes(queryApp) || title.includes(queryApp) || queryApp.includes(name);
+          })
+        : [];
 
       return {
         success: true,
@@ -331,7 +339,10 @@ class SystemController {
           target: 'apps',
           count: apps.length,
           apps,
-          names: Array.from(new Set(apps.map(app => app.name))).slice(0, 8)
+          names: Array.from(new Set(apps.map(app => app.name))).slice(0, 8),
+          queryApp: queryApp || undefined,
+          isOpen: queryApp ? matchedApps.length > 0 : undefined,
+          matchedApps: queryApp ? matchedApps.slice(0, 8) : undefined
         }
       };
     } catch (err) {

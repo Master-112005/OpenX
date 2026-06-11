@@ -15,6 +15,8 @@ describe('Command Recovery Reranker', function() {
     assert.equal(reranker.recover('open crow').correctedText, 'open chrome');
     assert.equal(reranker.recover('start spotfy').correctedText, 'start spotify');
     assert.equal(reranker.recover('open v s code').correctedText, 'open vscode');
+    assert.equal(reranker.recover('turn of blue tooth').correctedText, 'turn off bluetooth');
+    assert.equal(reranker.recover('check stroage space').correctedText, 'check storage space');
   });
 
   it('should leave low-confidence text unchanged', function() {

@@ -279,9 +279,18 @@ const RESPONSE_BUILDERS = {
     },
     'file.search': context => {
       const count = valueFromContext(context, 'count', context.result?.data?.count || 0);
-      return count === 0
-        ? `I couldn't find any matching files.`
-        : `I've found ${count} matching ${count === 1 ? 'file' : 'files'}.`;
+      const entries = valueFromContext(context, 'entries', context.result?.data?.entries || []);
+      if (count === 0) {
+        return `I couldn't find any matching files or folders.`;
+      }
+
+      const names = Array.isArray(entries)
+        ? entries.slice(0, 5).map(entry => `${entry.name}${entry.type === 'folder' ? ' folder' : ''}`).join(', ')
+        : '';
+      const label = count === 1 ? 'item' : 'items';
+      return names
+        ? `I found ${count} matching ${label}: ${names}.`
+        : `I found ${count} matching ${label}.`;
     },
     'file.list': context => {
       const entries = valueFromContext(context, 'entries', []);
@@ -372,6 +381,14 @@ const RESPONSE_BUILDERS = {
         return `Opening the first result: ${title}.`;
       }
       return url ? `Opening the first search result: ${url}.` : 'Opening the first search result.';
+    },
+    'browser.closeTab': context => {
+      const win = valueFromContext(context, 'matchedWindow', 'the browser');
+      return chooseVariant(`browser.closeTab:${win}`, [
+        `Closed the current tab in ${win}.`,
+        `Closed that browser tab.`,
+        `The current browser tab is closed.`
+      ]);
     },
     'system.time': context => {
       const time = valueFromContext(context, 'time');
@@ -511,6 +528,10 @@ const RESPONSE_BUILDERS = {
     },
     'system.battery': context => {
       const bat = valueFromContext(context, 'battery');
+      if (bat === 'N/A' || bat === undefined || bat === null || bat === '') {
+        const message = valueFromContext(context, 'message');
+        return message || 'No battery was detected.';
+      }
       return chooseVariant(`sys.battery:${bat}`, [
         `Battery is currently at ${bat}%.`,
         `Your battery level is ${bat}%.`,
@@ -531,7 +552,14 @@ const RESPONSE_BUILDERS = {
       const count = valueFromContext(context, 'count');
       const target = valueFromContext(context, 'target', '');
       const names = valueFromContext(context, 'names', []);
+      const queryApp = valueFromContext(context, 'queryApp', '');
+      const isOpen = valueFromContext(context, 'isOpen', null);
       if (target === 'apps') {
+        if (queryApp) {
+          return isOpen
+            ? `${queryApp} is open.`
+            : `I do not see ${queryApp} open right now.`;
+        }
         if (!count) {
           return 'I do not see any visible apps open right now.';
         }

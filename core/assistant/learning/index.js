@@ -5,6 +5,7 @@ const { Normalizer } = require('../../shared/index');
 
 const MAX_EVENTS = 200;
 const MAX_REWRITES = 100;
+const MAX_PROMPTS = 100;
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -113,6 +114,62 @@ class ActiveLearningStore {
     return record;
   }
 
+  rememberUserFact(kind, value, metadata = {}) {
+    if (!this.enabled || !kind) {
+      return null;
+    }
+
+    const normalizedKind = normalizeCommand(kind).replace(/\s+/g, '.');
+    const cleanValue = cleanCommand(value);
+    if (!normalizedKind || !cleanValue) {
+      return null;
+    }
+
+    const now = new Date().toISOString();
+    const existing = this.data.userFacts[normalizedKind];
+    const record = {
+      value: cleanValue,
+      source: metadata.source || 'user',
+      confidence: Number(metadata.confidence ?? 1),
+      createdAt: existing?.createdAt || now,
+      updatedAt: now
+    };
+    this.data.userFacts[normalizedKind] = record;
+    this._save();
+    return record;
+  }
+
+  getUserFact(kind) {
+    if (!this.enabled || !kind) {
+      return null;
+    }
+
+    const normalizedKind = normalizeCommand(kind).replace(/\s+/g, '.');
+    const record = this.data.userFacts[normalizedKind];
+    return record ? { ...record, kind: normalizedKind } : null;
+  }
+
+  answerPersonalQuestion(input) {
+    const normalized = normalizeCommand(input);
+    if (!normalized) {
+      return null;
+    }
+
+    if (/^(?:what|who)\s+(?:is|are)\s+my\s+name\b|^do\s+you\s+(?:know|remember)\s+my\s+name\b/.test(normalized)) {
+      const name = this.getUserFact('name');
+      return {
+        type: 'user-fact',
+        known: Boolean(name?.value),
+        fact: 'name',
+        response: name?.value
+          ? `Your name is ${name.value}.`
+          : 'I do not know your name yet. You can say, "remember my name is Rakesh."'
+      };
+    }
+
+    return null;
+  }
+
   adaptEntities(intentId, entities = {}) {
     if (!this.enabled) {
       return entities;
@@ -167,6 +224,80 @@ class ActiveLearningStore {
     return record;
   }
 
+  buildFeedbackKey(entry = {}) {
+    const intent = String(entry.intent || '').trim();
+    const entities = isPlainObject(entry.entities) ? entry.entities : {};
+    const target = [
+      entities.appName,
+      entities.folderName,
+      entities.filename,
+      entities.fileName,
+      entities.windowName,
+      entities.query,
+      entities.mediaQuery,
+      entities.contactName,
+      entities.platform,
+      entities.target,
+      entities.queryApp
+    ].map(value => normalizeCommand(value)).find(Boolean);
+    const routed = normalizeCommand(entry.routedInput || entry.input || '');
+    return [intent, target || routed].filter(Boolean).join(':');
+  }
+
+  shouldAskForFeedback(entry = {}) {
+    if (!this.enabled || !this.askForFeedback) {
+      return false;
+    }
+
+    const key = this.buildFeedbackKey(entry);
+    if (!key) {
+      return false;
+    }
+
+    const confidence = Number(entry.confidence ?? 1);
+    const recovered = Boolean(entry.recovered || entry.learnedCorrection || entry.contextualRewrite);
+    const previousPrompt = this.data.feedbackPrompts.find(prompt => prompt.key === key);
+    if (!previousPrompt) {
+      return true;
+    }
+
+    return recovered || confidence < 0.82;
+  }
+
+  recordFeedbackPrompt(entry = {}) {
+    if (!this.enabled) {
+      return null;
+    }
+
+    const key = this.buildFeedbackKey(entry);
+    if (!key) {
+      return null;
+    }
+
+    const now = new Date().toISOString();
+    const existing = this.data.feedbackPrompts.find(prompt => prompt.key === key);
+    const record = {
+      key,
+      input: cleanCommand(entry.input),
+      routedInput: cleanCommand(entry.routedInput || entry.input),
+      intent: entry.intent || null,
+      entities: isPlainObject(entry.entities) ? entry.entities : {},
+      confidence: Number(entry.confidence ?? 1),
+      promptedAt: now,
+      count: existing ? Number(existing.count || 0) + 1 : 1
+    };
+
+    if (existing) {
+      Object.assign(existing, record);
+    } else {
+      this.data.feedbackPrompts.unshift(record);
+      this.data.feedbackPrompts = this.data.feedbackPrompts.slice(0, MAX_PROMPTS);
+    }
+
+    this._save();
+    return record;
+  }
+
   learnFromText(input) {
     const text = cleanCommand(input);
     const normalized = normalizeCommand(text);
@@ -184,6 +315,22 @@ class ActiveLearningStore {
         return {
           type: 'correction',
           response: `I learned that when you say "${rule.input}", I should do "${rule.correction}".`
+        };
+      }
+    }
+
+    const userNameMatch = text.match(/^(?:remember\s+(?:that\s+)?)?(?:my\s+name\s+is|call\s+me)\s+(.+)$/i);
+    if (userNameMatch?.[1]) {
+      const name = userNameMatch[1]
+        .replace(/[.!?]+$/g, '')
+        .trim();
+      const fact = this.rememberUserFact('name', name, {
+        source: /^remember\b/i.test(text) ? 'explicit-memory' : 'user-stated-fact'
+      });
+      if (fact) {
+        return {
+          type: 'user-fact',
+          response: `I will remember that your name is ${fact.value}.`
         };
       }
     }
@@ -246,9 +393,11 @@ class ActiveLearningStore {
     return {
       version: 1,
       preferences: isPlainObject(source.preferences) ? source.preferences : {},
+      userFacts: isPlainObject(source.userFacts) ? source.userFacts : {},
       commandRewrites: Array.isArray(source.commandRewrites) ? source.commandRewrites.slice(0, MAX_REWRITES) : [],
       feedback: Array.isArray(source.feedback) ? source.feedback.slice(0, MAX_EVENTS) : [],
-      mistakes: Array.isArray(source.mistakes) ? source.mistakes.slice(0, MAX_EVENTS) : []
+      mistakes: Array.isArray(source.mistakes) ? source.mistakes.slice(0, MAX_EVENTS) : [],
+      feedbackPrompts: Array.isArray(source.feedbackPrompts) ? source.feedbackPrompts.slice(0, MAX_PROMPTS) : []
     };
   }
 }

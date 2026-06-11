@@ -1,4 +1,7 @@
 const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 describe('Assistant Confirmation Flow', function() {
   let Assistant;
@@ -624,5 +627,201 @@ describe('Assistant Confirmation Flow', function() {
     assert.equal(fixed.learned, true);
     assert.deepEqual(routedInputs, ['can please close that', 'close instagram']);
     assert.deepEqual(learnedRules, [{ input: 'can please close that', correction: 'close instagram' }]);
+  });
+
+  it('should not ask for feedback repeatedly after the same confident action', async function() {
+    const ActiveLearningStore = require('../../core/assistant/learning/index');
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-learning-'));
+    const learning = new ActiveLearningStore({
+      app: { dataDir: tempDir },
+      activeLearning: { enabled: true, askForFeedback: true }
+    });
+    const router = {
+      process: async () => ({
+        commandId: 'cmd-repeat-feedback',
+        success: true,
+        intent: 'app.open',
+        confidence: 1,
+        entities: { appName: 'chrome' },
+        response: 'Opened chrome.'
+      })
+    };
+    const assistant = new Assistant({}, {
+      router,
+      learning,
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    const first = await assistant.processCommand('open chrome');
+    await assistant.processCommand('yes');
+    const second = await assistant.processCommand('open chrome');
+
+    assert.match(first.response, /Did that work correctly/i);
+    assert.doesNotMatch(second.response, /Did that work correctly/i);
+  });
+
+  it('should handle positive feedback attached to the next command', async function() {
+    const routedInputs = [];
+    const router = {
+      process: async input => {
+        routedInputs.push(input);
+        return {
+          commandId: `cmd-combined-${routedInputs.length}`,
+          success: true,
+          intent: 'app.open',
+          confidence: 1,
+          entities: { appName: 'chrome' },
+          response: 'Opened chrome.'
+        };
+      }
+    };
+    const assistant = new Assistant({}, {
+      router,
+      learning: {
+        enabled: true,
+        askForFeedback: true,
+        findCorrection: () => null,
+        learnFromText: () => null,
+        recordFeedback: () => {},
+        shouldAskForFeedback: () => true,
+        recordFeedbackPrompt: () => {}
+      },
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    await assistant.processCommand('open chrome');
+    const result = await assistant.processCommand('yesopen chrome');
+
+    assert.equal(result.success, true);
+    assert.deepEqual(routedInputs, ['open chrome', 'open chrome']);
+  });
+
+  it('should only remember a correction after the corrected command succeeds', async function() {
+    const learnedRules = [];
+    const router = {
+      process: async input => ({
+        commandId: `cmd-${input}`,
+        success: input !== 'open missing app',
+        intent: 'app.open',
+        confidence: 1,
+        entities: { appName: input.replace(/^open\s+/, '') },
+        response: input === 'open missing app' ? 'Could not open missing app.' : 'Opened app.'
+      })
+    };
+    const assistant = new Assistant({}, {
+      router,
+      learning: {
+        enabled: true,
+        askForFeedback: true,
+        findCorrection: () => null,
+        learnFromText: () => null,
+        rememberCorrection: (input, correction) => {
+          learnedRules.push({ input, correction });
+          return { input, correction };
+        },
+        recordFeedback: () => {},
+        shouldAskForFeedback: () => true,
+        recordFeedbackPrompt: () => {}
+      },
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    await assistant.processCommand('open photos');
+    const result = await assistant.processCommand('no, open missing app');
+
+    assert.equal(result.success, false);
+    assert.equal(result.learned, false);
+    assert.deepEqual(learnedRules, []);
+  });
+
+  it('should turn plain negative outcome reports into active learning recovery', async function() {
+    const feedback = [];
+    const learnedRules = [];
+    const routedInputs = [];
+    const router = {
+      process: async input => {
+        routedInputs.push(input);
+        const isCloseTab = /close\s+(?:the\s+)?(?:empty\s+)?tab/i.test(input);
+        return {
+          commandId: `cmd-${routedInputs.length}`,
+          success: true,
+          intent: isCloseTab ? 'browser.closeTab' : 'browser.open',
+          confidence: 1,
+          entities: isCloseTab ? { browserName: 'chrome' } : { url: 'about:blank' },
+          response: isCloseTab ? 'Closed tab.' : 'Opened blank tab.'
+        };
+      }
+    };
+    const assistant = new Assistant({}, {
+      router,
+      learning: {
+        enabled: true,
+        askForFeedback: false,
+        findCorrection: () => null,
+        learnFromText: () => null,
+        recordFeedback: entry => feedback.push(entry),
+        rememberCorrection: (input, correction) => {
+          learnedRules.push({ input, correction });
+          return { input, correction };
+        }
+      },
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    await assistant.processCommand('open a new tab in chrome');
+    const recovery = await assistant.processCommand('you did wrong');
+    const corrected = await assistant.processCommand('close the empty tab in chrome');
+
+    assert.equal(recovery.success, false);
+    assert.match(recovery.response, /What should I do instead next time/i);
+    assert.equal(corrected.success, true);
+    assert.deepEqual(learnedRules, [{
+      input: 'open a new tab in chrome',
+      correction: 'close empty tab in chrome'
+    }]);
+    assert.equal(feedback.some(entry => entry.rating === 'negative'), true);
+  });
+
+  it('should answer remembered personal facts without web search', async function() {
+    const ActiveLearningStore = require('../../core/assistant/learning/index');
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-learning-'));
+    const learning = new ActiveLearningStore({
+      app: { dataDir: tempDir },
+      activeLearning: { enabled: true, askForFeedback: false }
+    });
+    const routedInputs = [];
+    const router = {
+      process: async input => {
+        routedInputs.push(input);
+        return {
+          commandId: 'cmd-search',
+          success: true,
+          intent: 'browser.search',
+          entities: { query: input },
+          response: 'Searched web.'
+        };
+      }
+    };
+    const assistant = new Assistant({}, {
+      router,
+      learning,
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    const before = await assistant.processCommand('what is my name');
+    const remember = await assistant.processCommand('remember my name is rakes');
+    const after = await assistant.processCommand('what is my name');
+
+    assert.equal(before.intent, 'assistant.memory');
+    assert.equal(before.success, false);
+    assert.match(before.response, /do not know your name/i);
+    assert.equal(remember.learned, true);
+    assert.match(after.response, /your name is rakes/i);
+    assert.deepEqual(routedInputs, []);
   });
 });

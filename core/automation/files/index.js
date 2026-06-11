@@ -20,6 +20,38 @@ const SEARCH_ROOTS = () => [
   getHomeDirectory()
 ].filter(Boolean);
 
+const EXCLUDED_SEARCH_DIRECTORIES = new Set([
+  '$recycle.bin',
+  '.git',
+  '.hg',
+  '.svn',
+  'appdata',
+  'application data',
+  'cache',
+  'cookies',
+  'local settings',
+  'node_modules',
+  'program files',
+  'program files (x86)',
+  'programdata',
+  'system volume information',
+  'windows'
+]);
+
+function uniquePaths(paths) {
+  const seen = new Set();
+  const result = [];
+  for (const candidate of paths || []) {
+    if (!candidate) continue;
+    const resolved = path.resolve(candidate);
+    const key = resolved.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(resolved);
+  }
+  return result;
+}
+
 class FileController {
   constructor(config) {
     this.logger = new Logger({ level: config?.logging?.level || 'info' });
@@ -253,8 +285,9 @@ class FileController {
 
     const cleanQuery = this._cleanSearchQuery(query);
     const results = [];
-    const searchDirs = SEARCH_ROOTS();
+    const searchDirs = uniquePaths(SEARCH_ROOTS());
     const lowerQuery = cleanQuery.toLowerCase();
+    const visitedDirectories = new Set();
 
     for (const dir of searchDirs) {
       if (!dir || !fs.existsSync(dir)) continue;
@@ -262,18 +295,27 @@ class FileController {
         this._searchDirectoryRecursive(dir, lowerQuery, results, {
           maxDepth: 8,
           maxDirectories: 8000,
-          maxResults: 40
+          maxResults: 40,
+          includeFolders: true,
+          visitedDirectories
         });
       } catch (err) {
         continue;
       }
     }
 
+    const uniqueResults = Array.from(new Set(results)).slice(0, 20);
+
     return {
       success: true,
       data: {
-        results: Array.from(new Set(results)).slice(0, 20),
-        count: results.length,
+        results: uniqueResults,
+        entries: uniqueResults.map(resultPath => ({
+          name: path.basename(resultPath),
+          type: fs.existsSync(resultPath) && fs.statSync(resultPath).isDirectory() ? 'folder' : 'file',
+          path: resultPath
+        })),
+        count: uniqueResults.length,
         query: cleanQuery
       }
     };
@@ -436,13 +478,15 @@ class FileController {
     }
 
     const fuzzyMatches = [];
-    for (const root of SEARCH_ROOTS()) {
+    const visitedDirectories = new Set();
+    for (const root of uniquePaths(SEARCH_ROOTS())) {
       this._searchDirectoryRecursive(root, path.basename(safeName).toLowerCase(), fuzzyMatches, {
         maxDepth: 8,
         maxDirectories: 8000,
         maxResults: 12,
         filesOnly: true,
-        fuzzyName: safeName
+        fuzzyName: safeName,
+        visitedDirectories
       });
     }
     return Array.from(new Set(fuzzyMatches)).slice(0, 12);
@@ -454,12 +498,19 @@ class FileController {
     }
 
     const queue = [{ directory: root, depth: 0 }];
+    const visitedDirectories = options.visitedDirectories || new Set();
     const maxDepth = options.maxDepth ?? 6;
     const maxDirectories = options.maxDirectories ?? 1500;
     let visited = 0;
 
     while (queue.length > 0 && visited < maxDirectories && results.length < (options.maxResults || 40)) {
       const { directory, depth } = queue.shift();
+      const resolvedDirectory = path.resolve(directory);
+      const directoryKey = resolvedDirectory.toLowerCase();
+      if (visitedDirectories.has(directoryKey)) {
+        continue;
+      }
+      visitedDirectories.add(directoryKey);
       visited += 1;
 
       let entries = [];
@@ -471,23 +522,68 @@ class FileController {
 
       for (const entry of entries) {
         const entryPath = path.join(directory, entry.name);
+        const isDirectory = entry.isDirectory();
         const entryName = entry.name.toLowerCase();
-        const isMatch = options.fuzzyName
+        const isMatch = options.fuzzyName && entry.isFile()
           ? this._fileNameLooksLike(entry.name, options.fuzzyName)
-          : entryName.includes(lowerQuery);
+          : this._entryNameMatchesQuery(entry.name, lowerQuery);
 
-        if (isMatch && (!options.filesOnly || entry.isFile())) {
+        if (isMatch && (!options.filesOnly || entry.isFile()) && (options.includeFolders || !isDirectory)) {
           results.push(entryPath);
           if (results.length >= (options.maxResults || 40)) {
             break;
           }
         }
 
-        if (depth < maxDepth && entry.isDirectory() && !entry.name.startsWith('.')) {
+        if (depth < maxDepth && isDirectory && this._shouldDescendIntoDirectory(entry.name)) {
           queue.push({ directory: entryPath, depth: depth + 1 });
         }
       }
     }
+  }
+
+  _shouldDescendIntoDirectory(name) {
+    const normalized = String(name || '').trim().toLowerCase();
+    return Boolean(normalized) &&
+      !normalized.startsWith('.') &&
+      !EXCLUDED_SEARCH_DIRECTORIES.has(normalized);
+  }
+
+  _entryNameMatchesQuery(entryName, lowerQuery) {
+    const query = String(lowerQuery || '').trim().toLowerCase();
+    const name = String(entryName || '').trim().toLowerCase();
+    if (!query || !name) {
+      return false;
+    }
+
+    if (name.includes(query)) {
+      return true;
+    }
+
+    const normalizedName = Normalizer.normalizeText(name);
+    const normalizedQuery = Normalizer.normalizeText(query);
+    const compactName = normalizedName.replace(/\s+/g, '');
+    const compactQuery = normalizedQuery.replace(/\s+/g, '');
+    if (compactQuery.length >= 4 && compactName.includes(compactQuery)) {
+      return true;
+    }
+
+    const queryTokens = normalizedQuery.split(/\s+/).filter(token => token.length >= 2);
+    if (queryTokens.length === 0) {
+      return false;
+    }
+
+    const matchedTokens = queryTokens.filter(token => (
+      normalizedName.includes(token) ||
+      compactName.includes(token) ||
+      Normalizer.findClosestOption(token, normalizedName.split(/\s+/), {
+        minSimilarity: 0.74,
+        maxDistance: token.length >= 8 ? 3 : 2
+      })
+    ));
+
+    return matchedTokens.length === queryTokens.length ||
+      (queryTokens.length >= 3 && matchedTokens.length >= queryTokens.length - 1);
   }
 
   _fileNameLooksLike(entryName, requestedName) {

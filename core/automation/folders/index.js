@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const Logger = require('../../shared/index').Logger;
+const Normalizer = require('../../shared/index').Normalizer;
 const Validator = require('../../shared/index').Validator;
 const {
   findEntriesByName,
@@ -13,6 +14,42 @@ const {
   splitNameAndLocation
 } = require('../common/path-utils');
 const { launchTarget } = require('../common/launcher');
+
+const EXCLUDED_SEARCH_DIRECTORIES = new Set([
+  '$recycle.bin',
+  '.git',
+  '.hg',
+  '.svn',
+  'appdata',
+  'application data',
+  'cache',
+  'cookies',
+  'local settings',
+  'node_modules',
+  'program files',
+  'program files (x86)',
+  'programdata',
+  'system volume information',
+  'windows'
+]);
+
+function uniquePaths(paths) {
+  const seen = new Set();
+  const result = [];
+  for (const candidate of paths || []) {
+    if (!candidate) continue;
+    const resolved = path.resolve(candidate);
+    const key = resolved.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(resolved);
+  }
+  return result;
+}
+
+function searchRoots() {
+  return uniquePaths([process.cwd(), getHomeDirectory(), ...Object.values(getSpecialFolders())]);
+}
 
 class FolderController {
   constructor(config) {
@@ -51,7 +88,7 @@ class FolderController {
     }
 
     return findEntryByName(safeName, {
-      roots: [process.cwd(), getHomeDirectory(), ...Object.values(getSpecialFolders())],
+      roots: searchRoots(),
       type: 'directory'
     });
   }
@@ -172,6 +209,12 @@ class FolderController {
         };
       }
 
+      if (matches.length === 1) {
+        const matchedPath = matches[0];
+        launchTarget(matchedPath);
+        return { success: true, data: { path: matchedPath, folderName: path.basename(matchedPath) } };
+      }
+
       const fullPath = this._resolveFolderPath(folderName);
       if (!fullPath) {
         return { success: false, error: 'Folder not found' };
@@ -208,13 +251,118 @@ class FolderController {
     }
 
     const safeName = Validator.sanitizePath(requestedName);
-    return findEntriesByName(safeName, {
-      roots: [process.cwd(), getHomeDirectory(), ...Object.values(getSpecialFolders())],
+    const exactMatches = findEntriesByName(safeName, {
+      roots: searchRoots(),
       type: 'directory',
       maxDepth: 8,
       maxDirectories: 8000,
       maxMatches: 12
     }) || [];
+    if (exactMatches.length > 0) {
+      return exactMatches;
+    }
+
+    return this._findFuzzyFolderMatches(safeName);
+  }
+
+  _findFuzzyFolderMatches(folderName) {
+    const results = [];
+    const roots = searchRoots();
+    const lowerQuery = String(folderName || '').trim().toLowerCase();
+    const visitedDirectories = new Set();
+
+    for (const root of roots) {
+      this._searchFoldersRecursive(root, lowerQuery, results, {
+        maxDepth: 8,
+        maxDirectories: 8000,
+        maxResults: 12,
+        visitedDirectories
+      });
+      if (results.length >= 12) {
+        break;
+      }
+    }
+
+    return uniquePaths(results).slice(0, 12);
+  }
+
+  _searchFoldersRecursive(root, lowerQuery, results, options = {}) {
+    if (!root || !fs.existsSync(root) || results.length >= (options.maxResults || 12)) {
+      return;
+    }
+
+    const queue = [{ directory: root, depth: 0 }];
+    const visitedDirectories = options.visitedDirectories || new Set();
+    const maxDepth = options.maxDepth ?? 6;
+    const maxDirectories = options.maxDirectories ?? 1500;
+    let visited = 0;
+
+    while (queue.length > 0 && visited < maxDirectories && results.length < (options.maxResults || 12)) {
+      const { directory, depth } = queue.shift();
+      const directoryKey = path.resolve(directory).toLowerCase();
+      if (visitedDirectories.has(directoryKey)) {
+        continue;
+      }
+      visitedDirectories.add(directoryKey);
+      visited += 1;
+
+      let entries = [];
+      try {
+        entries = fs.readdirSync(directory, { withFileTypes: true });
+      } catch (err) {
+        continue;
+      }
+
+      for (const entry of entries) {
+        if (!entry.isDirectory()) {
+          continue;
+        }
+
+        const entryPath = path.join(directory, entry.name);
+        if (this._folderNameMatchesQuery(entry.name, lowerQuery)) {
+          results.push(entryPath);
+          if (results.length >= (options.maxResults || 12)) {
+            break;
+          }
+        }
+
+        if (depth < maxDepth && this._shouldDescendIntoDirectory(entry.name)) {
+          queue.push({ directory: entryPath, depth: depth + 1 });
+        }
+      }
+    }
+  }
+
+  _shouldDescendIntoDirectory(name) {
+    const normalized = String(name || '').trim().toLowerCase();
+    return Boolean(normalized) &&
+      !normalized.startsWith('.') &&
+      !EXCLUDED_SEARCH_DIRECTORIES.has(normalized);
+  }
+
+  _folderNameMatchesQuery(entryName, lowerQuery) {
+    const query = String(lowerQuery || '').trim().toLowerCase();
+    const name = String(entryName || '').trim().toLowerCase();
+    if (!query || !name) {
+      return false;
+    }
+
+    if (name === query || name.includes(query)) {
+      return true;
+    }
+
+    const normalizedName = name.replace(/[_-]+/g, ' ');
+    const normalizedQuery = query.replace(/[_-]+/g, ' ');
+    const compactName = normalizedName.replace(/\s+/g, '');
+    const compactQuery = normalizedQuery.replace(/\s+/g, '');
+    if (compactQuery.length >= 4 && compactName.includes(compactQuery)) {
+      return true;
+    }
+
+    return Boolean(normalizedQuery.length >= 4 && Normalizer.findClosestOption(normalizedQuery, [normalizedName], {
+      minSimilarity: 0.72,
+      maxDistance: normalizedQuery.length >= 8 ? 3 : 2
+    }));
   }
 
   _buildAmbiguousFolderMessage(folderName, choices) {

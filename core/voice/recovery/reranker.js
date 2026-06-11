@@ -34,7 +34,28 @@ const DEFAULT_TERMS = [
   'increase volume',
   'decrease volume',
   'mute volume',
-  'unmute volume'
+  'unmute volume',
+  'turn on bluetooth',
+  'turn off bluetooth',
+  'bluetooth status',
+  'is bluetooth on',
+  'system status',
+  'computer status',
+  'cpu usage',
+  'processor usage',
+  'memory usage',
+  'ram usage',
+  'battery status',
+  'battery level',
+  'disk space',
+  'storage space',
+  'what apps are running',
+  'what processes are running',
+  'is chrome open',
+  'lock computer',
+  'restart computer',
+  'shut down computer',
+  'put computer to sleep'
 ];
 
 const COMMON_TOKEN_CORRECTIONS = new Map([
@@ -45,13 +66,31 @@ const COMMON_TOKEN_CORRECTIONS = new Map([
   ['spotfy', 'spotify'],
   ['spotifi', 'spotify'],
   ['yotube', 'youtube'],
-  ['youtubr', 'youtube']
+  ['youtubr', 'youtube'],
+  ['blutooth', 'bluetooth'],
+  ['blu tooth', 'bluetooth'],
+  ['blue tooth', 'bluetooth'],
+  ['blootooth', 'bluetooth'],
+  ['memry', 'memory'],
+  ['memeory', 'memory'],
+  ['stroage', 'storage'],
+  ['battrery', 'battery'],
+  ['battry', 'battery'],
+  ['proccess', 'process'],
+  ['proccesses', 'processes'],
+  ['proceses', 'processes'],
+  ['restert', 'restart'],
+  ['restrt', 'restart'],
+  ['shutdon', 'shutdown']
 ]);
 
 const COMMON_PHRASE_CORRECTIONS = [
   [/\bv\s+s\s+code\b/g, 'vscode'],
   [/\bvs\s+code\b/g, 'vscode'],
-  [/\byou\s+tube\b/g, 'youtube']
+  [/\byou\s+tube\b/g, 'youtube'],
+  [/\bblue\s+tooth\b/g, 'bluetooth'],
+  [/\bblu\s+tooth\b/g, 'bluetooth'],
+  [/\bturn\s+of\s+bluetooth\b/g, 'turn off bluetooth']
 ];
 
 class CommandRecoveryReranker {

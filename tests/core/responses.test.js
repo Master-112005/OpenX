@@ -138,6 +138,19 @@ describe('Response Generator', function() {
     assert.ok(!result.toLowerCase().includes('active processes'));
   });
 
+  it('should answer direct visible app status questions', function() {
+    const gen = new ResponseGenerator();
+    const open = gen.generate('success', 'system.processes', {
+      result: { data: { target: 'apps', queryApp: 'chrome', isOpen: true } }
+    });
+    const closed = gen.generate('success', 'system.processes', {
+      result: { data: { target: 'apps', queryApp: 'instagram', isOpen: false } }
+    });
+
+    assert.ok(open.includes('chrome is open'));
+    assert.ok(closed.includes('do not see instagram open'));
+  });
+
   it('should report failed configured mode commands', function() {
     const gen = new ResponseGenerator();
     const result = gen.generate('success', 'mode.start', {

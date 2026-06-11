@@ -58,4 +58,37 @@ describe('Active Learning Store', function() {
     assert.equal(search.openInBrowser, true);
     assert.equal(media.mediaPlatform, 'spotify');
   });
+
+  it('should suppress repeated high-confidence feedback prompts for the same action', function() {
+    const { store } = createStore();
+    const entry = {
+      input: 'open chrome',
+      routedInput: 'open chrome',
+      intent: 'app.open',
+      entities: { appName: 'chrome' },
+      confidence: 1
+    };
+
+    assert.equal(store.shouldAskForFeedback(entry), true);
+    store.recordFeedbackPrompt(entry);
+    assert.equal(store.shouldAskForFeedback(entry), false);
+    assert.equal(store.shouldAskForFeedback({ ...entry, confidence: 0.6 }), true);
+  });
+
+  it('should remember and answer explicit user identity facts', function() {
+    const { tempDir, store } = createStore();
+
+    const unknown = store.answerPersonalQuestion('what is my name');
+    const learned = store.learnFromText('remember my name is rakes');
+    const reloaded = new ActiveLearningStore({
+      app: { dataDir: tempDir },
+      activeLearning: { enabled: true }
+    });
+    const answer = reloaded.answerPersonalQuestion('what is my name');
+
+    assert.equal(unknown.known, false);
+    assert.equal(learned.type, 'user-fact');
+    assert.equal(answer.known, true);
+    assert.equal(answer.response, 'Your name is rakes.');
+  });
 });

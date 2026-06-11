@@ -92,16 +92,16 @@ class ActionRouter {
       this._resolveMediaUnderstandingIntent(rawCommandText, source) ||
       this._resolveExplicitMediaIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitModeIntent(rawCommandText, preparedInput) ||
+      this._resolveLocalInfoIntent(rawCommandText, preparedInput) ||
+      this._resolveBrowserTabIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitAppIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitWindowIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitCommunicationIntent(rawCommandText, preparedInput) ||
       this._resolveBrowserFollowupIntent(rawCommandText, preparedInput) ||
-      this._resolveBrowserTabIntent(rawCommandText, preparedInput) ||
       this._resolveKnownWebOpenIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitOpenIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitAppOpenIntent(rawCommandText, preparedInput) ||
       this._resolveCalculationIntent(rawCommandText, preparedInput) ||
-      this._resolveLocalInfoIntent(rawCommandText, preparedInput) ||
       this._resolveLocalFileListIntent(rawCommandText, preparedInput) ||
       this._resolveAssistantConversationIntent(rawCommandText, preparedInput) ||
       this._resolveLocalFileSearchIntent(rawCommandText, preparedInput) ||
@@ -182,6 +182,12 @@ class ActionRouter {
     }
 
     if (this._looksLikeSingleMediaPlatformRequest(text)) {
+      return null;
+    }
+
+    const preparedWholeText = this.nlp.prepare(text);
+    const wholeLocalInfo = this._resolveLocalInfoIntent(text, preparedWholeText);
+    if (wholeLocalInfo?.intent?.id === 'system.processes' && wholeLocalInfo.entities?.queryApp) {
       return null;
     }
 
@@ -476,6 +482,10 @@ class ActionRouter {
       return false;
     }
 
+    if (this._resolveLocalInfoIntent(rawText, preparedInput)) {
+      return false;
+    }
+
     const repaired = String(preparedInput?.repairedCommandText || '').trim();
     const corrected = String(preparedInput?.correctedText || rawText || '').trim();
     if (!repaired || repaired === corrected) {
@@ -700,7 +710,8 @@ class ActionRouter {
       { intentId: 'file.search', pattern: /^(?:locate|find|search)\b/ }
     ];
 
-    if (!/\b(?:file|location|path)\b|[^\s]+\.[A-Za-z0-9]{1,10}\b/i.test(`${input} ${rawText || ''}`)) {
+    const canBeImplicitLocate = /^(?:locate)\b/.test(input) && this._extractLocalFileSearchQuery(rawText || input, input);
+    if (!canBeImplicitLocate && !/\b(?:file|location|path)\b|[^\s]+\.[A-Za-z0-9]{1,10}\b/i.test(`${input} ${rawText || ''}`)) {
       return null;
     }
 
@@ -720,6 +731,9 @@ class ActionRouter {
       }
       if (correctedEntities.path && correctedEntities.path !== rawEntities.path) {
         entities.path = correctedEntities.path;
+      }
+      if (config.intentId === 'file.search') {
+        entities.query = this._extractLocalFileSearchQuery(rawText, input) || entities.query;
       }
       const missing = this._checkRequiredEntities(intent, entities);
       if (missing.length === 0) {
@@ -1042,18 +1056,35 @@ class ActionRouter {
 
   _resolveBrowserTabIntent(rawText, preparedInput) {
     const input = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
-    if (!/^(?:open\s+)?(?:a\s+)?new\s+tab(?:\s+(?:in|on)\s+(?:chrome|browser|edge|firefox))?$/.test(input)) {
+    const rawInput = String(rawText || '').trim().toLowerCase();
+    const browserMatch = (input.match(/\b(?:in|on)\s+(chrome|browser|edge|firefox)\b/) ||
+      rawInput.match(/\b(?:in|on)\s+(chrome|browser|edge|firefox)\b/));
+
+    if (/^(?:open\s+)?(?:a\s+)?new\s+tab(?:\s+(?:in|on)\s+(?:chrome|browser|edge|firefox))?$/.test(input)) {
+      const intent = this.intentRegistry.get('browser.open');
+      return intent
+        ? { intent, confidence: 1, entities: { url: 'about:blank' } }
+        : null;
+    }
+
+    if (!/^(?:close|remove|shut)\s+(?:(?:the\s+)?(?:current|active|empty|blank)\s+)?tab(?:\s+(?:in|on)\s+(?:chrome|browser|edge|firefox))?$/.test(input)) {
       return null;
     }
 
-    const intent = this.intentRegistry.get('browser.open');
+    const intent = this.intentRegistry.get('browser.closeTab');
     return intent
-      ? { intent, confidence: 1, entities: { url: 'about:blank' } }
+      ? {
+          intent,
+          confidence: 1,
+          entities: {
+            browserName: browserMatch?.[1] || 'browser'
+          }
+        }
       : null;
   }
 
   _resolveSystemSettingsIntent(rawText, preparedInput) {
-    const input = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
+    const input = this._normalizeSystemCommandText(preparedInput?.correctedText || rawText);
     if (!/\b(?:wifi|wi\s*fi|bluetooth|hotspot|mobile\s+hotspot)\b/.test(input)) {
       return null;
     }
@@ -1064,13 +1095,16 @@ class ActionRouter {
         return null;
       }
 
-      if (/^(?:(?:turn|switch)\s+on|enable)\b|\bon\b/.test(input) && !/\b(?:what|status|about|is|are)\b/.test(input)) {
+      const asksStatus = /\b(?:what|status|about|is|are)\b/.test(input);
+      const turnsOn = /\b(?:(?:turn|switch|put)\s+on|enable|activate)\b|\b(?:turn|switch|put)\s+bluetooth\s+on\b/.test(input);
+      const turnsOff = /\b(?:(?:turn|switch|put)\s+(?:off|of)|disable|deactivate)\b|\b(?:turn|switch|put)\s+bluetooth\s+(?:off|of)\b/.test(input);
+      if (turnsOn && !asksStatus) {
         return { intent, confidence: 1, entities: { enabled: true } };
       }
-      if (/^(?:(?:turn|switch)\s+off|disable)\b|\boff\b/.test(input) && !/\b(?:what|status|about|is|are)\b/.test(input)) {
+      if (turnsOff && !asksStatus) {
         return { intent, confidence: 1, entities: { enabled: false } };
       }
-      if (/^(?:what|tell|show|check)\b|\b(?:status|about|is|are)\b/.test(input)) {
+      if (/^(?:what|tell|show|check|is|are)\b|\b(?:status|about|enabled|disabled|on|off)\b/.test(input)) {
         return { intent, confidence: 1, entities: {} };
       }
     }
@@ -1134,45 +1168,110 @@ class ActionRouter {
   }
 
   _resolveLocalInfoIntent(rawText, preparedInput) {
-    const input = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
+    const input = this._normalizeSystemCommandText(preparedInput?.correctedText || rawText);
     const systemTimeIntent = this.intentRegistry.get('system.time');
     const systemDateIntent = this.intentRegistry.get('system.date');
     const systemStatusIntent = this.intentRegistry.get('system.status');
     const systemCpuIntent = this.intentRegistry.get('system.cpu');
     const systemMemoryIntent = this.intentRegistry.get('system.memory');
     const systemProcessesIntent = this.intentRegistry.get('system.processes');
+    const systemBatteryIntent = this.intentRegistry.get('system.battery');
+    const systemDiskIntent = this.intentRegistry.get('system.disk');
 
-    if (/\b(?:time)\b/.test(input) && /^(?:what|when|tell|current|time)\b/.test(input)) {
+    if (/\b(?:time)\b/.test(input) && /^(?:what|when|tell|show|current|time)\b/.test(input)) {
       return systemTimeIntent ? { intent: systemTimeIntent, confidence: 1, entities: {} } : null;
     }
 
-    if (/\b(?:date|day|today)\b/.test(input) && /^(?:what|which|tell|current|date|day)\b/.test(input)) {
+    if (/\b(?:date|day|today)\b/.test(input) && /^(?:what|which|tell|show|current|date|day)\b/.test(input)) {
       return systemDateIntent ? { intent: systemDateIntent, confidence: 1, entities: {} } : null;
     }
 
-    if (/\b(?:cpu|processor)\b/.test(input) && /\b(?:usage|status|use|using|load)\b/.test(input)) {
+    if (/\b(?:cpu|processor)\b/.test(input) && /\b(?:usage|status|use|using|load|percent|percentage|how\s+much|current)\b/.test(input)) {
       return systemCpuIntent ? { intent: systemCpuIntent, confidence: 1, entities: {} } : null;
     }
 
-    if (/\b(?:ram|memory)\b/.test(input) && /\b(?:usage|status|use|using|used|available|about)\b/.test(input)) {
+    if (/\b(?:ram|memory)\b/.test(input) && /\b(?:usage|status|use|using|used|available|free|left|about|how\s+much|current)\b/.test(input)) {
       return systemMemoryIntent ? { intent: systemMemoryIntent, confidence: 1, entities: {} } : null;
+    }
+
+    if (/\b(?:battery|charge|power)\b/.test(input) && /\b(?:status|level|percent|percentage|remaining|left|how\s+much|current|battery|charge)\b/.test(input)) {
+      return systemBatteryIntent ? { intent: systemBatteryIntent, confidence: 1, entities: {} } : null;
+    }
+
+    if (/\b(?:disk|storage|drive|space)\b/.test(input) && /\b(?:space|storage|disk|drive|free|left|available|usage|used|status|how\s+much)\b/.test(input)) {
+      return systemDiskIntent ? { intent: systemDiskIntent, confidence: 1, entities: {} } : null;
     }
 
     if (
       /\b(?:running|open|active)\b/.test(input) &&
       /\b(?:apps?|applications?|processes|programs?|system)\b/.test(input)
     ) {
-      const target = /\b(?:apps?|applications?|programs?)\b/.test(input) && !/\bprocesses\b/.test(input)
+      const target = /\b(?:apps?|applications?|programs?|windows?)\b/.test(input) && !/\bprocesses\b/.test(input)
         ? 'apps'
         : 'processes';
-      return systemProcessesIntent ? { intent: systemProcessesIntent, confidence: 1, entities: { target } } : null;
+      const queryApp = target === 'apps' ? this._extractRunningAppQuery(input) : '';
+      return systemProcessesIntent
+        ? {
+            intent: systemProcessesIntent,
+            confidence: 1,
+            entities: queryApp ? { target, queryApp } : { target }
+          }
+        : null;
     }
 
-    if (/\b(?:system|computer|pc|laptop)\b/.test(input) && /\b(?:status|health|usage|running|about|info|information)\b/.test(input)) {
+    const queryApp = this._extractRunningAppQuery(input);
+    if (queryApp && /\b(?:is|are|check|tell|whether|if|see)\b/.test(input) && /\b(?:running|open|opened|active|visible)\b/.test(input)) {
+      return systemProcessesIntent
+        ? { intent: systemProcessesIntent, confidence: 1, entities: { target: 'apps', queryApp } }
+        : null;
+    }
+
+    if (/\b(?:system|computer|pc|laptop|machine)\b/.test(input) && /\b(?:status|health|usage|running|about|info|information|performance|condition|doing)\b/.test(input)) {
       return systemStatusIntent ? { intent: systemStatusIntent, confidence: 1, entities: {} } : null;
     }
 
     return null;
+  }
+
+  _extractRunningAppQuery(input) {
+    const text = this._normalizeSystemCommandText(input);
+    const patterns = [
+      /\bif\s+(.+?)\s+(?:is|are)\s+(?:running|open|opened|active)\b/,
+      /\b(?:is|are)\s+(.+?)\s+(?:running|open|opened|active)\b/,
+      /\b(?:check|tell\s+me|see)\s+(?:if|whether)\s+(.+?)\s+(?:is|are)\s+(?:running|open|opened|active)\b/,
+      /\b(?:check|tell\s+me|see)\s+(.+?)\s+(?:running|open|opened|active)\b/,
+      /\b(.+?)\s+(?:is|are)\s+(?:running|open|opened|active)\b/
+    ];
+
+    for (const pattern of patterns) {
+      const match = text.match(pattern);
+      const candidate = match?.[1]
+        ?.replace(/\b(?:the|app|application|program|window|and|what|which|apps?|are|running|open|opened|active|tell|me|check|if|whether)\b/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (candidate && /^[a-z0-9][a-z0-9 ._-]{1,40}$/i.test(candidate)) {
+        return candidate;
+      }
+    }
+
+    return '';
+  }
+
+  _normalizeSystemCommandText(value) {
+    return String(value || '')
+      .trim()
+      .toLowerCase()
+      .replace(/\bblue\s+tooth\b/g, 'bluetooth')
+      .replace(/\bblu\s+tooth\b/g, 'bluetooth')
+      .replace(/\bblutooth\b/g, 'bluetooth')
+      .replace(/\bmemry\b/g, 'memory')
+      .replace(/\bmemeory\b/g, 'memory')
+      .replace(/\bstroage\b/g, 'storage')
+      .replace(/\bproceses\b/g, 'processes')
+      .replace(/\bproccesses\b/g, 'processes')
+      .replace(/\bproccess\b/g, 'process')
+      .replace(/\bopend\b/g, 'opened')
+      .replace(/\s+/g, ' ');
   }
 
   _resolveAssistantConversationIntent(rawText, preparedInput) {
@@ -1329,7 +1428,11 @@ class ActionRouter {
     if (!/^(?:locate|find|search|where\s+is|where\s+are|what\s+is\s+the\s+location\s+of|show\s+me\s+where)\b/.test(lower)) {
       return null;
     }
-    if (!/\b(?:file|folder|directory|location|path)\b|[^\s]+\.[A-Za-z0-9]{1,10}\b/i.test(`${input} ${rawText || ''}`)) {
+    const query = this._extractLocalFileSearchQuery(rawText || input, input);
+    if (!query) {
+      return null;
+    }
+    if (!/^(?:locate)\b/i.test(input) && !/\b(?:file|folder|directory|location|path)\b|[^\s]+\.[A-Za-z0-9]{1,10}\b/i.test(`${input} ${rawText || ''}`)) {
       return null;
     }
 
@@ -1338,13 +1441,31 @@ class ActionRouter {
       return null;
     }
 
-    const query = input
-      .replace(/^(?:locate|find|search(?:\s+for)?|where\s+is|where\s+are|what\s+is\s+the\s+location\s+of|show\s+me\s+where)\s+/i, '')
+    return { intent, confidence: 1, entities: { query } };
+  }
+
+  _extractLocalFileSearchQuery(rawText, correctedText = rawText) {
+    const clean = value => String(value || '')
+      .trim()
+      .replace(/^(?:locate|find|search(?:\s+for)?|where\s+(?:is|are|i)|whare\s+i|what\s+is\s+the\s+location\s+of|show\s+me\s+where)\s+/i, '')
       .replace(/^(?:the|a|an)\s+/i, '')
+      .replace(/\s+(?:on|in)\s+(?:my\s+)?(?:computer|pc|laptop|system|files?|folders?)$/i, '')
       .replace(/\s+(?:file|folder|directory|location|path)$/i, '')
       .replace(/\b([a-z0-9_-]+)\s+(pdf|txt|docx?|xlsx?|pptx?|csv|json|xml|html?|js|ts|py|java|md|png|jpe?g|gif|webp|mp[34]|mkv|wav|zip|rar)$/i, '$1.$2')
       .trim();
-    return query ? { intent, confidence: 1, entities: { query } } : null;
+
+    const source = String(rawText || '').trim();
+    const fallback = String(correctedText || '').trim();
+    const sourceQuery = clean(source);
+    const fallbackQuery = clean(fallback);
+    const query = sourceQuery && sourceQuery !== source
+      ? sourceQuery
+      : fallbackQuery && fallbackQuery !== fallback
+        ? fallbackQuery
+        : sourceQuery;
+    return query && !/^(?:file|folder|directory|location|path)$/i.test(query)
+      ? query.toLowerCase()
+      : '';
   }
 
   _resolvePersonalPhotoIntent(rawText, preparedInput) {
@@ -1407,9 +1528,11 @@ class ActionRouter {
     const corrected = String(preparedInput?.correctedText || rawText || '').trim();
     const raw = String(rawText || corrected || '').trim();
     const isQuestion = /^(?:what|who|when|where|why|how|which)\b/i.test(corrected || raw);
+    const rawSearchQuery = this._extractRawSearchQuery(raw);
     let query = isQuestion
       ? (corrected || raw)
-      : (this.entityExtractor._extractQuery(corrected.toLowerCase(), corrected) ||
+      : (rawSearchQuery ||
+        this.entityExtractor._extractQuery(corrected.toLowerCase(), corrected) ||
         this.entityExtractor._extractQuery(corrected.toLowerCase(), raw) ||
         raw ||
         corrected);
@@ -1428,6 +1551,24 @@ class ActionRouter {
       query,
       openInBrowser
     };
+  }
+
+  _extractRawSearchQuery(rawText) {
+    const text = String(rawText || '').trim();
+    if (!text) {
+      return '';
+    }
+
+    const match = text.match(/^(?:could\s+you\s+please\s+|can\s+you\s+please\s+|please\s+)?(?:search\s+for|search\s+the\s+web\s+for|search\s+web\s+for|search\s+web|search|google|look\s+up|find\s+on\s+web)\s+(.+)$/i);
+    if (!match?.[1]) {
+      return '';
+    }
+
+    return match[1]
+      .replace(/\s+(?:in|on)\s+new\s+tab(?:\s+(?:in|on)\s+(?:chrome|browser|edge|firefox))?\s*$/i, '')
+      .replace(/\s+new\s+tab(?:\s+(?:in|on)\s+(?:chrome|browser|edge|firefox))?\s*$/i, '')
+      .replace(/\s+(?:in|on)\s+(?:chrome|browser|edge|firefox)\s*$/i, '')
+      .trim();
   }
 
   _suggestAlternatives(preparedInput) {

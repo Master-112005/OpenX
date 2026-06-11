@@ -198,16 +198,10 @@ This layer detects local audio output and headphone state.
 - `headphones.js`: detects headphone and Bluetooth device state.
 - `device-events.js`: debounces device changes and emits audio/headphone events.
 
-### `core/modes`
+### Context mode profiles
 
-This layer contains deterministic mode scoring and behavior profiles.
-
-- `dev-mode.js`: detects coding/development contexts and prioritizes developer workflows.
-- `stream-mode.js`: detects streaming contexts and suppresses noisy assistant feedback.
-- `game-mode.js`: detects gaming/fullscreen contexts and minimizes assistant overhead.
-- `media-mode.js`: detects media consumption contexts and prioritizes media controls.
-- `work-mode.js`: detects productivity/meeting contexts and reduces interruptions.
-- `focus-mode.js`: detects long uninterrupted focus sessions and minimizes responses.
+Mode scoring and behavior profiles now live in `core/context-awareness/mode-engine.js`.
+The assistant no longer uses separate hardcoded `core/modes/*` modules.
 
 ### `core/voice`
 
@@ -755,13 +749,6 @@ OpenX/
 |   |   |-- audio-devices.js
 |   |   |-- device-events.js
 |   |   `-- headphones.js
-|   |-- modes/
-|   |   |-- dev-mode.js
-|   |   |-- focus-mode.js
-|   |   |-- game-mode.js
-|   |   |-- media-mode.js
-|   |   |-- stream-mode.js
-|   |   `-- work-mode.js
 |   |-- permissions/
 |   |   `-- index.js
 |   |-- settings/
@@ -856,7 +843,6 @@ OpenX/
 | `core/context-awareness/process-monitor.js` | Process monitor |
 | `core/context-awareness/signals.js` | Context signal emitter |
 | `core/device-detection/device-events.js` | Audio/headphone event monitor |
-| `core/modes/dev-mode.js` | Development mode scoring and behavior |
 | `core/voice/index.js` | Voice module entry |
 | `core/shared/events.js` | Shared event bus |
 | `plugins/index.js` | Plugin manager |

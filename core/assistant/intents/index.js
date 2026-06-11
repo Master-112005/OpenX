@@ -246,6 +246,14 @@ const INTENT_DEFINITIONS = [
     description: 'Open the first result from the last browser search'
   },
   {
+    id: 'browser.closeTab',
+    patterns: ['close tab', 'close current tab', 'close active tab', 'close empty tab', 'close blank tab'],
+    permissionLevel: 'low',
+    action: 'browser.closeTab',
+    entities: [{ name: 'browserName', type: 'string', required: false }],
+    description: 'Close the current browser tab'
+  },
+  {
     id: 'system.time',
     patterns: ['what time is it', 'current time', 'tell me the time', 'time now'],
     permissionLevel: 'low',
