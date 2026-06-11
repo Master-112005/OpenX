@@ -238,6 +238,63 @@ describe('Assistant Confirmation Flow', function() {
     assert.equal(assistant.getStatus().awaitingConfirmation, true);
   });
 
+  it('should repeat the app close target while waiting for confirmation', async function() {
+    const router = {
+      process: async () => ({
+        commandId: 'cmd-close-wait',
+        success: true,
+        requiresConfirmation: true,
+        intent: 'app.close',
+        entities: { appName: 'whatsapp' },
+        response: 'Please confirm: close whatsapp.'
+      }),
+      confirmAndExecute: async () => {
+        throw new Error('should not execute');
+      }
+    };
+
+    const assistant = new Assistant({}, {
+      router,
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    await assistant.processCommand('close whatsapp', 'chat');
+    const followUp = await assistant.processCommand('what?', 'chat');
+
+    assert.equal(followUp.requiresConfirmation, true);
+    assert.match(followUp.response, /close whatsapp/i);
+    assert.match(followUp.response, /yes/i);
+    assert.match(followUp.response, /no/i);
+  });
+
+  it('should resolve question follow-ups after file search context', async function() {
+    const routedInputs = [];
+    const router = {
+      process: async (input) => {
+        routedInputs.push(input);
+        return {
+          commandId: `cmd-${routedInputs.length}`,
+          success: true,
+          intent: 'file.search',
+          entities: { query: input.replace(/^find\s+/i, '') },
+          response: 'Found matching files.'
+        };
+      }
+    };
+
+    const assistant = new Assistant({}, {
+      router,
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    await assistant.processCommand('find Resume.docx', 'chat');
+    await assistant.processCommand('what are they', 'chat');
+
+    assert.deepEqual(routedInputs, ['find Resume.docx', 'find Resume.docx']);
+  });
+
   it('should allow the user to cancel a pending confirmation', async function() {
     const router = {
       process: async () => ({
@@ -460,5 +517,33 @@ describe('Assistant Confirmation Flow', function() {
 
     assert.equal(result.success, true);
     assert.deepEqual(routedInputs, ['close youtube', 'open youtube']);
+  });
+
+  it('should resolve chat pronouns from recent command context before routing', async function() {
+    const routedInputs = [];
+    const router = {
+      process: async (input) => {
+        routedInputs.push(input);
+        return {
+          commandId: `cmd-${routedInputs.length}`,
+          success: true,
+          intent: input.startsWith('close') ? 'app.close' : 'app.open',
+          entities: { appName: 'chrome' },
+          response: input.startsWith('close') ? 'Closed chrome.' : 'Opened chrome.'
+        };
+      }
+    };
+
+    const assistant = new Assistant({}, {
+      router,
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    await assistant.processCommand('open chrome', 'chat');
+    await assistant.processCommand('close it', 'chat');
+    await assistant.processCommand('open it again', 'chat');
+
+    assert.deepEqual(routedInputs, ['open chrome', 'close chrome', 'open chrome']);
   });
 });

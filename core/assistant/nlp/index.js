@@ -12,6 +12,7 @@ const {
 const {
   scorePreparedPattern
 } = require('./scorer');
+const { normalizeWebTarget } = require('./web-targets');
 
 class NlpProcessor {
   constructor(intentRegistry) {
@@ -78,6 +79,7 @@ class NlpProcessor {
     const repairedCommandText = this._repairNoisyCommandText(correctedTokens);
     const commandText = repairedCommandText || correctedText;
     const query = this._understandQuery(correctedTokens, correctedText, text || '');
+    const semanticFrame = this._buildSemanticFrame(correctedTokens, correctedText, text || '');
     const noiseTokenCount = this._countNoiseTokens(correctedTokens);
     const actionTokenCount = this._countActionTokens(correctedTokens);
     const repairContextTokenCount = this._countRepairContextTokens(correctedTokens);
@@ -90,6 +92,7 @@ class NlpProcessor {
       commandText,
       repairedCommandText,
       query,
+      semanticFrame,
       noiseTokenCount,
       actionTokenCount,
       repairContextTokenCount,
@@ -99,6 +102,96 @@ class NlpProcessor {
       bigrams,
       intentBigrams
     };
+  }
+
+  _buildSemanticFrame(tokens, correctedText, rawText) {
+    const safeTokens = Array.isArray(tokens) ? tokens : [];
+    const text = String(correctedText || '').trim().toLowerCase();
+    const raw = String(rawText || '').trim().toLowerCase();
+    const action = this._findNoisyAction(safeTokens);
+    const questionWord = safeTokens.find(token => ['what', 'who', 'when', 'where', 'why', 'how', 'which'].includes(token)) || null;
+    const targetText = action
+      ? this._extractTargetTextAfterAction(text, action.verb)
+      : this._extractQuestionTargetText(text, questionWord);
+    const localScope = this._findLocalScope(text, raw);
+    const webTarget = normalizeWebTarget(targetText || text);
+    const targetType = this._classifyTargetType({
+      actionVerb: action?.verb || null,
+      correctedText: text,
+      rawText: raw,
+      targetText,
+      webTarget,
+      localScope
+    });
+
+    return {
+      actionVerb: action?.verb || null,
+      questionWord,
+      targetText,
+      targetType,
+      webTarget,
+      localScope,
+      requiresWeb: targetType === 'web' || targetType === 'knowledge',
+      isLocal: targetType === 'local-file' || targetType === 'local-app'
+    };
+  }
+
+  _extractTargetTextAfterAction(text, actionVerb) {
+    const pattern = new RegExp(`^(?:search\\s+for|look\\s+up|go\\s+to|show\\s+me|${actionVerb}|launch|start|run|show|google|find)\\s+`, 'i');
+    return String(text || '')
+      .replace(pattern, '')
+      .replace(/\s+(?:in|on)\s+(?:chrome|browser|edge|firefox)\s*$/i, '')
+      .replace(/\s+(?:on|in)\s+(?:my\s+)?(?:laptop|pc|computer|system|device|windows)\s*$/i, '')
+      .trim();
+  }
+
+  _extractQuestionTargetText(text, questionWord) {
+    if (!questionWord) {
+      return '';
+    }
+    return String(text || '')
+      .replace(/^(?:what|who|when|where|why|how|which)\s+(?:is|are|was|were|won|did|does|do)?\s*/i, '')
+      .trim();
+  }
+
+  _findLocalScope(text, rawText) {
+    const combined = `${text || ''} ${rawText || ''}`.toLowerCase();
+    if (/\b(?:on|in)\s+(?:my\s+)?(?:laptop|pc|computer|system|device|windows)\b|\b(?:local|offline|this\s+(?:laptop|pc|computer|system|device))\b/.test(combined)) {
+      return 'device';
+    }
+    const location = this._findLocalLocation(Normalizer.tokenize(combined));
+    return location || null;
+  }
+
+  _classifyTargetType({ actionVerb, correctedText, rawText, targetText, webTarget, localScope }) {
+    const combined = `${correctedText || ''} ${rawText || ''}`.toLowerCase();
+    const target = String(targetText || '').toLowerCase();
+
+    if (/\b(?:file|folder|directory|desktop|downloads|documents|pictures|music|videos)\b|[^\s]+\.[a-z0-9]{1,10}\b/i.test(combined)) {
+      return 'local-file';
+    }
+
+    if (localScope) {
+      return 'local-app';
+    }
+
+    if (webTarget) {
+      return 'web';
+    }
+
+    if (/^(?:search|google)$/.test(actionVerb || '') || /\b(?:web|internet|online|browser|chrome|edge|firefox)\b/.test(combined)) {
+      return 'web';
+    }
+
+    if (/\b(?:news|score|winner|champion|event|release|price|schedule|fixtures?|match(?:es)?|best|top)\b/.test(combined)) {
+      return 'knowledge';
+    }
+
+    if (['open', 'launch', 'start', 'run', 'close', 'switch'].includes(actionVerb) && target) {
+      return 'local-app';
+    }
+
+    return 'unknown';
   }
 
   _understandQuery(tokens, correctedText, rawText) {
@@ -207,6 +300,22 @@ class NlpProcessor {
   }
 
   _findNoisyAction(tokens) {
+    const protectedQueryTokens = new Set([
+      'fifa',
+      'world',
+      'cup',
+      'match',
+      'matches',
+      'fixture',
+      'fixtures',
+      'schedule',
+      'release',
+      'premiere',
+      'price',
+      'iphone',
+      'movie',
+      'movies'
+    ]);
     const groups = [
       { verb: 'open', words: ['open', 'launch', 'start', 'run', 'show'] },
       { verb: 'close', words: ['close', 'quit', 'exit', 'terminate'] },
@@ -226,6 +335,9 @@ class NlpProcessor {
 
     for (let index = 0; index < tokens.length; index += 1) {
       const token = tokens[index];
+      if (protectedQueryTokens.has(token)) {
+        continue;
+      }
       for (const group of groups) {
         if (group.words.includes(token)) {
           return { verb: group.verb, index };

@@ -130,6 +130,7 @@ class AutomationEngine {
       'system.processes': () => this.system.getProcessCount(),
       'system.bluetooth': (entities) => this.system.bluetooth(entities.enabled),
       'assistant.identity': () => ({ success: true, data: { name: 'JARVIS' } }),
+      'assistant.userName': () => ({ success: true, data: { known: false } }),
       'window.minimize': (entities) => this.windows.minimizeWindow(entities.windowName),
       'window.maximize': (entities) => this.windows.maximizeWindow(entities.windowName),
       'window.close': (entities) => this.windows.closeWindow(entities.windowName),

@@ -1,5 +1,6 @@
 const Logger = require('../../shared/index').Logger;
 const { launchTarget } = require('../common/launcher');
+const { resolveTrustedWebTarget } = require('../../assistant/nlp/web-targets');
 const https = require('https');
 
 function decodeHtml(input) {
@@ -99,6 +100,33 @@ class BrowserController {
       return { success: false, error: 'No previous search to open' };
     }
 
+    const trusted = this._resolveTrustedWebTarget(requestedQuery);
+    if (trusted) {
+      const opened = this.open(trusted.url);
+      if (!opened?.success) {
+        return opened;
+      }
+      this.lastSearch = {
+        query: requestedQuery,
+        searchUrl: trusted.url,
+        results: [{
+          title: trusted.title,
+          url: trusted.url,
+          snippet: trusted.title,
+          source: 'trusted-web-target'
+        }]
+      };
+      return {
+        success: true,
+        data: {
+          query: requestedQuery,
+          title: trusted.title,
+          url: trusted.url,
+          trusted: true
+        }
+      };
+    }
+
     const cachedResults = this.lastSearch?.query === requestedQuery && Array.isArray(this.lastSearch.results)
       ? this.lastSearch.results
       : [];
@@ -130,6 +158,10 @@ class BrowserController {
       : opened;
   }
 
+  _resolveTrustedWebTarget(query) {
+    return resolveTrustedWebTarget(query);
+  }
+
   _normalizeResultUrl(url) {
     const source = decodeHtml(url);
     try {
@@ -144,7 +176,18 @@ class BrowserController {
     }
   }
 
-  _searchWebInBackground(query) {
+  async _searchWebInBackground(query) {
+    const instantResults = await this._searchInstantAnswer(query);
+    const htmlResults = await this._searchDuckDuckGoHtml(query);
+    const combined = this._mergeSearchResults(query, [...instantResults, ...htmlResults]);
+    if (combined.length > 0) {
+      return combined;
+    }
+
+    return this._searchBingInBackground(query);
+  }
+
+  _searchDuckDuckGoHtml(query) {
     const effectiveQuery = this._enhanceSearchQuery(query);
     const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(effectiveQuery)}`;
 
@@ -165,30 +208,95 @@ class BrowserController {
         });
         response.on('end', () => {
           const parsed = this._parseSearchResults(body);
-          const ranked = this._rankSearchResults(query, parsed);
-          if (ranked.length > 0) {
-            resolve(ranked);
-            return;
-          }
-
-          this._searchBingInBackground(query)
-            .then(resolve)
-            .catch(() => resolve([]));
+          resolve(this._rankSearchResults(query, parsed));
         });
       });
 
       request.on('timeout', () => {
         request.destroy();
-        this._searchBingInBackground(query)
-          .then(resolve)
-          .catch(() => resolve([]));
+        resolve([]);
       });
-      request.on('error', () => {
-        this._searchBingInBackground(query)
-          .then(resolve)
-          .catch(() => resolve([]));
-      });
+      request.on('error', () => resolve([]));
     });
+  }
+
+  _searchInstantAnswer(query) {
+    const url = `https://api.duckduckgo.com/?q=${encodeURIComponent(query)}&format=json&no_html=1&skip_disambig=1`;
+
+    return new Promise((resolve) => {
+      const request = https.get(url, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 JarvisAssistant/1.0'
+        },
+        timeout: 4500
+      }, (response) => {
+        let body = '';
+        response.setEncoding('utf8');
+        response.on('data', chunk => {
+          body += chunk;
+          if (body.length > 120000) {
+            request.destroy();
+          }
+        });
+        response.on('end', () => {
+          try {
+            const parsed = JSON.parse(body);
+            resolve(this._parseInstantAnswer(query, parsed));
+          } catch (error) {
+            resolve([]);
+          }
+        });
+      });
+
+      request.on('timeout', () => {
+        request.destroy();
+        resolve([]);
+      });
+      request.on('error', () => resolve([]));
+    });
+  }
+
+  _parseInstantAnswer(query, payload) {
+    const data = payload || {};
+    const candidates = [
+      data.Answer,
+      data.AbstractText,
+      data.Definition
+    ].map(value => decodeHtml(value)).filter(Boolean);
+
+    const text = candidates.find(value => value.length >= 4);
+    if (!text) {
+      return [];
+    }
+
+    const title = decodeHtml(data.Heading) || `Answer for ${query}`;
+    const url = decodeHtml(data.AbstractURL || data.DefinitionURL || '');
+    return [{
+      title,
+      snippet: text,
+      url,
+      source: 'duckduckgo-instant-answer',
+      answerText: text,
+      score: 100
+    }];
+  }
+
+  _mergeSearchResults(query, results) {
+    const seen = new Set();
+    const deduped = [];
+    for (const result of results || []) {
+      if (!result || (!result.title && !result.snippet)) {
+        continue;
+      }
+      const key = String(result.url || `${result.title}:${result.snippet}`).toLowerCase();
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      deduped.push(result);
+    }
+
+    return this._rankSearchResults(query, deduped);
   }
 
   _searchBingInBackground(query) {
@@ -254,6 +362,18 @@ class BrowserController {
       }
       return `${normalized} winner champion final result`;
     }
+    if (/\b(?:release date|premiere|launch date)\b/i.test(normalized)) {
+      return `${normalized} official release date`;
+    }
+    if (/\b(?:price|cost)\b/i.test(normalized)) {
+      return `${normalized} official price`;
+    }
+    if (/\b(?:match list|fixtures?|schedule)\b/i.test(normalized)) {
+      return `${normalized} schedule fixtures`;
+    }
+    if (/\b(?:best|top)\b.*\bmovies?\b/i.test(normalized)) {
+      return `${normalized} ranked list`;
+    }
     return normalized;
   }
 
@@ -281,22 +401,36 @@ class BrowserController {
   }
 
   _rankSearchResults(query, results) {
-    const queryTokens = String(query || '').toLowerCase().split(/\s+/).filter(token => token.length > 2);
-    const answerWords = ['won', 'winner', 'champion', 'champions', 'title', 'beat', 'defeated', 'final', 'result'];
+    const queryTokens = this._extractQueryTerms(query);
+    const profile = this._classifyAnswerProfile(query);
+    const answerWords = [
+      'won',
+      'winner',
+      'champion',
+      'champions',
+      'title',
+      'beat',
+      'defeated',
+      'final',
+      'result',
+      ...profile.answerWords
+    ];
 
     return results
       .map((result, index) => {
         const text = `${result.title || ''} ${result.snippet || ''}`.toLowerCase();
-        let score = Math.max(0, 20 - index);
+        let score = Number(result.score || 0) + Math.max(0, 20 - index);
 
         queryTokens.forEach(token => {
-          if (text.includes(token)) score += 4;
+          if (text.includes(token)) score += 6;
         });
         answerWords.forEach(word => {
           if (text.includes(word)) score += 5;
         });
+        if (profile.phrases.some(phrase => text.includes(phrase))) score += 10;
+        if (result.source === 'duckduckgo-instant-answer') score += 35;
         if (/full list|all season|history of/i.test(text)) score -= 14;
-        if (/wikipedia|official|scorecard|highlights|final/i.test(text)) score += 3;
+        if (/official|wikipedia|imdb|rottentomatoes|scorecard|highlights|final|fixtures?|schedule|release date/i.test(text)) score += 4;
 
         return { ...result, score };
       })
@@ -306,13 +440,22 @@ class BrowserController {
 
   _deriveAnswer(query, results) {
     const normalizedQuery = String(query || '').toLowerCase();
-    if (!this._isWinnerQuery(normalizedQuery)) {
-      return null;
-    }
 
     const combined = results
       .map(result => `${result.title || ''}. ${result.snippet || ''}`)
       .join(' ');
+
+    const instant = (results || []).find(result => result?.answerText);
+    if (instant?.answerText && !this._isWinnerQuery(normalizedQuery)) {
+      return {
+        text: this._normalizeAnswerText(instant.answerText),
+        sourceTitle: instant.title || 'DuckDuckGo Instant Answer'
+      };
+    }
+
+    if (!this._isWinnerQuery(normalizedQuery)) {
+      return this._deriveGeneralAnswer(query, results);
+    }
 
     if (
       /\b(?:ipl|indian premier league)\b/i.test(normalizedQuery) &&
@@ -327,16 +470,6 @@ class BrowserController {
       return {
         text: `Royal Challengers Bengaluru (RCB) won IPL 2026${margin}.`,
         sourceTitle: results[0]?.title || ''
-      };
-    }
-
-    if (
-      /\b(?:ipl|indian premier league)\b/i.test(normalizedQuery) &&
-      /\b2026\b/.test(normalizedQuery)
-    ) {
-      return {
-        text: 'Royal Challengers Bengaluru (RCB) won IPL 2026, beating Gujarat Titans by five wickets.',
-        sourceTitle: results[0]?.title || 'IPL 2026 final result'
       };
     }
 
@@ -375,12 +508,135 @@ class BrowserController {
       .split(/(?<=[.!?])\s+/)
       .map(sentence => sentence.trim())
       .filter(Boolean);
-    const direct = sentences.find(sentence => (
-      /\b(?:won|winner|champion|title)\b/i.test(sentence) &&
-      normalizedQuery.split(/\s+/).filter(token => token.length > 2).some(token => sentence.toLowerCase().includes(token))
-    ));
+    const queryTerms = this._extractQueryTerms(normalizedQuery);
+    const queryYear = normalizedQuery.match(/\b(19\d{2}|20\d{2})\b/)?.[1] || '';
+    const direct = sentences.find(sentence => {
+      const lower = sentence.toLowerCase();
+      const termHits = queryTerms.filter(token => lower.includes(token)).length;
+      const coverage = queryTerms.length > 0 ? termHits / queryTerms.length : 0;
+      return /\b(?:won|winner|champion|title)\b/i.test(sentence) &&
+        coverage >= 0.5 &&
+        (!queryYear || lower.includes(queryYear));
+    });
 
     return direct ? { text: direct, sourceTitle: results[0]?.title || '' } : null;
+  }
+
+  _deriveGeneralAnswer(query, results) {
+    const profile = this._classifyAnswerProfile(query);
+    const queryTerms = this._extractQueryTerms(query);
+    const candidates = [];
+
+    for (const result of results || []) {
+      const sourceTitle = result.title || '';
+      const parts = [
+        { text: result.snippet || '', kind: 'snippet' },
+        ...String(result.snippet || '').split(/(?<=[.!?])\s+|[|•]\s+/).map(part => ({ text: part, kind: 'snippet' })),
+        ...String(result.title || '').split(/(?<=[.!?])\s+|[|•]\s+/).map(part => ({ text: part, kind: 'title' }))
+      ]
+        .map(part => ({ ...part, text: this._normalizeAnswerText(part.text) }))
+        .filter(part => part.text.length >= 24 && part.text.length <= 260);
+
+      for (const part of parts) {
+        const sentence = part.text;
+        const lower = sentence.toLowerCase();
+        const matchedTerms = queryTerms.filter(term => lower.includes(term));
+        const termCoverage = queryTerms.length > 0 ? matchedTerms.length / queryTerms.length : 0;
+        const answerHits = profile.answerWords.filter(word => lower.includes(word)).length;
+        const phraseHits = profile.phrases.filter(phrase => lower.includes(phrase)).length;
+        let score = termCoverage * 40 + answerHits * 8 + phraseHits * 12 + Number(result.score || 0) / 5;
+        if (part.kind === 'title') {
+          score -= 30;
+        }
+        if (/official|wikipedia|imdb|rottentomatoes|espn|fifa|apple|warner bros|legendary/i.test(`${sourceTitle} ${sentence}`)) {
+          score += 8;
+        }
+        if (/cookie|privacy policy|sign in|subscribe|advertisement/i.test(lower)) {
+          score -= 30;
+        }
+        candidates.push({ text: sentence, sourceTitle, score, termCoverage });
+      }
+    }
+
+    candidates.sort((left, right) => right.score - left.score);
+    const best = candidates.find(candidate => candidate.termCoverage >= 0.35 || candidate.score >= 32);
+    return best ? { text: best.text, sourceTitle: best.sourceTitle } : null;
+  }
+
+  _classifyAnswerProfile(query) {
+    const normalized = String(query || '').toLowerCase();
+    if (/\b(?:release date|premiere|launch date|when)\b/.test(normalized)) {
+      return {
+        kind: 'release-date',
+        answerWords: ['release', 'released', 'premiere', 'premieres', 'date', 'scheduled', 'arrive', 'arrives'],
+        phrases: ['release date', 'is scheduled', 'set to release', 'premiere date']
+      };
+    }
+    if (/\b(?:price|cost)\b/.test(normalized)) {
+      return {
+        kind: 'price',
+        answerWords: ['price', 'cost', 'starts', 'starting', 'from', '$', 'rs', '₹', 'usd', 'inr'],
+        phrases: ['starting price', 'starts at', 'priced at', 'price is']
+      };
+    }
+    if (/\b(?:match list|fixtures?|schedule)\b/.test(normalized)) {
+      return {
+        kind: 'schedule',
+        answerWords: ['schedule', 'fixture', 'fixtures', 'match', 'matches', 'date', 'venue', 'group'],
+        phrases: ['match schedule', 'fixtures list', 'world cup schedule']
+      };
+    }
+    if (/\b(?:best|top)\b.*\bmovies?\b/.test(normalized)) {
+      return {
+        kind: 'best-list',
+        answerWords: ['best', 'top', 'ranked', 'movies', 'films', 'list', 'rating'],
+        phrases: ['best movies', 'top movies', 'ranked']
+      };
+    }
+    return {
+      kind: 'general',
+      answerWords: ['is', 'are', 'was', 'will', 'announced', 'reported', 'according'],
+      phrases: []
+    };
+  }
+
+  _extractQueryTerms(query) {
+    const stopWords = new Set([
+      'what',
+      'who',
+      'when',
+      'where',
+      'why',
+      'how',
+      'which',
+      'is',
+      'are',
+      'the',
+      'a',
+      'an',
+      'of',
+      'for',
+      'to',
+      'in',
+      'on',
+      'me',
+      'my',
+      'please'
+    ]);
+
+    return String(query || '')
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}\s]/gu, ' ')
+      .split(/\s+/)
+      .map(token => token.trim())
+      .filter(token => token.length > 1 && !stopWords.has(token));
+  }
+
+  _normalizeAnswerText(text) {
+    return decodeHtml(text)
+      .replace(/\s+-\s+[^.?!]+$/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
   }
 
   _isWinnerQuery(query) {

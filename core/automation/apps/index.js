@@ -25,7 +25,13 @@ const KNOWN_APPS = {
   'outlook': { cmd: 'outlook' },
   'spotify': { cmd: 'spotify' },
   'discord': { cmd: 'discord', processName: 'Discord' },
-  'whatsapp': { processName: 'WhatsApp' },
+  'whatsapp': {
+    processName: 'WhatsApp',
+    closeStrategy: 'window',
+    windowQuery: 'whatsapp',
+    preferredTitleTokens: ['whatsapp'],
+    preferredProcessNames: ['WhatsApp', 'ApplicationFrameHost']
+  },
   'slack': { cmd: 'slack' },
   'zoom': { cmd: 'zoom' },
   'teams': { cmd: 'teams', processName: 'Teams' },
@@ -55,6 +61,7 @@ const SPECIAL_LAUNCHERS = {
 };
 
 const BROWSER_APP_NAMES = new Set(['chrome', 'msedge', 'edge', 'firefox']);
+const COMMAND_FIRST_APPS = new Set(['chrome', 'msedge', 'edge', 'firefox']);
 const PROTECTED_BROWSER_TITLE_TOKENS = [
   'youtube',
   'spotify',
@@ -99,6 +106,11 @@ class AppController {
       const specialLaunch = this._launchSpecialApp(name);
       if (specialLaunch.success) {
         return specialLaunch;
+      }
+
+      if (COMMAND_FIRST_APPS.has(name) && app?.cmd && this._commandExists(app.cmd)) {
+        launchTarget(app.cmd);
+        return { success: true, data: { app: name, launchMethod: 'command' } };
       }
 
       const startApp = this._resolveStartApp(name);

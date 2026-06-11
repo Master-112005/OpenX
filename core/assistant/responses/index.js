@@ -551,6 +551,10 @@ const RESPONSE_BUILDERS = {
       const name = valueFromContext(context, 'name', 'JARVIS');
       return `My name is ${name}.`;
     },
+    'assistant.userName': context => {
+      const name = valueFromContext(context, 'name', '');
+      return name ? `Your name is ${name}.` : 'I do not know your name yet.';
+    },
     'window.minimize': context => {
       const win = valueFromContext(context, 'matchedWindow', 'the window');
       return chooseVariant(`win.minimize:${win}`, [
@@ -625,6 +629,11 @@ const RESPONSE_BUILDERS = {
     confirmRestart: () => 'Please confirm that you authorize the system to initiate a reboot',
     confirmAction: context => {
       const details = valueFromContext(context, 'details', valueFromContext(context, 'action'));
+      const intentId = valueFromContext(context, 'intent.id', context?.intent?.id || '');
+      const appName = valueFromContext(context, 'appName', context?.entities?.appName || '');
+      if (intentId === 'app.close' && appName) {
+        return `Please confirm: close ${appName}. Say yes to close it, or no to cancel.`;
+      }
       return `Before I continue, please confirm this request: ${details}. Say yes to continue or no to cancel.`;
     },
     awaitingDecision: () => 'I am waiting for your decision. Please say proceed or cancel.',

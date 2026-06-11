@@ -285,10 +285,17 @@ class Assistant extends EventEmitter {
       commandId: this.pendingConfirmation.commandId,
       intent: this.pendingConfirmation.intentId,
       entities: { ...this.pendingConfirmation.entities },
-      response: this.personality.applyToResponse(
-        this.responses.generate('confirmation', 'awaitingDecision')
-      )
+      response: this.personality.applyToResponse(this._buildPendingConfirmationPrompt())
     };
+  }
+
+  _buildPendingConfirmationPrompt() {
+    const pending = this.pendingConfirmation;
+    const appName = String(pending?.entities?.appName || '').trim();
+    if (pending?.intentId === 'app.close' && appName) {
+      return `I am waiting for your decision. Please say proceed or cancel. Say yes to close ${appName}, or no to cancel.`;
+    }
+    return this.responses.generate('confirmation', 'awaitingDecision');
   }
 
   async _handlePendingClarification(input, source) {
@@ -406,9 +413,18 @@ class Assistant extends EventEmitter {
     }
 
     const listFollowUp = /^(?:list|show|tell|display|open)?\s*(?:them|those|these|it|that)(?:\s+again)?$/.test(normalized) ||
-      /^(?:list|show|tell|display)\s+(?:them|those|these|it|that)\b/.test(normalized);
+      /^(?:list|show|tell|display)\s+(?:them|those|these|it|that)\b/.test(normalized) ||
+      /^(?:what|which)\s+(?:are|is)\s+(?:them|those|these|they|it|that)\b/.test(normalized);
     if (!listFollowUp) {
-      return '';
+      return this._resolveVoiceReference(input);
+    }
+
+    const lastFileSearch = this.context.getHistory(8)
+      .slice()
+      .reverse()
+      .find(entry => entry?.success && entry?.intent === 'file.search' && entry?.entities?.query);
+    if (lastFileSearch && /^(?:what|which)\s+(?:are|is)\s+(?:them|those|these|they|it|that)\b/.test(normalized)) {
+      return `find ${lastFileSearch.entities.query}`;
     }
 
     const lastFileList = this.context.getHistory(8)
@@ -417,14 +433,14 @@ class Assistant extends EventEmitter {
       .find(entry => entry?.success && entry?.intent === 'file.list' && entry?.entities?.path);
 
     if (!lastFileList) {
-      return '';
+      return this._resolveVoiceReference(input);
     }
 
     const entities = lastFileList.entities || {};
     const type = String(entities.fileType || '').trim();
     const path = String(entities.path || '').trim();
     if (!path) {
-      return '';
+      return this._resolveVoiceReference(input);
     }
 
     return `list ${type ? `${type} ` : ''}files in ${path}`;
@@ -520,6 +536,7 @@ class Assistant extends EventEmitter {
 
     return normalized
       .replace(/\b(?:it|that|same)\b/g, target)
+      .replace(/\s+again$/i, '')
       .replace(/\s+/g, ' ')
       .trim();
   }

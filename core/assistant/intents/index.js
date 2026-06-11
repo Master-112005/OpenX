@@ -449,6 +449,14 @@ const INTENT_DEFINITIONS = [
     description: 'Tell the assistant identity'
   },
   {
+    id: 'assistant.userName',
+    patterns: ['what is my name', 'who am i', 'do you know my name'],
+    permissionLevel: 'low',
+    action: 'assistant.userName',
+    entities: [],
+    description: 'Answer whether the assistant knows the user name'
+  },
+  {
     id: 'help',
     patterns: ['help', 'what can you do', 'commands', 'capabilities', 'what can i say'],
     permissionLevel: 'low',

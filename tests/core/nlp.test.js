@@ -32,4 +32,46 @@ describe('NLP Processor', function() {
     assert.equal(prepared.correctedText, 'who is the captain of indian cricket team in 2026');
     assert.equal(prepared.query.type, 'knowledge-question');
   });
+
+  it('should build semantic frames for web, local, search, and knowledge requests', function() {
+    const nlp = new NlpProcessor(new IntentRegistry());
+
+    const webOpen = nlp.prepare('please pull up google photes website');
+    const localOpen = nlp.prepare('open photos on this laptop');
+    const webSearch = nlp.prepare('search for google maps in chrome');
+    const knowledge = nlp.prepare('who is the winner of ipl 2026');
+
+    assert.equal(webOpen.semanticFrame.actionVerb, 'open');
+    assert.equal(webOpen.semanticFrame.targetText, 'google photos website');
+    assert.equal(webOpen.semanticFrame.targetType, 'web');
+    assert.equal(webOpen.semanticFrame.webTarget, 'google photos');
+
+    assert.equal(localOpen.semanticFrame.targetType, 'local-app');
+    assert.equal(localOpen.semanticFrame.localScope, 'device');
+    assert.equal(localOpen.semanticFrame.isLocal, true);
+
+    assert.equal(webSearch.semanticFrame.actionVerb, 'search');
+    assert.equal(webSearch.semanticFrame.targetText, 'google maps');
+    assert.equal(webSearch.semanticFrame.webTarget, 'google maps');
+
+    assert.equal(knowledge.semanticFrame.targetType, 'knowledge');
+    assert.equal(knowledge.semanticFrame.requiresWeb, true);
+  });
+
+  it('should not corrupt valid knowledge and developer terms during correction', function() {
+    const nlp = new NlpProcessor(new IntentRegistry());
+
+    assert.equal(
+      nlp.prepare('what is the meaning of following').correctedText,
+      'what is the meaning of following'
+    );
+    assert.equal(
+      nlp.prepare('search node js tutorial').correctedText,
+      'search node js tutorial'
+    );
+    assert.equal(
+      nlp.prepare('what is your anme').correctedText,
+      'what is your name'
+    );
+  });
 });

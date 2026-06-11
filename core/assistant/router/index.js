@@ -6,6 +6,7 @@ const InputParser = require('../parser/index');
 const EntityExtractor = require('../entities/index');
 const PermissionValidator = require('../../permissions/index');
 const NlpProcessor = require('../nlp/index');
+const { normalizeWebTarget } = require('../nlp/web-targets');
 const { MediaUnderstandingRouter } = require('../../media-understanding/media-router');
 
 const CONFIDENCE_THRESHOLD = 0.5;
@@ -81,6 +82,10 @@ class ActionRouter {
   }
 
   _resolveIntent(rawCommandText, preparedInput, source) {
+    if (this._isIncompleteCommand(rawCommandText, preparedInput)) {
+      return null;
+    }
+
     return (
       this._resolveExplicitReminderIntent(rawCommandText, preparedInput) ||
       this._resolveSystemSettingsIntent(rawCommandText, preparedInput) ||
@@ -91,6 +96,7 @@ class ActionRouter {
       this._resolveMediaUnderstandingIntent(rawCommandText, source) ||
       this._resolveExplicitMediaIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitModeIntent(rawCommandText, preparedInput) ||
+      this._resolveLiveKnowledgeIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitAppIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitWindowIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitCommunicationIntent(rawCommandText, preparedInput) ||
@@ -106,9 +112,18 @@ class ActionRouter {
       this._resolveLocalFileSearchIntent(rawCommandText, preparedInput) ||
       this._resolvePersonalPhotoIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitSearchIntent(rawCommandText, preparedInput) ||
+      this._resolveBareKnowledgeSearchIntent(rawCommandText, preparedInput) ||
       this._resolveGeneralQuestionSearchIntent(rawCommandText, preparedInput) ||
       this._matchIntent(preparedInput)
     );
+  }
+
+  _isIncompleteCommand(rawText, preparedInput) {
+    const input = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
+    if (!input) {
+      return true;
+    }
+    return /^(?:show|show\s+me|open|close|find|search|look\s+up|play|set|turn|make|move|copy|delete|remove)\s*(?:me|it|that|this)?$/i.test(input);
   }
 
   async _completeIntent(commandId, intentResult, rawCommandText, source) {
@@ -161,7 +176,8 @@ class ActionRouter {
         response: this._buildResponse('confirmation', 'confirmAction', {
           action: intentResult.intent.description,
           details: permissionCheck.confirmationMessage,
-          intent: intentResult.intent
+          intent: intentResult.intent,
+          entities
         })
       };
     }
@@ -465,6 +481,10 @@ class ActionRouter {
       return false;
     }
 
+    if (/\b(?:ipl|cricket|score|scores|live|today'?s?|latest|current|standings?|fifa|world\s+cup|match(?:es)?|fixtures?|schedule|news|release\s+date|premiere|price|best\s+movies?|top\s+movies?)\b/i.test(String(rawText || ''))) {
+      return false;
+    }
+
     if (/^\s*(?:open|show|search|look\s+up|google)\b.*\b(?:in|on)\s+(?:chrome|browser|edge|firefox)\s*$/i.test(String(rawText || ''))) {
       return false;
     }
@@ -472,6 +492,11 @@ class ActionRouter {
     const repaired = String(preparedInput?.repairedCommandText || '').trim();
     const corrected = String(preparedInput?.correctedText || rawText || '').trim();
     if (!repaired || repaired === corrected) {
+      return false;
+    }
+
+    const hasLocalScope = /\b(?:on|in)\s+(?:my\s+)?(?:laptop|pc|computer|system|device|windows)\b|\b(?:local|offline|this\s+(?:laptop|pc|computer|system|device))\b/i;
+    if (hasLocalScope.test(corrected) && !hasLocalScope.test(repaired)) {
       return false;
     }
 
@@ -642,6 +667,13 @@ class ActionRouter {
       return null;
     }
 
+    if (/\b(?:show|open|view)\b.*\b(?:latest|last|recent|newest)\b.*\bscreenshots?\b/.test(input)) {
+      const fileIntent = this.intentRegistry.get('file.open');
+      return fileIntent
+        ? { intent: fileIntent, confidence: 1, entities: { filename: 'screenshot in pictures' } }
+        : null;
+    }
+
     if (!/\b(?:screenshot|screen\s+shot|capture\s+screen|screen\s+capture|snap\s+screen)\b/.test(input)) {
       return null;
     }
@@ -684,6 +716,14 @@ class ActionRouter {
       return null;
     }
 
+    if (/^(?:open|show|launch|start|run)\s+(?:downloads|documents|desktop|pictures|music|videos|home)$/i.test(input)) {
+      return null;
+    }
+
+    if (/^(?:search|search\s+for|look\s+up|google)\b/i.test(input) && this._looksLikeWebSearchQuery(input)) {
+      return null;
+    }
+
     const configs = [
       { intentId: 'file.open', pattern: /^(?:open|show|play|watch)\b/ },
       { intentId: 'file.create', pattern: /^(?:create|new|make)\b/ },
@@ -693,7 +733,7 @@ class ActionRouter {
       { intentId: 'file.search', pattern: /^(?:locate|find|search)\b/ }
     ];
 
-    if (!/\b(?:file|location|path)\b|[^\s]+\.[A-Za-z0-9]{1,10}\b/i.test(`${input} ${rawText || ''}`)) {
+    if (!/\b(?:file|files|folder|folders|location|path|pdf|pdfs|document|documents|downloaded|downloads?|duplicate|duplicates)\b|[^\s]+\.[A-Za-z0-9]{1,10}\b/i.test(`${input} ${rawText || ''}`)) {
       return null;
     }
 
@@ -748,6 +788,30 @@ class ActionRouter {
     return { intent, confidence: 1, entities: { modeName } };
   }
 
+  _resolveLiveKnowledgeIntent(rawText, preparedInput) {
+    const corrected = String(preparedInput?.correctedText || rawText || '').trim();
+    const raw = String(rawText || corrected || '').trim();
+    const input = corrected.toLowerCase();
+    if (!input) {
+      return null;
+    }
+
+    if (/^(?:open|close|launch|start|run|switch|focus|activate|set|turn|play|pause|resume|stop|create|delete|move|copy|rename|remind|search|google|look\s+up)\b/.test(input)) {
+      return null;
+    }
+
+    const hasLiveCue = /\b(?:score|scores|live|today|latest|current|standings?|table|fixture|fixtures|schedule|news)\b/.test(input);
+    const hasPublicTopic = /\b(?:ipl|cricket|fifa|world\s+cup|football|soccer|match|matches|team|teams|japan|react|node|javascript|ai)\b/.test(input);
+    if (!hasLiveCue || !hasPublicTopic) {
+      return null;
+    }
+
+    const intent = this.intentRegistry.get('browser.search');
+    return intent
+      ? { intent, confidence: 1, entities: { query: raw.toLowerCase(), openInBrowser: false } }
+      : null;
+  }
+
   _resolveExplicitAppIntent(rawText, preparedInput) {
     const correctedText = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
     if (!correctedText) {
@@ -800,6 +864,10 @@ class ActionRouter {
     }
 
     const browserIntent = this.intentRegistry.get('browser.open');
+    if (browserIntent && /^(?:open|launch|start|show)\s+(?:my\s+)?browser\b/i.test(lower)) {
+      return { intent: browserIntent, confidence: 1, entities: { url: 'about:blank' } };
+    }
+
     if (browserIntent && this._looksLikeUrlRequest(rawText)) {
       return { intent: browserIntent, confidence: 1 };
     }
@@ -836,12 +904,20 @@ class ActionRouter {
 
   _resolveKnownWebOpenIntent(rawText, preparedInput) {
     const input = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
-    const match = input.match(/^(?:open|launch|start|go\s+to|show)\s+(.+?)(?:\s+(?:in|on)\s+(?:chrome|browser|edge|firefox))?$/i);
+    const match = input.match(/^(?:open|launch|start|go\s+to|show(?:\s+me)?)\s+(.+?)(?:\s+(?:in|on)\s+(?:chrome|browser|edge|firefox))?$/i);
     if (!match?.[1]) {
       return null;
     }
 
-    const query = this._normalizeKnownWebTarget(match[1]);
+    const requestedTarget = String(preparedInput?.semanticFrame?.targetText || match[1] || '').trim();
+    if (this._looksLikeLocalPhotosTarget(requestedTarget, rawText)) {
+      const appIntent = this.intentRegistry.get('app.open');
+      return appIntent
+        ? { intent: appIntent, confidence: 1, entities: { appName: 'photos' } }
+        : null;
+    }
+
+    const query = preparedInput?.semanticFrame?.webTarget || this._normalizeKnownWebTarget(requestedTarget);
     if (!query) {
       return null;
     }
@@ -853,42 +929,19 @@ class ActionRouter {
   }
 
   _normalizeKnownWebTarget(value) {
-    const target = String(value || '')
-      .trim()
-      .replace(/^(?:the|a|an)\s+/i, '')
-      .toLowerCase();
-    const aliases = {
-      chatgpt: 'chatgpt',
-      'chat gpt': 'chatgpt',
-      'open ai chatgpt': 'chatgpt',
-      claude: 'claude ai',
-      gemini: 'google gemini',
-      perplexity: 'perplexity ai',
-      github: 'github',
-      gmail: 'gmail',
-      'google mail': 'gmail',
-      maps: 'google maps',
-      'google maps': 'google maps',
-      photos: 'google photos',
-      'google photos': 'google photos',
-      drive: 'google drive',
-      'google drive': 'google drive',
-      docs: 'google docs',
-      'google docs': 'google docs',
-      notion: 'notion',
-      canva: 'canva',
-      figma: 'figma'
-    };
+    return normalizeWebTarget(value);
+  }
 
-    if (aliases[target]) {
-      return aliases[target];
+  _looksLikeLocalPhotosTarget(target, rawText) {
+    const normalizedTarget = String(target || '').toLowerCase();
+    const normalizedRaw = String(rawText || '').toLowerCase();
+    if (/\bgoogle\b/.test(normalizedTarget)) {
+      return false;
     }
-
-    const fuzzy = Normalizer.findClosestOption(target, Object.keys(aliases), {
-      minSimilarity: 0.78,
-      maxDistance: 2
-    });
-    return fuzzy ? aliases[fuzzy.normalizedMatch] : null;
+    if (!/\b(?:photos?|photesw?|phots|pictures?)\b/.test(normalizedTarget)) {
+      return false;
+    }
+    return /\b(?:on|in)\s+(?:my\s+)?(?:laptop|pc|computer|system|device|windows)\b|\b(?:local|offline|this\s+(?:laptop|pc|computer|system|device))\b/.test(normalizedRaw);
   }
 
   _resolveExplicitCommunicationIntent(rawText, preparedInput) {
@@ -1033,6 +1086,11 @@ class ActionRouter {
     return null;
   }
 
+  _looksLikeWebSearchQuery(input) {
+    const text = String(input || '').toLowerCase();
+    return /\b(?:tutorials?|documentation|docs?|examples?|guide|learn|react|angular|node|javascript|typescript|python|java|api|framework|weather|news|score|scores|latest|best|capital|difference|meaning)\b/.test(text);
+  }
+
   _resolveBrowserTabIntent(rawText, preparedInput) {
     const input = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
     if (!/^(?:open\s+)?(?:a\s+)?new\s+tab(?:\s+(?:in|on)\s+(?:chrome|browser|edge|firefox))?$/.test(input)) {
@@ -1139,7 +1197,12 @@ class ActionRouter {
       return systemTimeIntent ? { intent: systemTimeIntent, confidence: 1, entities: {} } : null;
     }
 
-    if (/\b(?:date|day|today)\b/.test(input) && /^(?:what|which|tell|current|date|day)\b/.test(input)) {
+    const externalDateCue = /\b(?:release|released|launch|premiere|event|schedule|match|movie|film|game|episode|iphone|price)\b/.test(input);
+    if (
+      !externalDateCue &&
+      /\b(?:date|day|today)\b/.test(input) &&
+      /^(?:what|which|tell|current|date|day)\b/.test(input)
+    ) {
       return systemDateIntent ? { intent: systemDateIntent, confidence: 1, entities: {} } : null;
     }
 
@@ -1158,7 +1221,7 @@ class ActionRouter {
       return systemProcessesIntent ? { intent: systemProcessesIntent, confidence: 1, entities: {} } : null;
     }
 
-    if (/\b(?:system|computer|pc|laptop)\b/.test(input) && /\b(?:status|health|usage|running|about|info|information)\b/.test(input)) {
+    if (/\b(?:system|computer|pc|laptop)\b/.test(input) && /\b(?:status|health|usage|running|about|info|information|doing|performance)\b/.test(input)) {
       return systemStatusIntent ? { intent: systemStatusIntent, confidence: 1, entities: {} } : null;
     }
 
@@ -1169,15 +1232,21 @@ class ActionRouter {
     const corrected = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
     const raw = String(rawText || corrected || '').trim().toLowerCase();
     const combined = `${raw} ${corrected}`.trim();
+    const variants = [corrected, raw, combined].filter(Boolean);
 
-    if (/^(?:what|who)\s+(?:is|are)\s+(?:your|you)\s+(?:name|called)\b|^who\s+are\s+you\b/.test(combined)) {
+    if (variants.some(text => /^(?:what|who)\s+(?:is|am)\s+(?:my|i)\s+(?:name|called)\b|^do\s+you\s+know\s+my\s+name\b/.test(text))) {
+      const intent = this.intentRegistry.get('assistant.userName');
+      return intent ? { intent, confidence: 1, entities: {} } : null;
+    }
+
+    if (variants.some(text => /^(?:what|who)\s+(?:is|are)\s+(?:your|you)\s+(?:name|called)\b|^who\s+are\s+you\b/.test(text))) {
       const intent = this.intentRegistry.get('assistant.identity');
       return intent ? { intent, confidence: 1, entities: {} } : null;
     }
 
     if (
-      /^(?:how\s+are\s+you|how\s+do\s+you\s+do|are\s+you\s+(?:ok|okay|ready))\b/.test(combined) ||
-      /^(?:hello|hi|hey|good\s+(?:morning|afternoon|evening))\b/.test(combined)
+      variants.some(text => /^(?:how\s+are\s+you|how\s+do\s+you\s+do|are\s+you\s+(?:ok|okay|ready))\b/.test(text)) ||
+      variants.some(text => /^(?:hello|hi|hey|good\s+(?:morning|afternoon|evening))\b/.test(text))
     ) {
       const intent = this.intentRegistry.get('greeting');
       return intent ? { intent, confidence: 1, entities: {} } : null;
@@ -1319,7 +1388,10 @@ class ActionRouter {
     if (!/^(?:locate|find|search|where\s+is|where\s+are|what\s+is\s+the\s+location\s+of|show\s+me\s+where)\b/.test(lower)) {
       return null;
     }
-    if (!/\b(?:file|folder|directory|location|path)\b|[^\s]+\.[A-Za-z0-9]{1,10}\b/i.test(`${input} ${rawText || ''}`)) {
+    if (/^(?:search|search\s+for|look\s+up|google)\b/i.test(lower) && this._looksLikeWebSearchQuery(`${lower} ${rawText || ''}`)) {
+      return null;
+    }
+    if (!/\b(?:file|files|folder|folders|directory|directories|location|path|pdf|pdfs|documents?|downloads?|duplicate|duplicates)\b|[^\s]+\.[A-Za-z0-9]{1,10}\b/i.test(`${input} ${rawText || ''}`)) {
       return null;
     }
 
@@ -1331,7 +1403,7 @@ class ActionRouter {
     const query = input
       .replace(/^(?:locate|find|search(?:\s+for)?|where\s+is|where\s+are|what\s+is\s+the\s+location\s+of|show\s+me\s+where)\s+/i, '')
       .replace(/^(?:the|a|an)\s+/i, '')
-      .replace(/\s+(?:file|folder|directory|location|path)$/i, '')
+      .replace(/\s+(?:file|files|folder|folders|directory|directories|location|path)$/i, '')
       .replace(/\b([a-z0-9_-]+)\s+(pdf|txt|docx?|xlsx?|pptx?|csv|json|xml|html?|js|ts|py|java|md|png|jpe?g|gif|webp|mp[34]|mkv|wav|zip|rar)$/i, '$1.$2')
       .trim();
     return query ? { intent, confidence: 1, entities: { query } } : null;
@@ -1362,6 +1434,42 @@ class ActionRouter {
 
     const intent = this.intentRegistry.get('browser.openFirstResult');
     return intent ? { intent, confidence: 0.95, entities: { query: 'google photos' } } : null;
+  }
+
+  _resolveBareKnowledgeSearchIntent(rawText, preparedInput) {
+    const corrected = String(preparedInput?.correctedText || rawText || '').trim();
+    const raw = String(rawText || corrected || '').trim();
+    const input = corrected.toLowerCase();
+    const rawLower = raw.toLowerCase();
+    if (!input) {
+      return null;
+    }
+
+    if (/^(?:open|close|launch|start|run|switch|focus|activate|set|turn|play|pause|resume|stop|create|delete|move|copy|rename|remind)\b/.test(input)) {
+      return null;
+    }
+
+    if (preparedInput?.query?.isLocalFileQuestion || /\b(?:file|folder|desktop|downloads|documents|pictures)\b/.test(input)) {
+      return null;
+    }
+
+    const knowledgeCue = /\b(?:world\s+cup|fifa|ipl|cricket|match(?:es)?|fixtures?|schedule|list|release\s+date|premiere|price|best\s+movies?|top\s+movies?|news|score|winner|champion|event)\b/.test(input) ||
+      /\b(?:world\s+cup|fifa|ipl|cricket|match(?:es)?|fixtures?|schedule|list|release\s+date|premiere|price|best\s+movies?|top\s+movies?|news|score|winner|champion|event)\b/.test(rawLower);
+    if (!knowledgeCue) {
+      return null;
+    }
+
+    const browserSearchIntent = this.intentRegistry.get('browser.search');
+    return browserSearchIntent
+      ? {
+          intent: browserSearchIntent,
+          confidence: 0.9,
+          entities: {
+            query: corrected || raw,
+            openInBrowser: false
+          }
+        }
+      : null;
   }
 
   _extractLocalListLocation(input) {

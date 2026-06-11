@@ -368,6 +368,87 @@ describe('App Controller', function() {
     assert.equal(result.data.confirmEntities.forceNewWindow, true);
   });
 
+  it('should prefer known command launchers before Start menu entries for known apps', function() {
+    const childProcess = require('child_process');
+    const fs = require('fs');
+    const originalExecFileSync = childProcess.execFileSync;
+    const originalExistsSync = fs.existsSync;
+    const appsPath = require.resolve('../../core/automation/apps/index');
+    const launcherPath = require.resolve('../../core/automation/common/launcher');
+    const previousApps = require.cache[appsPath];
+    const previousLauncher = require.cache[launcherPath];
+    let launchedCommand = '';
+
+    try {
+      delete require.cache[appsPath];
+      delete require.cache[launcherPath];
+      fs.existsSync = (target) => {
+        if (String(target).toLowerCase().includes('google\\chrome\\application\\chrome.exe')) {
+          return false;
+        }
+        return originalExistsSync(target);
+      };
+      childProcess.execFileSync = (command, args) => {
+        if (command === 'where.exe') {
+          return '';
+        }
+        const serialized = Array.isArray(args) ? args.join(' ') : '';
+        if (command === 'powershell.exe' && serialized.includes("Start-Process -FilePath 'chrome'")) {
+          launchedCommand = 'chrome';
+          return '';
+        }
+        if (command === 'powershell.exe' && serialized.includes('Get-StartApps')) {
+          return JSON.stringify([{ Name: 'Google Chrome', AppID: 'C:\\Users\\rakes\\AppData\\Chrome' }]);
+        }
+        return originalExecFileSync(command, args);
+      };
+
+      const FreshAppController = require('../../core/automation/apps/index');
+      const controller = new FreshAppController({});
+      controller._getRunningProcessDetails = () => [];
+      let startMenuUsed = false;
+      controller._launchStartApp = () => {
+        startMenuUsed = true;
+      };
+
+      const result = controller.open('chrome');
+
+      assert.equal(result.success, true);
+      assert.equal(result.data.launchMethod, 'command');
+      assert.equal(launchedCommand, 'chrome');
+      assert.equal(startMenuUsed, false);
+    } finally {
+      childProcess.execFileSync = originalExecFileSync;
+      fs.existsSync = originalExistsSync;
+      delete require.cache[appsPath];
+      delete require.cache[launcherPath];
+      if (previousApps) require.cache[appsPath] = previousApps;
+      if (previousLauncher) require.cache[launcherPath] = previousLauncher;
+    }
+  });
+
+  it('should close WhatsApp by visible window before process fallback', function() {
+    const controller = new AppController({});
+    let windowCloseAttempted = false;
+    let processCloseAttempted = false;
+
+    controller._closeAppWindow = (name) => {
+      windowCloseAttempted = name === 'whatsapp';
+      return { success: true, data: { app: name, closeMethod: 'window' } };
+    };
+    controller._closeProcessesGracefully = () => {
+      processCloseAttempted = true;
+      return true;
+    };
+
+    const result = controller.close('whatsapp');
+
+    assert.equal(result.success, true);
+    assert.equal(result.data.closeMethod, 'window');
+    assert.equal(windowCloseAttempted, true);
+    assert.equal(processCloseAttempted, false);
+  });
+
   it('should open when the user confirms a new app window', function() {
     const controller = new AppController({});
     let launched = null;

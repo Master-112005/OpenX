@@ -637,6 +637,55 @@ describe('Action Router', function() {
     assert.equal(result.entities.query, 'what is the ipl score yesterday');
   });
 
+  it('should route bare public knowledge list requests to web search', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const result = await router.process('fifa world cup match list', 'chat');
+
+    assert.equal(result.intent, 'browser.search');
+    assert.equal(result.entities.query, 'fifa world cup match list');
+  });
+
+  it('should route live sports score requests to background web search before app matching', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const result = await router.process("show me today's IPL score", 'chat');
+
+    assert.equal(result.intent, 'browser.search');
+    assert.equal(result.entities.query, "show me today's ipl score");
+    assert.equal(result.entities.openInBrowser, false);
+  });
+
+  it('should keep developer file-system example searches on web search', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const result = await router.process('search for node js file system examples', 'chat');
+
+    assert.equal(result.intent, 'browser.search');
+    assert.equal(result.entities.query, 'node js file system examples');
+  });
+
   it('should route local time and date questions to system answers', async function() {
     const config = {
       permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
@@ -653,6 +702,22 @@ describe('Action Router', function() {
 
     assert.equal(time.intent, 'system.time');
     assert.equal(day.intent, 'system.date');
+  });
+
+  it('should route external release-date questions to web search, not system.date', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const result = await router.process('what is the dune 3 release date', 'chat');
+
+    assert.equal(result.intent, 'browser.search');
+    assert.equal(result.entities.query, 'what is the dune 3 release date');
   });
 
   it('should route arithmetic questions to local calculation', async function() {
@@ -789,6 +854,25 @@ describe('Action Router', function() {
     assert.equal(suv.entities.query, 'what is the cost of a suv in india');
   });
 
+  it('should preserve public web entity names in corrected search queries', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const tomCruise = await router.process('what is the tomcures best movies', 'chat');
+    const iphone = await router.process('what is the iphone 18 price', 'chat');
+
+    assert.equal(tomCruise.intent, 'browser.search');
+    assert.equal(tomCruise.entities.query, 'what is the tom cruise best movies');
+    assert.equal(iphone.intent, 'browser.search');
+    assert.equal(iphone.entities.query, 'what is the iphone 18 price');
+  });
+
   it('should mark search queries for browser opening only when explicit', async function() {
     const config = {
       permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
@@ -842,6 +926,87 @@ describe('Action Router', function() {
     assert.equal(result.intent, 'browser.openFirstResult');
     assert.equal(result.entities.query, 'chatgpt');
     assert.deepEqual(executed.map(step => step.actionId), ['browser.openFirstResult']);
+  });
+
+  it('should route trusted Google web product opens without treating them as desktop apps', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const photos = await router.process('open google phots', 'chat');
+    const colab = await router.process('open collab', 'chat');
+    const googleColab = await router.process('open google collab', 'chat');
+
+    assert.equal(photos.intent, 'browser.openFirstResult');
+    assert.equal(photos.entities.query, 'google photos');
+    assert.equal(colab.intent, 'browser.openFirstResult');
+    assert.equal(colab.entities.query, 'google colab');
+    assert.equal(googleColab.intent, 'browser.openFirstResult');
+    assert.equal(googleColab.entities.query, 'google colab');
+  });
+
+  it('should route natural web-app open phrasing through trusted web targets', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const photos = await router.process('please pull up google photes website', 'chat');
+    const maps = await router.process('show me google maps site', 'chat');
+
+    assert.equal(photos.intent, 'browser.openFirstResult');
+    assert.equal(photos.entities.query, 'google photos');
+    assert.equal(maps.intent, 'browser.openFirstResult');
+    assert.equal(maps.entities.query, 'google maps');
+  });
+
+  it('should route local photos requests to the Windows Photos app when the user says laptop', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const result = await router.process('open photes on laptop', 'chat');
+    const thisLaptop = await router.process('open photos on this laptop', 'chat');
+
+    assert.equal(result.intent, 'app.open');
+    assert.equal(result.entities.appName, 'photos');
+    assert.equal(thisLaptop.intent, 'app.open');
+    assert.equal(thisLaptop.entities.appName, 'photos');
+  });
+
+  it('should route spaced unmute and noisy set-volume phrases correctly', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...entities, value: entities?.value ?? 50 } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const unmute = await router.process('un mute', 'chat');
+    const volume = await router.process('ste it tom 100', 'chat');
+
+    assert.equal(unmute.intent, 'volume.unmute');
+    assert.equal(volume.intent, 'volume.set');
+    assert.equal(volume.entities.value, 100);
   });
 
   it('should route typo search commands to browser.search', async function() {
@@ -1225,6 +1390,68 @@ describe('Action Router', function() {
 
     assert.equal(result.intent, 'assistant.identity');
     assert.match(result.response, /JARVIS/);
+  });
+
+  it('should answer personal and assistant-name questions locally without web search', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId) {
+        return { success: true, data: { actionId, name: actionId === 'assistant.identity' ? 'JARVIS' : '' } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const personal = await router.process('what is my name', 'chat');
+    const assistantTypo = await router.process('what is your anme', 'chat');
+
+    assert.equal(personal.intent, 'assistant.userName');
+    assert.match(personal.response, /do not know your name/i);
+    assert.equal(assistantTypo.intent, 'assistant.identity');
+    assert.match(assistantTypo.response, /JARVIS/);
+  });
+
+  it('should reject incomplete commands instead of inventing targets', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const result = await router.process('show me', 'chat');
+
+    assert.equal(result.success, false);
+    assert.equal(result.intent, undefined);
+  });
+
+  it('should keep local system and file requests out of web search', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...entities, cpu: 10, ram: 50 } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const system = await router.process('how is my system doing', 'chat');
+    const pdfs = await router.process('find all PDFs downloaded this week', 'chat');
+    const duplicates = await router.process('find duplicate files', 'chat');
+    const browser = await router.process('open my browser', 'chat');
+    const screenshot = await router.process('show my latest screenshot', 'chat');
+
+    assert.equal(system.intent, 'system.status');
+    assert.equal(pdfs.intent, 'file.search');
+    assert.equal(duplicates.intent, 'file.search');
+    assert.equal(browser.intent, 'browser.open');
+    assert.equal(browser.entities.url, 'about:blank');
+    assert.equal(screenshot.intent, 'file.open');
+    assert.equal(screenshot.entities.filename, 'screenshot in pictures');
   });
 
   it('should answer assistant conversation and capability questions locally', async function() {
