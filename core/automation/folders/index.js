@@ -33,6 +33,13 @@ const EXCLUDED_SEARCH_DIRECTORIES = new Set([
   'windows'
 ]);
 
+const FOLDER_SEARCH_LIMITS = Object.freeze({
+  maxDepth: 7,
+  maxDirectories: 2500,
+  maxElapsedMs: 1200,
+  maxResults: 12
+});
+
 function uniquePaths(paths) {
   const seen = new Set();
   const result = [];
@@ -49,6 +56,10 @@ function uniquePaths(paths) {
 
 function searchRoots() {
   return uniquePaths([process.cwd(), getHomeDirectory(), ...Object.values(getSpecialFolders())]);
+}
+
+function hasSearchTimeRemaining(startedAt, maxElapsedMs) {
+  return !Number.isFinite(maxElapsedMs) || maxElapsedMs <= 0 || Date.now() - startedAt < maxElapsedMs;
 }
 
 class FolderController {
@@ -254,8 +265,9 @@ class FolderController {
     const exactMatches = findEntriesByName(safeName, {
       roots: searchRoots(),
       type: 'directory',
-      maxDepth: 8,
-      maxDirectories: 8000,
+      maxDepth: FOLDER_SEARCH_LIMITS.maxDepth,
+      maxDirectories: FOLDER_SEARCH_LIMITS.maxDirectories,
+      maxElapsedMs: FOLDER_SEARCH_LIMITS.maxElapsedMs,
       maxMatches: 12
     }) || [];
     if (exactMatches.length > 0) {
@@ -273,9 +285,7 @@ class FolderController {
 
     for (const root of roots) {
       this._searchFoldersRecursive(root, lowerQuery, results, {
-        maxDepth: 8,
-        maxDirectories: 8000,
-        maxResults: 12,
+        ...FOLDER_SEARCH_LIMITS,
         visitedDirectories
       });
       if (results.length >= 12) {
@@ -295,10 +305,20 @@ class FolderController {
     const visitedDirectories = options.visitedDirectories || new Set();
     const maxDepth = options.maxDepth ?? 6;
     const maxDirectories = options.maxDirectories ?? 1500;
+    const maxElapsedMs = options.maxElapsedMs ?? FOLDER_SEARCH_LIMITS.maxElapsedMs;
+    const startedAt = options.startedAt || Date.now();
     let visited = 0;
 
-    while (queue.length > 0 && visited < maxDirectories && results.length < (options.maxResults || 12)) {
-      const { directory, depth } = queue.shift();
+    for (
+      let cursor = 0;
+      cursor < queue.length && visited < maxDirectories && results.length < (options.maxResults || 12);
+      cursor += 1
+    ) {
+      if (!hasSearchTimeRemaining(startedAt, maxElapsedMs)) {
+        break;
+      }
+
+      const { directory, depth } = queue[cursor];
       const directoryKey = path.resolve(directory).toLowerCase();
       if (visitedDirectories.has(directoryKey)) {
         continue;

@@ -48,6 +48,20 @@ const EXCLUDED_SEARCH_DIRECTORIES = new Set([
   'windows'
 ]);
 
+const FILE_SEARCH_LIMITS = Object.freeze({
+  maxDepth: 7,
+  maxDirectories: 2500,
+  maxElapsedMs: 1500,
+  maxResults: 40
+});
+
+const SMART_FIND_LIMITS = Object.freeze({
+  maxDepth: 7,
+  maxDirectories: 3500,
+  maxElapsedMs: 1800,
+  maxResults: 1200
+});
+
 function uniquePaths(paths) {
   const seen = new Set();
   const result = [];
@@ -60,6 +74,29 @@ function uniquePaths(paths) {
     result.push(resolved);
   }
   return result;
+}
+
+function createSearchStats(kind, roots) {
+  return {
+    kind,
+    roots,
+    visitedDirectories: 0,
+    skippedDirectories: 0,
+    matchedEntries: 0,
+    partial: false,
+    partialReason: null,
+    elapsedMs: 0
+  };
+}
+
+function markPartial(stats, reason) {
+  if (!stats || stats.partial) return;
+  stats.partial = true;
+  stats.partialReason = reason;
+}
+
+function hasSearchTimeRemaining(startedAt, maxElapsedMs) {
+  return !Number.isFinite(maxElapsedMs) || maxElapsedMs <= 0 || Date.now() - startedAt < maxElapsedMs;
 }
 
 class FileController {
@@ -288,7 +325,7 @@ class FileController {
     }
   }
 
-  search(query) {
+  search(query, options = {}) {
     if (!query) {
       return { success: false, error: 'No search query provided' };
     }
@@ -298,23 +335,32 @@ class FileController {
     const searchDirs = uniquePaths(SEARCH_ROOTS());
     const lowerQuery = cleanQuery.toLowerCase();
     const visitedDirectories = new Set();
+    const startedAt = Date.now();
+    const limits = this._resolveSearchLimits(FILE_SEARCH_LIMITS, options);
+    const stats = createSearchStats('file.search', searchDirs.length);
 
     for (const dir of searchDirs) {
+      if (!hasSearchTimeRemaining(startedAt, limits.maxElapsedMs)) {
+        markPartial(stats, 'time-budget');
+        break;
+      }
       if (!dir || !fs.existsSync(dir)) continue;
       try {
         this._searchDirectoryRecursive(dir, lowerQuery, results, {
-          maxDepth: 8,
-          maxDirectories: 8000,
-          maxResults: 40,
+          ...limits,
           includeFolders: true,
-          visitedDirectories
+          visitedDirectories,
+          stats,
+          startedAt
         });
       } catch (err) {
+        stats.skippedDirectories += 1;
         continue;
       }
     }
 
     const uniqueResults = Array.from(new Set(results)).slice(0, 20);
+    stats.elapsedMs = Date.now() - startedAt;
 
     return {
       success: true,
@@ -326,7 +372,8 @@ class FileController {
           path: resultPath
         })),
         count: uniqueResults.length,
-        query: cleanQuery
+        query: cleanQuery,
+        searchStats: stats
       }
     };
   }
@@ -349,14 +396,27 @@ class FileController {
 
     const files = [];
     const visitedDirectories = new Set();
+    const startedAt = Date.now();
+    const limits = this._resolveSearchLimits(SMART_FIND_LIMITS, {
+      ...options,
+      maxDepth: options.maxDepth ?? (location ? 10 : SMART_FIND_LIMITS.maxDepth),
+      maxDirectories: options.maxDirectories ?? (location ? 2500 : SMART_FIND_LIMITS.maxDirectories),
+      maxElapsedMs: options.maxElapsedMs ?? (location ? 1600 : SMART_FIND_LIMITS.maxElapsedMs)
+    });
+    const stats = createSearchStats('file.smartFind', roots.length);
     for (const root of roots) {
+      if (!hasSearchTimeRemaining(startedAt, limits.maxElapsedMs)) {
+        markPartial(stats, 'time-budget');
+        break;
+      }
       this._collectFilesRecursive(root, files, {
-        maxDepth: location ? 10 : 8,
-        maxDirectories: location ? 5000 : 9000,
-        maxResults: 2000,
-        visitedDirectories
+        ...limits,
+        visitedDirectories,
+        stats,
+        startedAt
       });
     }
+    stats.elapsedMs = Date.now() - startedAt;
 
     const filtered = files
       .filter(file => this._matchesSmartFileType(file, fileType))
@@ -386,7 +446,8 @@ class FileController {
         results: results.map(entry => entry.path),
         entries: results,
         duplicates,
-        opened: openResult && sorted[0] ? this._fileEntry(sorted[0]) : null
+        opened: openResult && sorted[0] ? this._fileEntry(sorted[0]) : null,
+        searchStats: stats
       }
     };
   }
@@ -535,8 +596,9 @@ class FileController {
     const exactMatches = findEntriesByName(safeName, {
       roots: SEARCH_ROOTS(),
       type: 'file',
-      maxDepth: 8,
-      maxDirectories: 8000,
+      maxDepth: 7,
+      maxDirectories: 2500,
+      maxElapsedMs: 1200,
       maxMatches: 12
     }) || [];
     if (exactMatches.length > 1) {
@@ -551,8 +613,9 @@ class FileController {
     const visitedDirectories = new Set();
     for (const root of uniquePaths(SEARCH_ROOTS())) {
       this._searchDirectoryRecursive(root, path.basename(safeName).toLowerCase(), fuzzyMatches, {
-        maxDepth: 8,
-        maxDirectories: 8000,
+        maxDepth: 7,
+        maxDirectories: 2500,
+        maxElapsedMs: 1200,
         maxResults: 12,
         filesOnly: true,
         fuzzyName: safeName,
@@ -571,10 +634,21 @@ class FileController {
     const visitedDirectories = options.visitedDirectories || new Set();
     const maxDepth = options.maxDepth ?? 6;
     const maxDirectories = options.maxDirectories ?? 1500;
+    const maxElapsedMs = options.maxElapsedMs ?? FILE_SEARCH_LIMITS.maxElapsedMs;
+    const startedAt = options.startedAt || Date.now();
     let visited = 0;
 
-    while (queue.length > 0 && visited < maxDirectories && results.length < (options.maxResults || 40)) {
-      const { directory, depth } = queue.shift();
+    for (
+      let cursor = 0;
+      cursor < queue.length && visited < maxDirectories && results.length < (options.maxResults || 40);
+      cursor += 1
+    ) {
+      if (!hasSearchTimeRemaining(startedAt, maxElapsedMs)) {
+        markPartial(options.stats, 'time-budget');
+        break;
+      }
+
+      const { directory, depth } = queue[cursor];
       const resolvedDirectory = path.resolve(directory);
       const directoryKey = resolvedDirectory.toLowerCase();
       if (visitedDirectories.has(directoryKey)) {
@@ -582,11 +656,17 @@ class FileController {
       }
       visitedDirectories.add(directoryKey);
       visited += 1;
+      if (options.stats) {
+        options.stats.visitedDirectories += 1;
+      }
 
       let entries = [];
       try {
         entries = fs.readdirSync(directory, { withFileTypes: true });
       } catch (err) {
+        if (options.stats) {
+          options.stats.skippedDirectories += 1;
+        }
         continue;
       }
 
@@ -600,6 +680,9 @@ class FileController {
 
         if (isMatch && (!options.filesOnly || entry.isFile()) && (options.includeFolders || !isDirectory)) {
           results.push(entryPath);
+          if (options.stats) {
+            options.stats.matchedEntries += 1;
+          }
           if (results.length >= (options.maxResults || 40)) {
             break;
           }
@@ -607,8 +690,14 @@ class FileController {
 
         if (depth < maxDepth && isDirectory && this._shouldDescendIntoDirectory(entry.name)) {
           queue.push({ directory: entryPath, depth: depth + 1 });
+        } else if (isDirectory && !this._shouldDescendIntoDirectory(entry.name) && options.stats) {
+          options.stats.skippedDirectories += 1;
         }
       }
+    }
+
+    if (visited >= maxDirectories && results.length < (options.maxResults || 40)) {
+      markPartial(options.stats, 'directory-limit');
     }
   }
 
@@ -621,10 +710,21 @@ class FileController {
     const visitedDirectories = options.visitedDirectories || new Set();
     const maxDepth = options.maxDepth ?? 6;
     const maxDirectories = options.maxDirectories ?? 1500;
+    const maxElapsedMs = options.maxElapsedMs ?? SMART_FIND_LIMITS.maxElapsedMs;
+    const startedAt = options.startedAt || Date.now();
     let visited = 0;
 
-    while (queue.length > 0 && visited < maxDirectories && results.length < (options.maxResults || 2000)) {
-      const { directory, depth } = queue.shift();
+    for (
+      let cursor = 0;
+      cursor < queue.length && visited < maxDirectories && results.length < (options.maxResults || 2000);
+      cursor += 1
+    ) {
+      if (!hasSearchTimeRemaining(startedAt, maxElapsedMs)) {
+        markPartial(options.stats, 'time-budget');
+        break;
+      }
+
+      const { directory, depth } = queue[cursor];
       const resolvedDirectory = path.resolve(directory);
       const directoryKey = resolvedDirectory.toLowerCase();
       if (visitedDirectories.has(directoryKey)) {
@@ -632,11 +732,17 @@ class FileController {
       }
       visitedDirectories.add(directoryKey);
       visited += 1;
+      if (options.stats) {
+        options.stats.visitedDirectories += 1;
+      }
 
       let entries = [];
       try {
         entries = fs.readdirSync(directory, { withFileTypes: true });
       } catch (err) {
+        if (options.stats) {
+          options.stats.skippedDirectories += 1;
+        }
         continue;
       }
 
@@ -662,9 +768,24 @@ class FileController {
           }
         } else if (entry.isDirectory() && depth < maxDepth && this._shouldDescendIntoDirectory(entry.name)) {
           queue.push({ directory: entryPath, depth: depth + 1 });
+        } else if (entry.isDirectory() && !this._shouldDescendIntoDirectory(entry.name) && options.stats) {
+          options.stats.skippedDirectories += 1;
         }
       }
     }
+
+    if (visited >= maxDirectories && results.length < (options.maxResults || 2000)) {
+      markPartial(options.stats, 'directory-limit');
+    }
+  }
+
+  _resolveSearchLimits(defaults, options = {}) {
+    return {
+      maxDepth: Number.isFinite(options.maxDepth) ? options.maxDepth : defaults.maxDepth,
+      maxDirectories: Number.isFinite(options.maxDirectories) ? options.maxDirectories : defaults.maxDirectories,
+      maxElapsedMs: Number.isFinite(options.maxElapsedMs) ? options.maxElapsedMs : defaults.maxElapsedMs,
+      maxResults: Number.isFinite(options.maxResults) ? options.maxResults : defaults.maxResults
+    };
   }
 
   _matchesSmartFileType(file, fileType) {
