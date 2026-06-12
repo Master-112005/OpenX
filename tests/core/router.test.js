@@ -1358,7 +1358,7 @@ describe('Action Router', function() {
     assert.equal(help.intent, 'help');
   });
 
-  it('should route personal photo requests to the photo library instead of web search', async function() {
+  it('should route personal photo requests through personal context instead of blind web search', async function() {
     const config = {
       permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
     };
@@ -1368,7 +1368,35 @@ describe('Action Router', function() {
       }
     };
     const router = new ActionRouter(config, stubEngine);
-    const result = await router.process('find a pic with my classmetes in the photos', 'chat');
+    const local = await router.process('can you find me a pic me with my classmates', 'chat');
+    const google = await router.process('find a pic with my classmates in google photos', 'chat');
+    const photosApp = await router.process('find my family pictures in the photos app', 'chat');
+
+    assert.equal(local.intent, 'file.search');
+    assert.equal(local.entities.query, 'classmates me');
+    assert.equal(local.entities.personalSearchType, 'photo');
+    assert.equal(google.intent, 'browser.openFirstResult');
+    assert.equal(google.entities.query, 'google photos');
+    assert.equal(photosApp.intent, 'app.open');
+    assert.equal(photosApp.entities.appName, 'photos');
+  });
+
+  it('should apply learned personal photo library preference during routing', async function() {
+    const ActiveLearningStore = require('../../core/assistant/learning/index');
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const learningStore = new ActiveLearningStore({
+      activeLearning: { enabled: true },
+      app: { dataDir: require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'jarvis-router-learning-')) }
+    });
+    learningStore.rememberPreference('photoLibrary', 'googlePhotos');
+    const router = new ActionRouter({ ...config, learningStore }, {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...entities } };
+      }
+    });
+    const result = await router.process('find my classmates photo', 'chat');
 
     assert.equal(result.intent, 'browser.openFirstResult');
     assert.equal(result.entities.query, 'google photos');

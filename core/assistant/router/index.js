@@ -98,6 +98,7 @@ class ActionRouter {
       this._resolveExplicitWindowIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitCommunicationIntent(rawCommandText, preparedInput) ||
       this._resolveBrowserFollowupIntent(rawCommandText, preparedInput) ||
+      this._resolvePersonalPhotoIntent(rawCommandText, preparedInput) ||
       this._resolveKnownWebOpenIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitOpenIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitAppOpenIntent(rawCommandText, preparedInput) ||
@@ -105,7 +106,6 @@ class ActionRouter {
       this._resolveLocalFileListIntent(rawCommandText, preparedInput) ||
       this._resolveAssistantConversationIntent(rawCommandText, preparedInput) ||
       this._resolveLocalFileSearchIntent(rawCommandText, preparedInput) ||
-      this._resolvePersonalPhotoIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitSearchIntent(rawCommandText, preparedInput) ||
       this._resolveGeneralQuestionSearchIntent(rawCommandText, preparedInput) ||
       this._matchIntent(preparedInput)
@@ -400,7 +400,9 @@ class ActionRouter {
           ? this._buildResponse('success', intentResult.intent.id, {
               entities,
               result: responseResult,
-              intent: intentResult.intent
+              intent: intentResult.intent,
+              input: rawCommandText,
+              source
             })
           : this._buildResponse('error', 'executionFailed', {
               error: result.error,
@@ -1289,7 +1291,24 @@ class ActionRouter {
       /^(?:hello|hi|hey|good\s+(?:morning|afternoon|evening))\b/.test(combined)
     ) {
       const intent = this.intentRegistry.get('greeting');
-      return intent ? { intent, confidence: 1, entities: {} } : null;
+      if (!intent) {
+        return null;
+      }
+
+      const greetingType = /\bgood\s+morning\b/.test(combined)
+        ? 'morning'
+        : /\bgood\s+afternoon\b/.test(combined)
+          ? 'afternoon'
+          : /\bgood\s+evening\b/.test(combined)
+            ? 'evening'
+            : /^how\s+are\s+you\b/.test(combined)
+              ? 'wellbeing'
+              : /^hi\b/.test(combined)
+                ? 'hi'
+                : /^hey\b/.test(combined)
+                  ? 'hey'
+                  : 'hello';
+      return { intent, confidence: 1, entities: { greetingType } };
     }
 
     if (
@@ -1491,8 +1510,51 @@ class ActionRouter {
       return null;
     }
 
-    const intent = this.intentRegistry.get('browser.openFirstResult');
-    return intent ? { intent, confidence: 0.95, entities: { query: 'google photos' } } : null;
+    const photoLibrary = this.learningStore?.getPreference?.('photoLibrary')?.value || '';
+    const wantsGooglePhotos = /\bgoogle\s+photos?\b/.test(input) || photoLibrary === 'googlePhotos';
+    if (wantsGooglePhotos) {
+      const intent = this.intentRegistry.get('browser.openFirstResult');
+      return intent ? { intent, confidence: 0.95, entities: { query: 'google photos' } } : null;
+    }
+
+    const wantsWindowsPhotos = /\b(?:microsoft\s+photos|windows\s+photos|photos\s+app)\b/.test(input) ||
+      photoLibrary === 'windowsPhotos';
+    if (wantsWindowsPhotos) {
+      const intent = this.intentRegistry.get('app.open');
+      return intent ? { intent, confidence: 0.92, entities: { appName: 'photos' } } : null;
+    }
+
+    const intent = this.intentRegistry.get('file.search');
+    return intent
+      ? {
+          intent,
+          confidence: 0.95,
+          entities: {
+            query: this._extractPersonalPhotoQuery(input),
+            personalSearchType: 'photo'
+          }
+        }
+      : null;
+  }
+
+  _extractPersonalPhotoQuery(input) {
+    const text = String(input || '')
+      .toLowerCase()
+      .replace(/\bclassmetes\b/g, 'classmates')
+      .replace(/\bclassm[eai]tes\b/g, 'classmates');
+    const priorityTerms = [
+      ['classmates', /\b(?:classmates?|class\s+mates?|college\s+friends?|school\s+friends?)\b/],
+      ['friends', /\bfriends?\b/],
+      ['family', /\bfamily\b/],
+      ['me', /\b(?:me|myself|mine)\b/],
+      ['recent', /\brecent\b/]
+    ];
+    const matched = priorityTerms
+      .filter(([, pattern]) => pattern.test(text))
+      .map(([term]) => term);
+    return matched.length > 0
+      ? Array.from(new Set(matched)).join(' ')
+      : 'photos';
   }
 
   _extractLocalListLocation(input) {

@@ -824,4 +824,26 @@ describe('Assistant Confirmation Flow', function() {
     assert.match(after.response, /your name is rakes/i);
     assert.deepEqual(routedInputs, []);
   });
+
+  it('should vary conversational greetings by user phrasing', async function() {
+    const assistant = new Assistant({}, {
+      automation: {
+        execute: async () => ({ success: true, data: {} })
+      },
+      eventBus: { publish() {} }
+    });
+
+    const morning = await assistant.processCommand('good morning');
+    const hello = await assistant.processCommand('hello');
+    const hi = await assistant.processCommand('hi');
+    const wellbeing = await assistant.processCommand('how are you');
+
+    assert.equal(morning.intent, 'greeting');
+    assert.equal(hello.intent, 'greeting');
+    assert.equal(hi.intent, 'greeting');
+    assert.equal(wellbeing.intent, 'greeting');
+    assert.notEqual(morning.response, hello.response);
+    assert.notEqual(hello.response, hi.response);
+    assert.notEqual(hello.response, wellbeing.response);
+  });
 });

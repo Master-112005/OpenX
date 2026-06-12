@@ -59,6 +59,19 @@ describe('Active Learning Store', function() {
     assert.equal(media.mediaPlatform, 'spotify');
   });
 
+  it('should remember personal photo library preferences', function() {
+    const { tempDir, store } = createStore();
+
+    const learned = store.learnFromText('remember my photo library is Google Photos');
+    const reloaded = new ActiveLearningStore({
+      app: { dataDir: tempDir },
+      activeLearning: { enabled: true }
+    });
+
+    assert.equal(learned.type, 'preference');
+    assert.equal(reloaded.getPreference('photoLibrary').value, 'googlePhotos');
+  });
+
   it('should suppress repeated high-confidence feedback prompts for the same action', function() {
     const { store } = createStore();
     const entry = {

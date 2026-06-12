@@ -174,7 +174,27 @@ describe('Response Generator', function() {
   it('should use formal addressing by default', function() {
     const gen = new ResponseGenerator();
     const result = gen.generate('info', 'idle');
-    assert.equal(result, 'Awaiting your next command, sir.');
+    assert.equal(result, 'Ready when you are, sir.');
+  });
+
+  it('should vary short conversational greetings', function() {
+    const gen = new ResponseGenerator();
+    const hello = gen.generate('success', 'greeting', {
+      entities: { greetingType: 'hello' },
+      input: 'hello'
+    });
+    const hi = gen.generate('success', 'greeting', {
+      entities: { greetingType: 'hi' },
+      input: 'hi'
+    });
+    const hey = gen.generate('success', 'greeting', {
+      entities: { greetingType: 'hey' },
+      input: 'hey'
+    });
+
+    assert.notEqual(hello, hi);
+    assert.notEqual(hi, hey);
+    assert.notEqual(hello, hey);
   });
 
   it('should support a configured honorific', function() {

@@ -114,6 +114,15 @@ class ActiveLearningStore {
     return record;
   }
 
+  getPreference(kind) {
+    if (!this.enabled || !kind) {
+      return null;
+    }
+
+    const record = this.data.preferences[kind];
+    return record ? { ...record, kind } : null;
+  }
+
   rememberUserFact(kind, value, metadata = {}) {
     if (!this.enabled || !kind) {
       return null;
@@ -331,6 +340,30 @@ class ActiveLearningStore {
         return {
           type: 'user-fact',
           response: `I will remember that your name is ${fact.value}.`
+        };
+      }
+    }
+
+    const photoLibraryMatch = normalized.match(/\b(?:remember|learn)\b.*\b(?:my\s+)?(?:photo|photos|picture|pictures)\s+(?:library|app|source|place)\s+(?:is|as|to|in)\s+(.+)$/);
+    if (photoLibraryMatch?.[1]) {
+      const source = photoLibraryMatch[1].trim();
+      const value = /\bgoogle\s+photos?\b/.test(source)
+        ? 'googlePhotos'
+        : /\b(?:windows|microsoft)\s+photos?\b|\bphotos\s+app\b/.test(source)
+          ? 'windowsPhotos'
+          : /\b(?:local|pictures?|photos?\s+folder|computer|pc|laptop)\b/.test(source)
+            ? 'localPictures'
+            : '';
+      if (value) {
+        this.rememberPreference('photoLibrary', value, { source: 'explicit-learning' });
+        const label = value === 'googlePhotos'
+          ? 'Google Photos'
+          : value === 'windowsPhotos'
+            ? 'Windows Photos'
+            : 'local Pictures';
+        return {
+          type: 'preference',
+          response: `I learned that your photo library is ${label}.`
         };
       }
     }

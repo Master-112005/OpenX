@@ -180,16 +180,16 @@ const RESPONSE_BUILDERS = {
     'app.open': context => {
       const name = valueFromContext(context, 'appName');
       return chooseVariant(`app.open:${name}`, [
-        `Opening ${name} now.`,
+        `Opening ${name}.`,
         `Launching ${name}.`,
-        `${name} is opening now.`
+        `${name} is coming up.`
       ]);
     },
     'app.close': context => {
       const name = valueFromContext(context, 'appName');
       return chooseVariant(`app.close:${name}`, [
-        `${name} has been closed.`,
-        `Closing ${name} now.`,
+        `${name} is closed.`,
+        `Closing ${name}.`,
         `Closed ${name}.`
       ]);
     },
@@ -281,7 +281,7 @@ const RESPONSE_BUILDERS = {
       const count = valueFromContext(context, 'count', context.result?.data?.count || 0);
       const entries = valueFromContext(context, 'entries', context.result?.data?.entries || []);
       if (count === 0) {
-        return `I couldn't find any matching files or folders.`;
+        return `I couldn't find a matching file or folder.`;
       }
 
       const names = Array.isArray(entries)
@@ -364,14 +364,14 @@ const RESPONSE_BUILDERS = {
         const top = results[0];
         const snippet = top.snippet || top.title || '';
         return snippet
-          ? `I found this for "${query}": ${snippet}`
+          ? `Here's what I found for "${query}": ${snippet}`
           : `I found results for "${query}".`;
       }
 
       return chooseVariant(`browser.search:${query}`, [
-        `I searched the web for "${query}".`,
-        `I looked that up in the background: "${query}".`,
-        `I checked the web for "${query}".`
+        `I checked the web for "${query}".`,
+        `I looked that up in the background.`,
+        `I searched for "${query}".`
       ]);
     },
     'browser.openFirstResult': context => {
@@ -392,7 +392,7 @@ const RESPONSE_BUILDERS = {
     },
     'system.time': context => {
       const time = valueFromContext(context, 'time');
-      return time ? `The time is ${time}.` : 'I could not read the current time.';
+      return time ? `It's ${time}.` : 'I could not read the current time.';
     },
     'system.date': context => {
       const date = valueFromContext(context, 'date');
@@ -401,7 +401,7 @@ const RESPONSE_BUILDERS = {
     'system.calculate': context => {
       const result = valueFromContext(context, 'result');
       return result !== '' && result !== null && result !== undefined
-        ? `The answer is ${result}.`
+        ? `That is ${result}.`
         : 'I could not calculate that.';
     },
     'system.screenshot': context => {
@@ -425,11 +425,11 @@ const RESPONSE_BUILDERS = {
       }
       return `Now playing "${query}" on ${displayName}.`;
     },
-    'media.next': () => 'Skipped to the next track.',
-    'media.previous': () => 'Moved back to the previous track.',
-    'media.pause': () => 'Playback is paused.',
-    'media.resume': () => 'Playback has resumed.',
-    'media.stop': () => 'Playback is stopped.',
+    'media.next': () => 'Skipping to the next track.',
+    'media.previous': () => 'Going back to the previous track.',
+    'media.pause': () => 'Paused.',
+    'media.resume': () => 'Resuming playback.',
+    'media.stop': () => 'Stopped playback.',
     'media.search': context => {
       const query = valueFromContext(context, 'query', valueFromContext(context, 'mediaQuery', 'music'));
       const rawPlatform = valueFromContext(context, 'platform', valueFromContext(context, 'mediaPlatform', 'YouTube'));
@@ -614,16 +614,53 @@ const RESPONSE_BUILDERS = {
         `I've closed ${win} for you.`
       ]);
     },
-    'help': () => 'I can manage applications, open websites, handle files and folders, control playback, and adjust system settings. Tell me what you need.',
-    'greeting': () => chooseVariant('greeting', [
-      'Good day. How may I assist you?',
-      'Hello. What would you like me to do?',
-      'Ready when you are. Please give me your instruction.'
-    ]),
+    'help': () => 'I can open apps, search the web, manage files and folders, control media, and adjust system settings. Tell me the task in your own words.',
+    'greeting': context => {
+      const type = valueFromContext(context, 'greetingType', 'hello');
+      const input = valueFromContext(context, 'input', type);
+      const variantsByType = {
+        morning: [
+          'Good morning. What should we start with?',
+          'Good morning. I am ready when you are.',
+          'Morning. What can I help you with first?'
+        ],
+        afternoon: [
+          'Good afternoon. What would you like me to handle?',
+          'Good afternoon. I am ready to help.',
+          'Afternoon. What should I work on?'
+        ],
+        evening: [
+          'Good evening. What can I do for you?',
+          'Good evening. I am ready when you are.',
+          'Evening. What would you like handled?'
+        ],
+        wellbeing: [
+          'I am doing fine. What can I help with?',
+          'Doing well. What should I handle?',
+          'I am ready to help. What do you need?'
+        ],
+        hi: [
+          'Hi. What can I help with?',
+          'Hi. What do you need?',
+          'Hey. What should I handle?'
+        ],
+        hey: [
+          'Hey. What can I do for you?',
+          'Hey. What do you need?',
+          'I am here. What should I handle?'
+        ],
+        hello: [
+          'Hello. What can I help with?',
+          'Hello. What would you like me to do?',
+          'I am here. What should I handle?'
+        ]
+      };
+      return chooseVariant(`greeting:${type}:${input}`, variantsByType[type] || variantsByType.hello);
+    },
     'thanks': () => chooseVariant('thanks', [
       'You are welcome.',
-      'Glad to assist.',
-      'Always at your service.'
+      'No problem.',
+      'Anytime.'
     ]),
     default: () => 'Done.'
   },
@@ -632,9 +669,9 @@ const RESPONSE_BUILDERS = {
     unknownCommand: context => {
       const suggestions = Array.isArray(context?.suggestions) ? context.suggestions.filter(Boolean) : [];
       if (suggestions.length > 0) {
-        return `I could not confidently map that request to an action. Please rephrase it, or try: ${suggestions.join(', ')}`;
+        return `I am not sure which action you want. Try saying it another way, or try: ${suggestions.join(', ')}`;
       }
-      return 'I could not understand that clearly enough to take action. Please say it another way, or ask what I can do.';
+      return 'I am not sure what action you want. Please say it another way, or ask what I can do.';
     },
     executionFailed: context => humanizeError(context?.error),
     permissionDenied: () => 'I cannot do that with the current permission setting. You can change assistant permissions in Settings if you want me to act without asking.',
@@ -664,18 +701,18 @@ const RESPONSE_BUILDERS = {
     confirmRestart: () => 'Please confirm that you authorize the system to initiate a reboot',
     confirmAction: context => {
       const details = valueFromContext(context, 'details', valueFromContext(context, 'action'));
-      return `Before I continue, please confirm this request: ${details}. Say yes to continue or no to cancel.`;
+      return `Before I do that, please confirm: ${details}. Say yes to continue or no to cancel.`;
     },
-    awaitingDecision: () => 'I am waiting for your decision. Please say proceed or cancel.',
+    awaitingDecision: () => 'Please say proceed or cancel.',
     cancelled: () => 'Understood. I have cancelled that action.',
     timedOut: () => 'The confirmation timed out, so I cancelled that request.',
     default: () => 'I need your confirmation before I proceed with that operation.'
   },
 
   info: {
-    listening: () => 'Listening now.',
-    processing: () => 'Working on that now.',
-    idle: () => 'Awaiting your next command.',
+    listening: () => 'Listening.',
+    processing: () => 'Working on it.',
+    idle: () => 'Ready when you are.',
     wakeWord: () => {
       const isTest = typeof global.it === 'function' || process.env.NODE_ENV === 'test';
       if (isTest) {
