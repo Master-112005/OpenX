@@ -124,6 +124,14 @@ class Assistant extends EventEmitter {
         return learningResult;
       }
 
+      const sessionContextResult = this._answerSessionContextQuestion(input, source) ||
+        this._answerTimeUntilQuestion(input, source) ||
+        this._answerUnsupportedPersonalIntegration(input, source);
+      if (sessionContextResult) {
+        this.context.record(input, {}, sessionContextResult);
+        return sessionContextResult;
+      }
+
       const memoryResult = this._answerPersonalMemoryQuestion(input, source);
       if (memoryResult) {
         return memoryResult;
@@ -272,12 +280,180 @@ class Assistant extends EventEmitter {
     };
   }
 
+  _answerSessionContextQuestion(input, source) {
+    const normalized = Normalizer.normalizeText(String(input || '').trim());
+    if (!normalized) {
+      return null;
+    }
+
+    if (/^(?:what\s+were\s+)?(?:the\s+)?last\s+three\s+commands\s+i\s+gave\b/.test(normalized)) {
+      const commands = this.context.getRecentCommands(3);
+      return this._directContextResult(source, commands.length
+        ? `Your last three commands were: ${commands.join('; ')}.`
+        : 'I do not have three commands in this session yet.');
+    }
+
+    if (/^what\s+did\s+i\s+ask\s+you\s+to\s+do\s+today\b/.test(normalized)) {
+      const commands = this.context.getCommandsToday()
+        .map(entry => entry.input)
+        .filter(Boolean)
+        .slice(-8);
+      return this._directContextResult(source, commands.length
+        ? `Today you asked me to: ${commands.join('; ')}.`
+        : 'I do not have any commands recorded for today yet.');
+    }
+
+    if (/^what\s+was\s+my\s+first\s+command\b/.test(normalized)) {
+      const first = this.context.getFirstCommandToday();
+      return this._directContextResult(source, first?.input
+        ? `Your first command today was: ${first.input}.`
+        : 'I do not have a first command recorded for today yet.');
+    }
+
+    if (/^what\s+was\s+my\s+last\s+command\b/.test(normalized)) {
+      const last = this.context.getLastCommand();
+      return this._directContextResult(source, last?.input
+        ? `Your last command was: ${last.input}.`
+        : 'I do not have a previous command recorded yet.');
+    }
+
+    if (/^(?:what\s+was\s+)?(?:the\s+)?last\s+thing\s+i\s+searched\b/.test(normalized)) {
+      const search = this.context.getLastSearch();
+      const query = search?.entities?.query || search?.data?.query || '';
+      return this._directContextResult(source, query
+        ? `Your last search was: ${query}.`
+        : 'I do not have a previous search recorded yet.');
+    }
+
+    if (/^which\s+one\s+did\s+i\s+search\s+first\b/.test(normalized)) {
+      const search = this.context.getFirstSearchToday();
+      const query = search?.entities?.query || search?.data?.query || '';
+      return this._directContextResult(source, query
+        ? `The first search I have for today is: ${query}.`
+        : 'I do not have a search recorded for today yet.');
+    }
+
+    if (/^which\s+app\s+did\s+i\s+open\s+before\s+this\b/.test(normalized)) {
+      const previous = this.context.getPreviousAppOpen();
+      return this._directContextResult(source, previous?.entities?.appName
+        ? `Before this, you opened ${previous.entities.appName}.`
+        : 'I do not have an earlier app open recorded in this session.');
+    }
+
+    if (/^which\s+app\s+did\s+you\s+close\b/.test(normalized)) {
+      const closed = this.context.getLastAppAction('app.close');
+      return this._directContextResult(source, closed?.entities?.appName
+        ? `I last closed ${closed.entities.appName}.`
+        : 'I do not have a closed app recorded in this session.');
+    }
+
+    if (/^(?:what\s+file\s+(?:were\s+we\s+discussing|did\s+i\s+open)\s+earlier|what\s+file\s+is\s+this)\b/.test(normalized)) {
+      const fileEntry = this.context.getLastFileReference();
+      const file = this.context.getFileReference(fileEntry);
+      return this._directContextResult(source, file?.name
+        ? `The file in context is ${file.name}${file.path ? ` at ${file.path}` : ''}.`
+        : 'I do not have a file in context yet.');
+    }
+
+    if (/^(?:what\s+is\s+)?(?:its|the)\s+file\s+name\b/.test(normalized)) {
+      const fileEntry = this.context.getLastFileReference();
+      const file = this.context.getFileReference(fileEntry);
+      return this._directContextResult(source, file?.name
+        ? `The file name is ${file.name}.`
+        : 'I do not have a file in context yet.');
+    }
+
+    return null;
+  }
+
+  _answerTimeUntilQuestion(input, source) {
+    const text = String(input || '').trim();
+    const match = text.match(/\b(?:how\s+long\s+until|time\s+until|calculate\s+how\s+long\s+until)\s+(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\b/i);
+    if (!match) {
+      return null;
+    }
+
+    const now = new Date();
+    let hour = Number(match[1]);
+    const minute = Number(match[2] || 0);
+    const meridiem = String(match[3] || '').toLowerCase();
+    if (meridiem === 'pm' && hour < 12) hour += 12;
+    if (meridiem === 'am' && hour === 12) hour = 0;
+    const target = new Date(now);
+    target.setHours(hour, minute, 0, 0);
+    if (target <= now) {
+      target.setDate(target.getDate() + 1);
+    }
+
+    const diffMs = target.getTime() - now.getTime();
+    const totalMinutes = Math.max(0, Math.round(diffMs / 60000));
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    const parts = [
+      hours ? `${hours} hour${hours === 1 ? '' : 's'}` : '',
+      minutes ? `${minutes} minute${minutes === 1 ? '' : 's'}` : ''
+    ].filter(Boolean);
+    return this._directContextResult(source, `${parts.join(' and ') || 'less than a minute'} until ${match[1]}${match[2] ? `:${match[2]}` : ''}${meridiem ? ` ${meridiem.toUpperCase()}` : ''}.`);
+  }
+
+  _answerUnsupportedPersonalIntegration(input, source) {
+    const normalized = Normalizer.normalizeText(String(input || '').trim());
+    if (!normalized) {
+      return null;
+    }
+
+    if (/\b(?:meetings?|calendar|next\s+event)\b/.test(normalized)) {
+      return this._directContextResult(source, 'Calendar reading is not connected yet, so I cannot reliably list your meetings from the system.');
+    }
+
+    if (/\b(?:read|summarize|show)\b.*\b(?:unread\s+)?emails?\b/.test(normalized)) {
+      return this._directContextResult(source, 'Email reading is not connected yet. I can open or search Gmail, but I cannot read your inbox locally.');
+    }
+
+    if (/^if\s+.+\b(?:warn|notify|remind)\s+me\b/.test(normalized)) {
+      return this._directContextResult(source, 'Continuous condition monitoring is not connected yet. I can check the current status now, but I will not pretend a background watcher was created.');
+    }
+
+    return null;
+  }
+
+  _directContextResult(source, response) {
+    return {
+      commandId: null,
+      success: true,
+      intent: 'assistant.context',
+      confidence: 1,
+      entities: {},
+      data: {},
+      response: this.personality.applyToResponse(response),
+      source
+    };
+  }
+
   _buildRoutedInput(input) {
-    const contextual = this._resolveContextualFollowUp(input) || input;
-    const learned = this.learning?.findCorrection?.(contextual);
+    const contextual = this._resolveContextualFollowUp(input);
+    const contextualChanged = contextual && contextual !== input;
+    const personalSource = contextualChanged ? '' : this._resolvePersonalSourceRouting(input);
+    const routedInput = contextualChanged ? contextual : (personalSource || contextual || input);
+    const contextualForLearning = routedInput;
+    const learned = this.learning?.findCorrection?.(contextualForLearning);
     this._lastRoutingLearning = learned || null;
-    this._lastContextualRewrite = contextual !== input ? { input, correction: contextual } : null;
-    return learned?.correction || contextual;
+    this._lastContextualRewrite = contextualForLearning !== input ? { input, correction: contextualForLearning } : null;
+    return learned?.correction || contextualForLearning;
+  }
+
+  _resolvePersonalSourceRouting(input) {
+    const normalized = Normalizer.normalizeText(String(input || '').trim());
+    if (!normalized) {
+      return '';
+    }
+
+    const emailSearch = normalized.match(/^search\s+(?:my\s+)?emails?\s+(?:for|about)\s+(.+)$/);
+    if (emailSearch?.[1]) {
+      return `search ${emailSearch[1].trim()} in gmail`;
+    }
+
+    return '';
   }
 
   _answerPersonalMemoryQuestion(input, source) {
@@ -745,6 +921,68 @@ class Assistant extends EventEmitter {
       return repeatTarget;
     }
 
+    const yearFollowUp = normalized.match(/^(?:what\s+about|and|who\s+won\s+in)\s+((?:19|20)\d{2})$/);
+    if (yearFollowUp?.[1]) {
+      const lastSearch = this.context.getLastSearch();
+      const query = String(lastSearch?.entities?.query || lastSearch?.data?.query || '').trim();
+      if (query) {
+        return /\bipl\b/i.test(query)
+          ? `who won IPL in ${yearFollowUp[1]}`
+          : `search for ${query} ${yearFollowUp[1]}`;
+      }
+    }
+
+    if (/^what\s+about\s+the\s+year\s+before\s+that$/.test(normalized)) {
+      const recentWithYear = this.context.findRecent(entry => /(?:19|20)\d{2}/.test(String(entry?.input || entry?.entities?.query || '')), 20);
+      const year = String(recentWithYear?.input || recentWithYear?.entities?.query || '').match(/((?:19|20)\d{2})/)?.[1];
+      const lastSearch = this.context.getLastSearch();
+      const query = String(lastSearch?.entities?.query || lastSearch?.data?.query || '').trim();
+      if (year && query) {
+        const previousYear = Number(year) - 1;
+        return /\bipl\b/i.test(query)
+          ? `who won IPL in ${previousYear}`
+          : `search for ${query} ${previousYear}`;
+      }
+    }
+
+    const lastReference = this._getLastReferenceTarget();
+    const lastFileEntry = this.context.getLastFileReference();
+    const lastFile = this.context.getFileReference(lastFileEntry);
+
+    if (/^(?:maxmize|maximize|minimize)\s+(?:it|that|this|current\s+one|current\s+app)$/i.test(normalized)) {
+      const verb = /^minimize\b/i.test(normalized) ? 'minimize' : 'maximize';
+      return lastReference ? `${verb} ${lastReference}` : '';
+    }
+
+    if (/^(?:close|quit|exit)\s+(?:it|that|this|current\s+one|current\s+app)$/i.test(normalized)) {
+      return lastReference ? `close ${lastReference}` : '';
+    }
+
+    if (/^(?:open|reopen)\s+(?:it|that|that\s+one|this|this\s+one)(?:\s+again)?$/i.test(normalized)) {
+      if (lastFile?.path || lastFile?.name) {
+        return `open ${lastFile.path || lastFile.name}`;
+      }
+      return lastReference ? `open ${lastReference}` : '';
+    }
+
+    if (/^(?:where\s+is\s+(?:it|that)\s+(?:located|saved)|where\s+did\s+i\s+save\s+(?:it|that))$/i.test(normalized)) {
+      return lastFile?.path || lastFile?.name
+        ? `what is the location of ${lastFile.path || lastFile.name}`
+        : '';
+    }
+
+    if (/^open\s+(?:its|it|that|the)\s+folder$/i.test(normalized)) {
+      if (lastFile?.path) {
+        const path = require('path');
+        return `open ${path.dirname(lastFile.path)}`;
+      }
+      return '';
+    }
+
+    if (/^(?:what\s+is\s+)?(?:its|the)\s+file\s+name$/i.test(normalized)) {
+      return '';
+    }
+
     const listFollowUp = /^(?:list|show|tell|display|open)?\s*(?:them|those|these|it|that)(?:\s+again)?$/.test(normalized) ||
       /^(?:list|show|tell|display)\s+(?:them|those|these|it|that)\b/.test(normalized);
     if (!listFollowUp) {
@@ -861,7 +1099,7 @@ class Assistant extends EventEmitter {
     }
 
     const normalized = Normalizer.normalizeText(text);
-    if (!/\b(?:it|that|same)\b/.test(normalized)) {
+    if (!/\b(?:it|that|same|current\s+one|current\s+app)\b/.test(normalized)) {
       return text;
     }
 
@@ -871,7 +1109,7 @@ class Assistant extends EventEmitter {
     }
 
     return normalized
-      .replace(/\b(?:it|that|same)\b/g, target)
+      .replace(/\b(?:it|that|same|current\s+one|current\s+app)\b/g, target)
       .replace(/^(?:can|could|would)\s+(?:you\s+)?(?:please\s+)?/i, '')
       .replace(/^please\s+/i, '')
       .replace(/\bthe\s+([a-z0-9][a-z0-9 ._-]*)$/i, '$1')
@@ -889,6 +1127,7 @@ class Assistant extends EventEmitter {
       'filename',
       'fileName',
       'query',
+      'queryApp',
       'contactName'
     ];
 
@@ -899,6 +1138,11 @@ class Assistant extends EventEmitter {
         if (value) {
           return value.toLowerCase();
         }
+      }
+
+      const file = this.context.getFileReference(entry);
+      if (file?.name) {
+        return file.name.toLowerCase();
       }
     }
 

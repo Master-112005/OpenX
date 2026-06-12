@@ -642,6 +642,160 @@ describe('Assistant Confirmation Flow', function() {
     assert.deepEqual(routedInputs, ['can you please open instagram', 'close instagram']);
   });
 
+  it('should resolve app status context before window follow-ups', async function() {
+    const routedInputs = [];
+    const router = {
+      process: async input => {
+        routedInputs.push(input);
+        if (input === 'is chrome running') {
+          return {
+            commandId: 'cmd-app-status',
+            success: true,
+            intent: 'system.processes',
+            confidence: 1,
+            entities: { target: 'apps', queryApp: 'chrome' },
+            response: 'Chrome is open.'
+          };
+        }
+        return {
+          commandId: 'cmd-window',
+          success: true,
+          intent: 'window.maximize',
+          confidence: 1,
+          entities: { windowName: 'chrome' },
+          response: 'Maximized chrome.'
+        };
+      }
+    };
+
+    const assistant = new Assistant({}, {
+      router,
+      learning: { enabled: false },
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    await assistant.processCommand('is chrome running');
+    await assistant.processCommand('maxmize it');
+
+    assert.deepEqual(routedInputs, ['is chrome running', 'maximize chrome']);
+  });
+
+  it('should keep personal email and calendar requests out of blind web search', async function() {
+    const routedInputs = [];
+    const router = {
+      process: async input => {
+        routedInputs.push(input);
+        return {
+          commandId: 'cmd-mail',
+          success: true,
+          intent: 'browser.siteSearch',
+          confidence: 1,
+          entities: { site: 'gmail', query: 'internship' },
+          response: 'Searching Gmail.'
+        };
+      }
+    };
+
+    const assistant = new Assistant({}, {
+      router,
+      learning: { enabled: false },
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    const mail = await assistant.processCommand('search my emails for internship');
+    const calendar = await assistant.processCommand('what meetings do I have today');
+
+    assert.equal(mail.intent, 'browser.siteSearch');
+    assert.deepEqual(routedInputs, ['search internship in gmail']);
+    assert.equal(calendar.intent, 'assistant.context');
+    assert.match(calendar.response, /Calendar reading is not connected/i);
+  });
+
+  it('should answer session search history and carry topic into year follow-ups', async function() {
+    const routedInputs = [];
+    const router = {
+      process: async input => {
+        routedInputs.push(input);
+        return {
+          commandId: `cmd-search-${routedInputs.length}`,
+          success: true,
+          intent: 'browser.search',
+          confidence: 1,
+          entities: { query: input.replace(/^search\s+(?:for\s+)?/i, '') },
+          data: { query: input.replace(/^search\s+(?:for\s+)?/i, '') },
+          response: 'Search complete.'
+        };
+      }
+    };
+
+    const assistant = new Assistant({}, {
+      router,
+      learning: { enabled: false },
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    await assistant.processCommand('search for IPL winners');
+    const lastSearch = await assistant.processCommand('what was the last thing I searched');
+    await assistant.processCommand('what about 2022');
+    await assistant.processCommand('what about the year before that');
+
+    assert.match(lastSearch.response, /IPL winners/i);
+    assert.deepEqual(routedInputs, [
+      'search for IPL winners',
+      'who won IPL in 2022',
+      'who won IPL in 2021'
+    ]);
+  });
+
+  it('should resolve file pronouns to the last discussed file', async function() {
+    const routedInputs = [];
+    const filePath = 'C:\\Users\\rakes\\Documents\\Resume.docx';
+    const router = {
+      process: async input => {
+        routedInputs.push(input);
+        if (input === 'find Resume.docx') {
+          return {
+            commandId: 'cmd-file-search',
+            success: true,
+            intent: 'file.search',
+            confidence: 1,
+            entities: { query: 'Resume.docx' },
+            data: { results: [{ name: 'Resume.docx', path: filePath }] },
+            response: 'Found Resume.docx.'
+          };
+        }
+        return {
+          commandId: 'cmd-file-follow',
+          success: true,
+          intent: 'file.search',
+          confidence: 1,
+          entities: { query: filePath },
+          response: 'Located file.'
+        };
+      }
+    };
+
+    const assistant = new Assistant({}, {
+      router,
+      learning: { enabled: false },
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    await assistant.processCommand('find Resume.docx');
+    await assistant.processCommand('where is it located');
+    const name = await assistant.processCommand('what is its file name');
+
+    assert.deepEqual(routedInputs, [
+      'find Resume.docx',
+      `what is the location of ${filePath}`
+    ]);
+    assert.match(name.response, /Resume\.docx/);
+  });
+
   it('should learn corrective phrasing against the last failed command', async function() {
     const learnedRules = [];
     const routedInputs = [];

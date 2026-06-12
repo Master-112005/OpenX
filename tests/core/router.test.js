@@ -1668,6 +1668,24 @@ describe('Action Router', function() {
     assert.equal(settings.entities.query, 'privacy');
   });
 
+  it('should route personal email searches to Gmail site search instead of web search', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const result = await router.process('search my emails for internship', 'chat');
+
+    assert.equal(result.intent, 'browser.siteSearch');
+    assert.equal(result.entities.site, 'gmail');
+    assert.equal(result.entities.query, 'internship');
+  });
+
   it('should keep browser tab language on browser tab actions despite typos', async function() {
     const config = {
       permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }

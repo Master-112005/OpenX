@@ -1425,6 +1425,22 @@ class ActionRouter {
       return null;
     }
 
+    const personalEmail = String(rawText || corrected || '')
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .trim()
+      .match(/^(?:search|find|show)\s+(?:my\s+)?emails?\s+(?:for|from|about)\s+(.+)$/i);
+    if (personalEmail?.[1]) {
+      return {
+        intent,
+        confidence: 1,
+        entities: {
+          site: 'gmail',
+          query: personalEmail[1].trim()
+        }
+      };
+    }
+
     for (const candidate of candidates) {
       const parsed = this._extractSiteSearch(candidate);
       if (parsed) {
