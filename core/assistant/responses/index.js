@@ -63,6 +63,14 @@ function humanizeError(error) {
   if (lowered.includes('mode has no apps or commands configured')) return 'That mode does not have any apps or commands configured yet';
   if (lowered.includes('mode has no apps configured')) return 'That mode does not have any apps configured yet';
   if (lowered.includes('some mode apps failed')) return 'I started the mode, but one or more apps could not be opened';
+  if (lowered.includes('expected file was not found')) return 'I could not verify that the file was created';
+  if (lowered.includes('destination file was not found')) return 'I could not verify that the file reached the destination';
+  if (lowered.includes('source file still exists after move')) return 'I could not verify the move because the original file is still there';
+  if (lowered.includes('expected folder was not found')) return 'I could not verify that the folder exists';
+  if (lowered.includes('destination folder was not found')) return 'I could not verify that the folder reached the destination';
+  if (lowered.includes('source folder still exists after move')) return 'I could not verify the folder move because the original folder is still there';
+  if (lowered.includes('still appears to be open')) return message;
+  if (lowered.includes('could not verify')) return message;
   if (lowered.includes('file not found')) return 'Unable to find that file';
   if (lowered.includes('folder not found')) return 'Unable to find that folder';
   if (lowered.includes('source not found')) return 'Unable to find the source item';
@@ -80,6 +88,8 @@ function humanizeError(error) {
   if (lowered.includes('could not schedule')) return 'I could not schedule that right now';
   if (lowered.includes('contact not found')) return 'I could not find that contact in the assistant contact book';
   if (lowered.includes('contact does not have a phone number')) return 'That contact does not have a phone number saved';
+  if (lowered.includes('contact does not have an email address')) return 'I found the contact, but there is no email address saved for them';
+  if (lowered.includes('email draft needs')) return message;
   if (lowered.includes('messaging platform not supported')) return 'That messaging platform is not supported yet';
   if (lowered.includes('direct whatsapp calling is not supported')) return 'Direct WhatsApp calling is not available through this assistant yet';
   if (lowered.includes('whatsapp desktop automation failed')) return 'I could not complete the WhatsApp desktop action';
@@ -292,6 +302,29 @@ const RESPONSE_BUILDERS = {
         ? `I found ${count} matching ${label}: ${names}.`
         : `I found ${count} matching ${label}.`;
     },
+    'file.smartFind': context => {
+      const count = valueFromContext(context, 'count', context.result?.data?.count || 0);
+      const entries = valueFromContext(context, 'entries', context.result?.data?.entries || []);
+      const opened = valueFromContext(context, 'opened', context.result?.data?.opened || null);
+      const duplicates = valueFromContext(context, 'duplicates', context.result?.data?.duplicates || []);
+
+      if (opened?.name) {
+        return `Opening "${opened.name}" from ${pathLabel(opened.path) || path.dirname(opened.path)}.`;
+      }
+
+      if (Array.isArray(duplicates) && duplicates.length > 0) {
+        const first = duplicates[0].map(item => item.name).join(', ');
+        return `I found ${duplicates.length} possible duplicate group${duplicates.length === 1 ? '' : 's'}. First group: ${first}.`;
+      }
+
+      if (!count || !Array.isArray(entries) || entries.length === 0) {
+        return 'I could not find matching local files for that request.';
+      }
+
+      const names = entries.slice(0, 5).map(entry => `${entry.name}${entry.sizeMB ? ` (${entry.sizeMB} MB)` : ''}`).join(', ');
+      const label = count === 1 ? 'file' : 'files';
+      return `I found ${count} matching ${label}: ${names}.`;
+    },
     'file.list': context => {
       const entries = valueFromContext(context, 'entries', []);
       const count = valueFromContext(context, 'count', 0);
@@ -374,6 +407,13 @@ const RESPONSE_BUILDERS = {
         `I searched for "${query}".`
       ]);
     },
+    'browser.siteSearch': context => {
+      const site = valueFromContext(context, 'site', 'that site');
+      const query = valueFromContext(context, 'query', '');
+      return query
+        ? `Searching ${site} for "${query}".`
+        : `Opening ${site}.`;
+    },
     'browser.openFirstResult': context => {
       const title = valueFromContext(context, 'title', '');
       const url = valueFromContext(context, 'url', '');
@@ -384,11 +424,29 @@ const RESPONSE_BUILDERS = {
     },
     'browser.closeTab': context => {
       const win = valueFromContext(context, 'matchedWindow', 'the browser');
+      const query = valueFromContext(context, 'tabQuery', '');
+      const closedCount = valueFromContext(context, 'closedCount', 1);
+      if (query) {
+        return closedCount > 1
+          ? `Closed ${closedCount} ${query} tabs in ${win}.`
+          : `Closed the ${query} tab in ${win}.`;
+      }
       return chooseVariant(`browser.closeTab:${win}`, [
         `Closed the current tab in ${win}.`,
         `Closed that browser tab.`,
         `The current browser tab is closed.`
       ]);
+    },
+    'browser.listTabs': context => {
+      const tabs = valueFromContext(context, 'tabs', []);
+      const count = valueFromContext(context, 'count', 0);
+      const browserName = valueFromContext(context, 'browserName', 'browser');
+      if (!count || !Array.isArray(tabs) || tabs.length === 0) {
+        return `I do not see any visible ${browserName} tabs right now.`;
+      }
+      const names = tabs.slice(0, 6).map(tab => tab.title || tab.rawTitle).filter(Boolean).join(', ');
+      const more = count > 6 ? `, and ${count - 6} more` : '';
+      return `I can see ${count} visible ${browserName} tab${count === 1 ? '' : 's'}: ${names}${more}.`;
     },
     'system.time': context => {
       const time = valueFromContext(context, 'time');
@@ -447,6 +505,14 @@ const RESPONSE_BUILDERS = {
         return `I've prepared the WhatsApp message for ${contactName}. Please check it on your screen.`;
       }
       return `I've prepared the message for ${contactName} and it is ready for your review.`;
+    },
+    'email.compose': context => {
+      const contactName = valueFromContext(context, 'contactName');
+      const email = valueFromContext(context, 'email');
+      const subject = valueFromContext(context, 'subject', '');
+      return subject
+        ? `I've prepared an email draft to ${contactName} at ${email} with subject "${subject}". Please review it before sending.`
+        : `I found ${contactName}'s email address: ${email}. Tell me the subject and message to draft.`;
     },
     'call.start': context => {
       const contactName = valueFromContext(context, 'contactName');
@@ -573,6 +639,48 @@ const RESPONSE_BUILDERS = {
         `You've got ${count} active processes at the moment.`,
         `There are ${count} active processes right now.`
       ]);
+    },
+    'system.insight': context => {
+      const insightType = valueFromContext(context, 'insightType');
+      if (insightType === 'topMemoryApp' || insightType === 'topCpuProcess') {
+        const top = valueFromContext(context, 'top', context.result?.data?.top || null);
+        if (!top?.name) {
+          return 'I could not identify the top process right now.';
+        }
+        return insightType === 'topMemoryApp'
+          ? `${top.name} is using the most memory right now, about ${top.memoryMB} MB.`
+          : `${top.name} is the highest CPU process right now.`;
+      }
+
+      if (insightType === 'storageUsage') {
+        const folders = valueFromContext(context, 'folders', context.result?.data?.folders || []);
+        if (!Array.isArray(folders) || folders.length === 0) {
+          return 'I could not calculate folder storage usage right now.';
+        }
+        const summary = folders.slice(0, 3).map(folder => `${folder.name}: ${folder.sizeMB} MB`).join(', ');
+        return `The largest user folders are ${summary}.`;
+      }
+
+      if (insightType === 'recentlyInstalledApps') {
+        const apps = valueFromContext(context, 'apps', context.result?.data?.apps || []);
+        if (!Array.isArray(apps) || apps.length === 0) {
+          return 'I could not find recently installed applications.';
+        }
+        return `Recently installed applications include ${apps.slice(0, 5).map(app => app.name).join(', ')}.`;
+      }
+
+      if (insightType === 'systemSlowdown') {
+        const cpu = valueFromContext(context, 'cpu', context.result?.data?.cpu || null);
+        const memory = valueFromContext(context, 'memory', context.result?.data?.memory || null);
+        const parts = [];
+        if (cpu?.name) parts.push(`CPU: ${cpu.name}`);
+        if (memory?.name) parts.push(`memory: ${memory.name}`);
+        return parts.length > 0
+          ? `The likely pressure points are ${parts.join(', ')}.`
+          : 'I could not identify a clear slowdown source right now.';
+      }
+
+      return 'I checked the system insight.';
     },
     'system.bluetooth': context => {
       const enabled = valueFromContext(context, 'enabled', null);

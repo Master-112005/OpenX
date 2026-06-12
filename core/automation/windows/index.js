@@ -60,6 +60,14 @@ class WindowsController {
     return this.session.sendKeys(windowName, keys, options);
   }
 
+  listWindows() {
+    return this.session.listWindows();
+  }
+
+  findWindow(windowName, options = {}) {
+    return this.session.findWindow(windowName, options);
+  }
+
   hibernate() {
     try {
       execSync('shutdown /h', { timeout: 3000 });

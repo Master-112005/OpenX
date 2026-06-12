@@ -47,6 +47,26 @@ describe('Browser Controller', function() {
     assert.ok(openedUrl.includes('google.com/search'));
   });
 
+  it('should search directly inside supported sites', function() {
+    const controller = new BrowserController({});
+    let openedUrl = '';
+
+    controller.open = (url) => {
+      openedUrl = url;
+      return { success: true, data: { url } };
+    };
+
+    const photos = controller.siteSearch('google photos', 'classmates');
+    assert.equal(photos.success, true);
+    assert.equal(photos.data.site, 'google photos');
+    assert.equal(photos.data.query, 'classmates');
+    assert.equal(openedUrl, 'https://photos.google.com/search/classmates');
+
+    const settings = controller.siteSearch('chrome settings', 'privacy');
+    assert.equal(settings.success, true);
+    assert.equal(settings.data.url, 'chrome://settings/?search=privacy');
+  });
+
   it('should open the first result from the last search query', async function() {
     const controller = new BrowserController({});
     let openedUrl = '';

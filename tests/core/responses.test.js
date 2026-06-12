@@ -52,6 +52,16 @@ describe('Response Generator', function() {
     assert.ok(result.toLowerCase().includes('cannot find the java app'));
   });
 
+  it('should humanize verification failures', function() {
+    const gen = new ResponseGenerator();
+    const result = gen.generate('error', 'executionFailed', {
+      error: 'Expected file was not found'
+    });
+
+    assert.ok(result.toLowerCase().includes('could not verify'));
+    assert.ok(result.toLowerCase().includes('file'));
+  });
+
   it('should speak local time and date answers', function() {
     const gen = new ResponseGenerator();
     const time = gen.generate('success', 'system.time', { result: { data: { time: '2:45 PM' } } });
@@ -99,6 +109,59 @@ describe('Response Generator', function() {
 
     assert.ok(result.includes('Royal Challengers Bengaluru won IPL 2026'));
     assert.ok(!result.includes('Full list'));
+  });
+
+  it('should describe site-specific browser searches', function() {
+    const gen = new ResponseGenerator();
+    const result = gen.generate('success', 'browser.siteSearch', {
+      entities: { site: 'google photos', query: 'classmates' }
+    });
+
+    assert.ok(result.includes('google photos'));
+    assert.ok(result.includes('classmates'));
+  });
+
+  it('should summarize visible browser tabs', function() {
+    const gen = new ResponseGenerator();
+    const result = gen.generate('success', 'browser.listTabs', {
+      result: {
+        data: {
+          browserName: 'chrome',
+          count: 2,
+          tabs: [{ title: 'ChatGPT' }, { title: 'Google Photos' }]
+        }
+      }
+    });
+
+    assert.ok(result.includes('2 visible chrome tabs'));
+    assert.ok(result.includes('ChatGPT'));
+    assert.ok(result.includes('Google Photos'));
+  });
+
+  it('should describe email draft preparation and missing details', function() {
+    const gen = new ResponseGenerator();
+    const needsDetails = gen.generate('success', 'email.compose', {
+      result: {
+        data: {
+          contactName: 'rakesh',
+          email: 'rakesh@example.com',
+          needsDetails: true
+        }
+      }
+    });
+    const draft = gen.generate('success', 'email.compose', {
+      result: {
+        data: {
+          contactName: 'rakesh',
+          email: 'rakesh@example.com',
+          subject: 'Project update'
+        }
+      }
+    });
+
+    assert.ok(needsDetails.includes('rakesh@example.com'));
+    assert.ok(needsDetails.includes('subject and message'));
+    assert.ok(draft.includes('Project update'));
   });
 
   it('should summarize local file listings', function() {

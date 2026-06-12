@@ -135,6 +135,58 @@ class CommunicationsController {
     };
   }
 
+  async composeEmail(contactName, subject = '', body = '') {
+    if (!contactName) {
+      return { success: false, error: 'No contact name provided' };
+    }
+
+    const contact = this.contactStore.findContact(contactName);
+    if (!contact) {
+      return {
+        success: false,
+        error: `Contact not found: ${contactName}. Add the contact to ${this.contactStore.contactsPath}`
+      };
+    }
+
+    if (!contact.email) {
+      return {
+        success: false,
+        error: `Contact does not have an email address: ${contact.name}`
+      };
+    }
+
+    const cleanSubject = String(subject || '').trim();
+    const cleanBody = String(body || '').trim();
+    if (!cleanSubject || !cleanBody) {
+      return {
+        success: true,
+        error: `Email draft needs ${!cleanSubject && !cleanBody ? 'a subject and message' : !cleanSubject ? 'a subject' : 'a message'} for ${contact.name}`,
+        data: {
+          contactName: contact.name,
+          email: contact.email,
+          subject: cleanSubject,
+          body: cleanBody,
+          needsDetails: true
+        }
+      };
+    }
+
+    const url = this._buildMailtoUrl(contact.email, cleanSubject, cleanBody);
+    this._launchUri(url);
+    return {
+      success: true,
+      data: {
+        contactName: contact.name,
+        email: contact.email,
+        subject: cleanSubject,
+        body: cleanBody,
+        url,
+        delivery: 'draft',
+        platform: 'email'
+      }
+    };
+  }
+
   _resolveMessagingPlatform(platform, contact) {
     const requestedPlatform = String(platform || '').trim().toLowerCase();
     if (requestedPlatform) {
@@ -172,6 +224,13 @@ class CommunicationsController {
   _buildWhatsAppComposeUrl(phoneNumber, messageText) {
     const digits = String(phoneNumber || '').replace(/[^\d]/g, '');
     return `https://wa.me/${digits}?text=${encodeURIComponent(messageText)}`;
+  }
+
+  _buildMailtoUrl(email, subject, body) {
+    const params = new URLSearchParams();
+    params.set('subject', subject);
+    params.set('body', body);
+    return `mailto:${encodeURIComponent(email)}?${params.toString()}`;
   }
 
   _prepareOutgoingMessageText(messageText) {

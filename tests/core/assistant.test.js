@@ -212,6 +212,73 @@ describe('Assistant Confirmation Flow', function() {
     assert.equal(seenInputs[1], 'list files in desktop');
   });
 
+  it('should retry the last actionable command from natural follow-up language', async function() {
+    const seenInputs = [];
+    const router = {
+      process: async input => {
+        seenInputs.push(input);
+        return {
+          commandId: `cmd-${seenInputs.length}`,
+          success: true,
+          intent: 'media.resume',
+          entities: {},
+          response: 'Resumed playback.'
+        };
+      }
+    };
+
+    const assistant = new Assistant({}, {
+      router,
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    await assistant.processCommand('unpause');
+    const repeated = await assistant.processCommand('try again');
+
+    assert.equal(repeated.success, true);
+    assert.equal(seenInputs[1], 'unpause');
+  });
+
+  it('should retry the last failed command before repeating a successful one', async function() {
+    const seenInputs = [];
+    const router = {
+      process: async input => {
+        seenInputs.push(input);
+        if (input === 'close github tab') {
+          return {
+            commandId: 'cmd-failed',
+            success: false,
+            intent: 'browser.closeTab',
+            entities: { tabQuery: 'github' },
+            response: 'I could not find that tab.',
+            error: 'Could not find a github tab'
+          };
+        }
+        return {
+          commandId: 'cmd-success',
+          success: true,
+          intent: 'app.open',
+          entities: { appName: 'chrome' },
+          response: 'Opened chrome.'
+        };
+      }
+    };
+
+    const assistant = new Assistant({}, {
+      router,
+      automation: {},
+      eventBus: { publish() {} },
+      learning: { enabled: false }
+    });
+
+    await assistant.processCommand('open chrome');
+    await assistant.processCommand('close github tab');
+    await assistant.processCommand('try again');
+
+    assert.equal(seenInputs[2], 'close github tab');
+  });
+
   it('should refuse unrelated follow-up speech until confirmation is resolved', async function() {
     const router = {
       process: async () => ({
@@ -845,5 +912,37 @@ describe('Assistant Confirmation Flow', function() {
     assert.notEqual(morning.response, hello.response);
     assert.notEqual(hello.response, hi.response);
     assert.notEqual(hello.response, wellbeing.response);
+  });
+
+  it('should keep validation and verification evidence in command context', async function() {
+    const router = {
+      process: async () => ({
+        commandId: 'cmd-verified-file',
+        success: true,
+        intent: 'file.create',
+        confidence: 1,
+        entities: { filename: 'report.txt' },
+        languageUnderstanding: { status: 'passed', intent: 'file.create' },
+        validation: { status: 'passed', check: 'required-entities' },
+        verification: { status: 'passed', check: 'file-exists' },
+        response: 'Created report.txt.'
+      })
+    };
+    const assistant = new Assistant({}, {
+      router,
+      learning: { enabled: false },
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    await assistant.processCommand('create report.txt');
+    const history = assistant.getContext().getHistory(1);
+    const summary = assistant.getContext().getConversationSummary();
+
+    assert.equal(history[0].validation.status, 'passed');
+    assert.equal(history[0].languageUnderstanding.status, 'passed');
+    assert.equal(history[0].verification.check, 'file-exists');
+    assert.equal(summary.verifiedCommands, 1);
+    assert.equal(summary.failedVerificationCommands, 0);
   });
 });

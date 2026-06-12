@@ -155,6 +155,7 @@ $wshell.SendKeys('${escapePowerShell(keys)}')
           action: 'sendKeys',
           keys,
           matchedWindow: target.title,
+          matchedHandle: target.handle,
           processName: target.processName
         }
       };
@@ -177,6 +178,7 @@ $wshell.SendKeys('${escapePowerShell(keys)}')
     const preferredTitleTokens = Array.isArray(options.preferredTitleTokens)
       ? options.preferredTitleTokens.map(value => Normalizer.normalizeText(value)).filter(Boolean)
       : [];
+    const requireTitleTokenMatch = Boolean(options.requireTitleTokenMatch);
     const excludedTitleTokens = Array.isArray(options.excludeTitleTokens)
       ? options.excludeTitleTokens.map(value => Normalizer.normalizeText(value)).filter(Boolean)
       : [];
@@ -190,6 +192,16 @@ $wshell.SendKeys('${escapePowerShell(keys)}')
 
       if (excludedTitleTokens.some(token => token && title.includes(token))) {
         return;
+      }
+
+      if (requireTitleTokenMatch && preferredTitleTokens.length > 0) {
+        const titleTokens = new Set(Normalizer.tokenize(title));
+        const titleMatches = preferredTitleTokens.every(token => (
+          title.includes(token) || titleTokens.has(token)
+        ));
+        if (!titleMatches) {
+          return;
+        }
       }
 
       if (normalizedQuery) {
@@ -298,6 +310,7 @@ if ($process) {
         data: {
           action,
           matchedWindow: target.title,
+          matchedHandle: target.handle,
           processName: target.processName
         }
       };

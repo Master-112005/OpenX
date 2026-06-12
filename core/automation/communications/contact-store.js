@@ -98,6 +98,7 @@ class ContactStore {
       normalizedAliases: aliases.map(alias => Normalizer.normalizeText(alias)).filter(Boolean),
       phone,
       platforms,
+      email: String(contact.email || contact.mail || '').trim(),
       preferredMessagingPlatform: String(
         contact.preferredMessagingPlatform ||
         contact.preferredPlatform ||
@@ -125,6 +126,7 @@ class ContactStore {
     return this.getAll().map(contact => ({
       name: contact.name,
       phone: contact.phone,
+      email: contact.email,
       aliases: [...contact.aliases],
       platforms: [...contact.platforms],
       preferredMessagingPlatform: contact.preferredMessagingPlatform,
@@ -257,6 +259,7 @@ class ContactStore {
     return {
       name,
       phone: normalizePhoneNumber(source.phone || ''),
+      email: String(source.email || source.mail || '').trim(),
       aliases,
       platforms,
       preferredMessagingPlatform: String(source.preferredMessagingPlatform || '').trim().toLowerCase(),

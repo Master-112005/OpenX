@@ -176,6 +176,9 @@ class Assistant extends EventEmitter {
           intent: result.intent,
           entities: result.entities || {},
           data: result.data || null,
+          languageUnderstanding: result.languageUnderstanding || null,
+          validation: result.validation || result.data?.validation || null,
+          verification: result.verification || result.data?.verification || null,
           error: result.error || null
         });
       }
@@ -425,6 +428,9 @@ class Assistant extends EventEmitter {
       intent: result.intent || null,
       entities: result.entities || {},
       confidence: result.confidence ?? 1,
+      languageUnderstanding: result.languageUnderstanding || null,
+      validation: result.validation || result.data?.validation || null,
+      verification: result.verification || result.data?.verification || null,
       learnedCorrection: this._lastRoutingLearning,
       contextualRewrite: this._lastContextualRewrite
     };
@@ -494,7 +500,10 @@ class Assistant extends EventEmitter {
       intent: result.intent || null,
       success: false,
       rating: 'negative',
-      note: result.error || result.response || ''
+      note: result.error || result.response || '',
+      languageUnderstanding: result.languageUnderstanding || null,
+      validation: result.validation || result.data?.validation || null,
+      verification: result.verification || result.data?.verification || null
     });
   }
 
@@ -731,6 +740,11 @@ class Assistant extends EventEmitter {
       return '';
     }
 
+    const repeatTarget = this._resolveRepeatRequest(normalized);
+    if (repeatTarget) {
+      return repeatTarget;
+    }
+
     const listFollowUp = /^(?:list|show|tell|display|open)?\s*(?:them|those|these|it|that)(?:\s+again)?$/.test(normalized) ||
       /^(?:list|show|tell|display)\s+(?:them|those|these|it|that)\b/.test(normalized);
     if (!listFollowUp) {
@@ -754,6 +768,18 @@ class Assistant extends EventEmitter {
     }
 
     return `list ${type ? `${type} ` : ''}files in ${path}`;
+  }
+
+  _resolveRepeatRequest(normalized) {
+    if (!/^(?:try\s+again|again|do\s+(?:that|it)\s+again|repeat(?:\s+(?:that|it|the\s+last\s+command))?|retry(?:\s+(?:that|it))?)$/.test(normalized)) {
+      return '';
+    }
+
+    const recent = this.context.getHistory(12).slice().reverse();
+    const failed = recent.find(entry => entry?.input && entry.success === false && entry.intent);
+    const actionable = recent.find(entry => entry?.input && entry.intent && /^(?:app|file|folder|browser|media|message|email|call|mode|window|system\.(?:bluetooth|screenshot|processes|time|date|calculate))\b/.test(entry.intent));
+    const target = failed || actionable;
+    return target?.input || '';
   }
 
   _isConfirmPhrase(text) {

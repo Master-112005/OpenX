@@ -218,7 +218,10 @@ class ActiveLearningStore {
       success: Boolean(entry?.success),
       rating: entry?.rating || 'unknown',
       correction: cleanCommand(entry?.correction || ''),
-      note: String(entry?.note || '').trim()
+      note: String(entry?.note || '').trim(),
+      languageUnderstanding: isPlainObject(entry?.languageUnderstanding) ? entry.languageUnderstanding : null,
+      validation: isPlainObject(entry?.validation) ? entry.validation : null,
+      verification: isPlainObject(entry?.verification) ? entry.verification : null
     };
 
     this.data.feedback.unshift(record);

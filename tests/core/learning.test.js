@@ -104,4 +104,26 @@ describe('Active Learning Store', function() {
     assert.equal(answer.known, true);
     assert.equal(answer.response, 'Your name is rakes.');
   });
+
+  it('should preserve validation and verification evidence on feedback records', function() {
+    const { store } = createStore();
+
+    store.recordFeedback({
+      input: 'create report.txt',
+      routedInput: 'create report.txt',
+      intent: 'file.create',
+      success: false,
+      rating: 'negative',
+      note: 'Expected file was not found',
+      languageUnderstanding: { status: 'passed', intent: 'file.create' },
+      validation: { status: 'passed', check: 'required-entities' },
+      verification: { status: 'failed', check: 'file-exists' }
+    });
+
+    const snapshot = store.getSnapshot();
+    assert.equal(snapshot.feedback[0].languageUnderstanding.intent, 'file.create');
+    assert.equal(snapshot.feedback[0].validation.status, 'passed');
+    assert.equal(snapshot.feedback[0].verification.status, 'failed');
+    assert.equal(snapshot.mistakes[0].verification.check, 'file-exists');
+  });
 });

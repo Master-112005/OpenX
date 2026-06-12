@@ -54,4 +54,27 @@ describe('Windows Session Controller', function() {
     assert.equal(result.handle, 100);
     assert.equal(result.title, 'New Tab - Google Chrome');
   });
+
+  it('should require title token matches for targeted browser tabs', function() {
+    const controller = new WindowsSessionController({});
+    controller.listWindows = () => ([
+      { handle: 100, title: 'New Tab - Google Chrome', processName: 'chrome', id: 1 },
+      { handle: 200, title: 'Google Photos - Google Chrome', processName: 'chrome', id: 2 }
+    ]);
+    controller._getForegroundWindowHandle = () => 100;
+
+    const missing = controller.findWindow('google photos', {
+      preferredProcessNames: ['chrome'],
+      preferredTitleTokens: ['google', 'photos', 'classmates'],
+      requireTitleTokenMatch: true
+    });
+    const found = controller.findWindow('google photos', {
+      preferredProcessNames: ['chrome'],
+      preferredTitleTokens: ['google', 'photos'],
+      requireTitleTokenMatch: true
+    });
+
+    assert.equal(missing, null);
+    assert.equal(found.handle, 200);
+  });
 });

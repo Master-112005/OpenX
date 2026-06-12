@@ -21,7 +21,10 @@ class ContextManager {
       confidence: result?.confidence || 0,
       success: result?.success || false,
       entities: result?.entities || {},
-      response: result?.response || ''
+      response: result?.response || '',
+      languageUnderstanding: result?.languageUnderstanding || null,
+      validation: result?.validation || result?.data?.validation || null,
+      verification: result?.verification || result?.data?.verification || null
     };
 
     this.history.push(entry);
@@ -82,10 +85,14 @@ class ContextManager {
   getConversationSummary() {
     const successful = this.history.filter(h => h.success).length;
     const total = this.history.length;
+    const verified = this.history.filter(h => h.verification?.status === 'passed').length;
+    const failedVerification = this.history.filter(h => h.verification?.status === 'failed').length;
     return {
       totalCommands: total,
       successfulCommands: successful,
       failedCommands: total - successful,
+      verifiedCommands: verified,
+      failedVerificationCommands: failedVerification,
       lastInteraction: this.lastInteraction,
       sessionKeys: Array.from(this.sessionData.keys())
     };

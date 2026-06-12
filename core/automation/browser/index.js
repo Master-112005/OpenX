@@ -2,6 +2,51 @@ const Logger = require('../../shared/index').Logger;
 const { launchTarget } = require('../common/launcher');
 const https = require('https');
 
+const SITE_SEARCH_TARGETS = [
+  {
+    key: 'google photos',
+    aliases: ['google photos', 'photos', 'photos.google.com'],
+    homeUrl: 'https://photos.google.com/',
+    buildUrl: query => `https://photos.google.com/search/${encodeURIComponent(query)}`
+  },
+  {
+    key: 'youtube',
+    aliases: ['youtube', 'you tube', 'yt'],
+    homeUrl: 'https://www.youtube.com/',
+    buildUrl: query => `https://www.youtube.com/results?search_query=${encodeURIComponent(query)}`
+  },
+  {
+    key: 'gmail',
+    aliases: ['gmail', 'google mail', 'mail'],
+    homeUrl: 'https://mail.google.com/',
+    buildUrl: query => `https://mail.google.com/mail/u/0/#search/${encodeURIComponent(query)}`
+  },
+  {
+    key: 'google drive',
+    aliases: ['google drive', 'drive'],
+    homeUrl: 'https://drive.google.com/',
+    buildUrl: query => `https://drive.google.com/drive/search?q=${encodeURIComponent(query)}`
+  },
+  {
+    key: 'google maps',
+    aliases: ['google maps', 'maps'],
+    homeUrl: 'https://www.google.com/maps',
+    buildUrl: query => `https://www.google.com/maps/search/${encodeURIComponent(query)}`
+  },
+  {
+    key: 'chrome settings',
+    aliases: ['chrome settings', 'settings in chrome', 'chrome setting', 'browser settings'],
+    homeUrl: 'chrome://settings/',
+    buildUrl: query => `chrome://settings/?search=${encodeURIComponent(query)}`
+  },
+  {
+    key: 'chatgpt',
+    aliases: ['chatgpt', 'chat gpt'],
+    homeUrl: 'https://chatgpt.com/',
+    buildUrl: query => `https://chatgpt.com/?q=${encodeURIComponent(query)}`
+  }
+];
+
 function decodeHtml(input) {
   return String(input || '')
     .replace(/&quot;/g, '"')
@@ -91,6 +136,45 @@ class BrowserController {
         answer
       }
     };
+  }
+
+  siteSearch(site, query) {
+    const target = this._resolveSiteSearchTarget(site);
+    const cleanQuery = String(query || '').trim();
+    if (!target) {
+      return { success: false, error: `I cannot search inside ${site || 'that site'} yet.` };
+    }
+
+    if (!cleanQuery) {
+      return this.open(target.homeUrl);
+    }
+
+    const url = target.buildUrl(cleanQuery);
+    const opened = this.open(url);
+    return opened?.success
+      ? {
+          success: true,
+          data: {
+            site: target.key,
+            query: cleanQuery,
+            url
+          }
+        }
+      : opened;
+  }
+
+  _resolveSiteSearchTarget(site) {
+    const normalized = String(site || '')
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!normalized) {
+      return null;
+    }
+
+    return SITE_SEARCH_TARGETS.find(target =>
+      target.aliases.some(alias => normalized === alias || normalized.includes(alias))
+    ) || null;
   }
 
   async openFirstResult(query = null) {

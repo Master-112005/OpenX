@@ -20,6 +20,16 @@ const SEARCH_ROOTS = () => [
   getHomeDirectory()
 ].filter(Boolean);
 
+const FILE_TYPE_EXTENSIONS = {
+  document: ['.doc', '.docx', '.pdf', '.txt', '.rtf', '.odt', '.md'],
+  pdf: ['.pdf'],
+  image: ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.svg'],
+  video: ['.mp4', '.mkv', '.mov', '.avi', '.webm', '.wmv'],
+  audio: ['.mp3', '.wav', '.m4a', '.flac', '.aac', '.ogg'],
+  presentation: ['.ppt', '.pptx', '.key'],
+  archive: ['.zip', '.rar', '.7z', '.tar', '.gz']
+};
+
 const EXCLUDED_SEARCH_DIRECTORIES = new Set([
   '$recycle.bin',
   '.git',
@@ -321,6 +331,66 @@ class FileController {
     };
   }
 
+  smartFind(options = {}) {
+    const location = String(options.location || '').trim();
+    const fileType = String(options.fileType || '').trim().toLowerCase();
+    const query = this._cleanSearchQuery(options.query || '');
+    const sortBy = String(options.sortBy || 'modifiedDesc').trim();
+    const timeFilter = String(options.timeFilter || '').trim();
+    const openResult = Boolean(options.openResult);
+    const groupDuplicates = Boolean(options.groupDuplicates);
+    const roots = location
+      ? [resolveDirectory(location, { mustExist: true })].filter(Boolean)
+      : uniquePaths(SEARCH_ROOTS());
+
+    if (roots.length === 0) {
+      return { success: false, error: 'Folder not found' };
+    }
+
+    const files = [];
+    const visitedDirectories = new Set();
+    for (const root of roots) {
+      this._collectFilesRecursive(root, files, {
+        maxDepth: location ? 10 : 8,
+        maxDirectories: location ? 5000 : 9000,
+        maxResults: 2000,
+        visitedDirectories
+      });
+    }
+
+    const filtered = files
+      .filter(file => this._matchesSmartFileType(file, fileType))
+      .filter(file => this._matchesSmartQuery(file, query))
+      .filter(file => this._matchesSmartTime(file, timeFilter));
+
+    const duplicates = groupDuplicates ? this._findDuplicateFileGroups(filtered) : [];
+    const sorted = this._sortSmartFiles(filtered, sortBy);
+    const results = sorted.slice(0, 20).map(file => this._fileEntry(file));
+
+    if (openResult && sorted[0]) {
+      launchTarget(sorted[0].path);
+    }
+
+    return {
+      success: true,
+      data: {
+        action: openResult ? 'openSmartFile' : 'smartFind',
+        query: query || null,
+        location: location || null,
+        fileType: fileType || null,
+        sortBy,
+        timeFilter: timeFilter || null,
+        openResult,
+        groupDuplicates,
+        count: filtered.length,
+        results: results.map(entry => entry.path),
+        entries: results,
+        duplicates,
+        opened: openResult && sorted[0] ? this._fileEntry(sorted[0]) : null
+      }
+    };
+  }
+
   list(targetPath = 'home', options = {}) {
     const dir = resolveDirectory(targetPath || 'home', { mustExist: true });
     if (!dir) {
@@ -540,6 +610,169 @@ class FileController {
         }
       }
     }
+  }
+
+  _collectFilesRecursive(root, results, options = {}) {
+    if (!root || !fs.existsSync(root) || results.length >= (options.maxResults || 2000)) {
+      return;
+    }
+
+    const queue = [{ directory: root, depth: 0 }];
+    const visitedDirectories = options.visitedDirectories || new Set();
+    const maxDepth = options.maxDepth ?? 6;
+    const maxDirectories = options.maxDirectories ?? 1500;
+    let visited = 0;
+
+    while (queue.length > 0 && visited < maxDirectories && results.length < (options.maxResults || 2000)) {
+      const { directory, depth } = queue.shift();
+      const resolvedDirectory = path.resolve(directory);
+      const directoryKey = resolvedDirectory.toLowerCase();
+      if (visitedDirectories.has(directoryKey)) {
+        continue;
+      }
+      visitedDirectories.add(directoryKey);
+      visited += 1;
+
+      let entries = [];
+      try {
+        entries = fs.readdirSync(directory, { withFileTypes: true });
+      } catch (err) {
+        continue;
+      }
+
+      for (const entry of entries) {
+        if (entry.name.startsWith('.')) {
+          continue;
+        }
+        const entryPath = path.join(directory, entry.name);
+        if (entry.isFile()) {
+          try {
+            const stats = fs.statSync(entryPath);
+            results.push({
+              path: entryPath,
+              name: entry.name,
+              ext: path.extname(entry.name).toLowerCase(),
+              size: stats.size,
+              modifiedAt: stats.mtimeMs,
+              accessedAt: stats.atimeMs,
+              createdAt: stats.birthtimeMs
+            });
+          } catch (err) {
+            continue;
+          }
+        } else if (entry.isDirectory() && depth < maxDepth && this._shouldDescendIntoDirectory(entry.name)) {
+          queue.push({ directory: entryPath, depth: depth + 1 });
+        }
+      }
+    }
+  }
+
+  _matchesSmartFileType(file, fileType) {
+    if (!fileType) {
+      return true;
+    }
+    const extensions = FILE_TYPE_EXTENSIONS[fileType] || [];
+    return extensions.length === 0 ? true : extensions.includes(file.ext);
+  }
+
+  _matchesSmartQuery(file, query) {
+    const normalizedQuery = Normalizer.normalizeText(query || '');
+    if (!normalizedQuery) {
+      return true;
+    }
+
+    const name = Normalizer.normalizeText(file.name || '');
+    const fullPath = Normalizer.normalizeText(file.path || '');
+    if (name.includes(normalizedQuery) || fullPath.includes(normalizedQuery)) {
+      return true;
+    }
+
+    const queryTokens = normalizedQuery.split(/\s+/).filter(token => token.length >= 2);
+    if (queryTokens.length === 0) {
+      return true;
+    }
+
+    return queryTokens.every(token => (
+      name.includes(token) ||
+      fullPath.includes(token) ||
+      Normalizer.findClosestOption(token, name.split(/\s+/), {
+        minSimilarity: 0.74,
+        maxDistance: token.length >= 8 ? 3 : 2
+      })
+    ));
+  }
+
+  _matchesSmartTime(file, timeFilter) {
+    const filter = String(timeFilter || '').trim().toLowerCase();
+    if (!filter) {
+      return true;
+    }
+
+    const now = Date.now();
+    const dayMs = 24 * 60 * 60 * 1000;
+    const today = new Date();
+    const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate()).getTime();
+    const modified = file.modifiedAt || 0;
+    const accessed = file.accessedAt || 0;
+
+    if (filter === 'today') {
+      return modified >= startOfToday || file.createdAt >= startOfToday;
+    }
+    if (filter === 'yesterday') {
+      return modified >= startOfToday - dayMs && modified < startOfToday;
+    }
+    if (filter === 'thisMorning') {
+      const noon = startOfToday + (12 * 60 * 60 * 1000);
+      return modified >= startOfToday && modified < noon;
+    }
+    if (filter === 'lastWeek') {
+      return modified >= now - (7 * dayMs);
+    }
+    if (filter === 'olderThan6MonthsAccess') {
+      return accessed > 0 && accessed < now - (183 * dayMs);
+    }
+
+    return true;
+  }
+
+  _sortSmartFiles(files, sortBy) {
+    const key = String(sortBy || '').trim();
+    const sorted = [...files];
+    sorted.sort((left, right) => {
+      if (key === 'sizeDesc') return (right.size || 0) - (left.size || 0);
+      if (key === 'accessedAsc') return (left.accessedAt || 0) - (right.accessedAt || 0);
+      if (key === 'createdDesc') return (right.createdAt || 0) - (left.createdAt || 0);
+      return (right.modifiedAt || 0) - (left.modifiedAt || 0);
+    });
+    return sorted;
+  }
+
+  _fileEntry(file) {
+    return {
+      name: file.name,
+      type: 'file',
+      path: file.path,
+      size: file.size,
+      sizeMB: Number((Number(file.size || 0) / 1024 / 1024).toFixed(2)),
+      modifiedAt: new Date(file.modifiedAt || 0).toISOString(),
+      accessedAt: new Date(file.accessedAt || 0).toISOString(),
+      createdAt: new Date(file.createdAt || 0).toISOString()
+    };
+  }
+
+  _findDuplicateFileGroups(files) {
+    const buckets = new Map();
+    for (const file of files) {
+      const key = `${file.name.toLowerCase()}:${file.size}`;
+      if (!buckets.has(key)) {
+        buckets.set(key, []);
+      }
+      buckets.get(key).push(this._fileEntry(file));
+    }
+
+    return Array.from(buckets.values())
+      .filter(group => group.length > 1)
+      .slice(0, 10);
   }
 
   _shouldDescendIntoDirectory(name) {

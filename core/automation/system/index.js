@@ -350,6 +350,129 @@ class SystemController {
     }
   }
 
+  getInsight(insightType) {
+    const type = String(insightType || '').trim();
+    if (type === 'topMemoryApp') {
+      return this._getTopProcessBy('WorkingSet64', 'memory');
+    }
+    if (type === 'topCpuProcess') {
+      return this._getTopProcessBy('CPU', 'cpu');
+    }
+    if (type === 'storageUsage') {
+      return this._getLargestUserFolders();
+    }
+    if (type === 'recentlyInstalledApps') {
+      return this._getRecentlyInstalledApps();
+    }
+    if (type === 'systemSlowdown') {
+      return this._getSystemSlowdownSnapshot();
+    }
+    return { success: false, error: 'System insight is not supported yet' };
+  }
+
+  _getTopProcessBy(property, metric) {
+    try {
+      const output = execFileSync('powershell.exe', [
+        '-NoProfile',
+        '-Command',
+        [
+          `$items = Get-Process | Where-Object { $_.${property} -ne $null } | Sort-Object ${property} -Descending | Select-Object -First 8 ProcessName, Id, CPU, WorkingSet64, MainWindowTitle;`,
+          '$items | ConvertTo-Json -Compress'
+        ].join(' ')
+      ], { encoding: 'utf8', timeout: 6000 });
+      const parsed = JSON.parse(output || '[]');
+      const rows = Array.isArray(parsed) ? parsed : (parsed ? [parsed] : []);
+      const processes = rows.map(row => ({
+        name: String(row.ProcessName || '').trim(),
+        id: Number(row.Id || 0),
+        cpu: Number(row.CPU || 0),
+        memoryMB: Number((Number(row.WorkingSet64 || 0) / 1024 / 1024).toFixed(1)),
+        title: String(row.MainWindowTitle || '').trim()
+      })).filter(row => row.name);
+
+      return {
+        success: true,
+        data: {
+          insightType: metric === 'memory' ? 'topMemoryApp' : 'topCpuProcess',
+          metric,
+          top: processes[0] || null,
+          processes
+        }
+      };
+    } catch (err) {
+      return { success: false, error: `${metric === 'memory' ? 'Memory' : 'CPU'} usage by process is not available` };
+    }
+  }
+
+  _getLargestUserFolders() {
+    try {
+      const home = os.homedir();
+      const folders = ['Desktop', 'Documents', 'Downloads', 'Pictures', 'Videos', 'Music']
+        .map(name => `${home}\\${name}`);
+      const script = [
+        `$paths = @(${folders.map(folder => `'${folder.replace(/'/g, "''")}'`).join(',')});`,
+        '$items = foreach ($p in $paths) {',
+        '  if (Test-Path $p) {',
+        '    $size = (Get-ChildItem -LiteralPath $p -Recurse -File -ErrorAction SilentlyContinue | Measure-Object -Property Length -Sum).Sum;',
+        '    [PSCustomObject]@{ Path = $p; Name = Split-Path $p -Leaf; SizeBytes = [int64]($size) }',
+        '  }',
+        '};',
+        '$items | Sort-Object SizeBytes -Descending | ConvertTo-Json -Compress'
+      ].join(' ');
+      const output = execFileSync('powershell.exe', ['-NoProfile', '-Command', script], {
+        encoding: 'utf8',
+        timeout: 12000
+      });
+      const parsed = JSON.parse(output || '[]');
+      const rows = Array.isArray(parsed) ? parsed : (parsed ? [parsed] : []);
+      const folderRows = rows.map(row => ({
+        name: String(row.Name || '').trim(),
+        path: String(row.Path || '').trim(),
+        sizeMB: Number((Number(row.SizeBytes || 0) / 1024 / 1024).toFixed(1))
+      })).filter(row => row.name);
+      return { success: true, data: { insightType: 'storageUsage', folders: folderRows } };
+    } catch (err) {
+      return { success: false, error: 'Storage usage by folder is not available' };
+    }
+  }
+
+  _getRecentlyInstalledApps() {
+    try {
+      const script = [
+        '$roots = @("HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*", "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*", "HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*");',
+        '$apps = foreach ($root in $roots) { Get-ItemProperty $root -ErrorAction SilentlyContinue | Where-Object { $_.DisplayName } | Select-Object DisplayName, InstallDate, Publisher };',
+        '$apps | Sort-Object InstallDate -Descending | Select-Object -First 10 | ConvertTo-Json -Compress'
+      ].join(' ');
+      const output = execFileSync('powershell.exe', ['-NoProfile', '-Command', script], {
+        encoding: 'utf8',
+        timeout: 8000
+      });
+      const parsed = JSON.parse(output || '[]');
+      const rows = Array.isArray(parsed) ? parsed : (parsed ? [parsed] : []);
+      const apps = rows.map(row => ({
+        name: String(row.DisplayName || '').trim(),
+        installDate: String(row.InstallDate || '').trim(),
+        publisher: String(row.Publisher || '').trim()
+      })).filter(row => row.name);
+      return { success: true, data: { insightType: 'recentlyInstalledApps', apps } };
+    } catch (err) {
+      return { success: false, error: 'Recently installed applications are not available' };
+    }
+  }
+
+  _getSystemSlowdownSnapshot() {
+    const cpu = this._getTopProcessBy('CPU', 'cpu');
+    const memory = this._getTopProcessBy('WorkingSet64', 'memory');
+    return {
+      success: true,
+      data: {
+        insightType: 'systemSlowdown',
+        cpu: cpu.data?.top || null,
+        memory: memory.data?.top || null
+      }
+    };
+  }
+
   bluetooth(enabled = undefined) {
     if (enabled === true || enabled === false) {
       return this._setBluetoothState(enabled);
