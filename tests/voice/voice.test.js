@@ -107,7 +107,7 @@ describe('Voice Manager & Audio Engine Integration', function() {
     AssistantEventBus = require('../../core/shared/index').AssistantEventBus;
   });
 
-  it('should initialize the Node speech recognition engine', async function() {
+  it('should initialize the speech recognition engine', async function() {
     const { vm } = createVoiceManager();
     await vm.initialize();
     assert.equal(vm.workerReady, true);
@@ -190,34 +190,6 @@ describe('Voice Manager & Audio Engine Integration', function() {
     });
   });
 
-  it('should keep a hotkey conversation active after a recognized command', async function() {
-    const { vm } = createVoiceManager();
-    let deactivated = false;
-
-    await vm.initialize();
-    vm.on('deactivated', () => {
-      deactivated = true;
-    });
-
-    assert.equal(vm.manualActivate(), true);
-
-    const result = await new Promise((resolve) => {
-      vm.on('speechResult', (data) => resolve(data));
-      vm._handleEngineEvent({
-        event: 'result',
-        text: 'open chrome',
-        confidence: 0.91,
-        mode: 'conversation'
-      });
-    });
-
-    assert.equal(result.text, 'open chrome');
-    assert.equal(deactivated, false);
-    assert.equal(vm.getStatus().active, true);
-    assert.equal(vm.getStatus().conversationActive, true);
-    vm.destroy();
-  });
-
   it('should preserve the manual activation trigger for fallback shortcuts', async function() {
     const { vm } = createVoiceManager();
     let activationPayload = null;
@@ -233,541 +205,121 @@ describe('Voice Manager & Audio Engine Integration', function() {
     vm.destroy();
   });
 
-  it('should ignore low-confidence or no-speech transcripts before routing', async function() {
-    const { vm } = createVoiceManager({
-      voice: {
-        stt: {
-          minConfidence: 0.55,
-          maxNoSpeechProbability: 0.55
-        }
-      }
-    });
-    let speechResult = false;
-
-    await vm.initialize();
-    vm.on('speechResult', () => {
-      speechResult = true;
-    });
-
-    vm._handleEngineEvent({
-      event: 'result',
-      text: 'thanks for watching',
-      confidence: 0.3,
-      noSpeechProbability: 0.92,
-      mode: 'command'
-    });
-
-    assert.equal(speechResult, false);
-    assert.equal(vm.getStatus().state, 'IDLE');
-    vm.destroy();
-  });
-
-  it('should allow low-confidence actionable commands into NLP routing', async function() {
-    const { vm } = createVoiceManager({
-      voice: {
-        stt: {
-          minConfidence: 0.55,
-          commandRecoveryMinConfidence: 0.25
-        }
-      }
-    });
-    const results = [];
-
-    await vm.initialize();
-    vm.on('speechResult', (data) => {
-      results.push(data);
-    });
-
-    assert.equal(vm.manualActivate(), true);
-
-    vm._handleEngineEvent({
-      event: 'result',
-      text: 'open chrome',
-      confidence: 0.34,
-      noSpeechProbability: 0.6,
-      mode: 'conversation'
-    });
-    vm._handleEngineEvent({
-      event: 'result',
-      text: 'open youtube',
-      confidence: 0.31,
-      noSpeechProbability: 0.5,
-      mode: 'conversation'
-    });
-
-    assert.deepEqual(results.map(result => result.text), ['open chrome', 'open youtube']);
-    assert.equal(vm.getStatus().conversationActive, true);
-    vm.destroy();
-  });
-
-  it('should allow low-confidence fuzzy actionable commands into NLP routing', async function() {
+  it('should forward any non-empty transcript without STT-side judgment', async function() {
     const { vm } = createVoiceManager();
     const results = [];
 
     await vm.initialize();
     vm.on('speechResult', (data) => {
       results.push(data);
-    });
-
-    assert.equal(vm.manualActivate(), true);
-
-    vm._handleEngineEvent({
-      event: 'result',
-      text: 'ope chrome',
-      confidence: 0.34,
-      noSpeechProbability: 0.5,
-      mode: 'conversation'
-    });
-
-    assert.deepEqual(results.map(result => result.text), ['open chrome']);
-    assert.equal(vm.getStatus().conversationActive, true);
-    vm.destroy();
-  });
-
-  it('should allow low-confidence conversational commands into NLP routing', async function() {
-    const { vm } = createVoiceManager();
-    const results = [];
-
-    await vm.initialize();
-    vm.on('speechResult', (data) => {
-      results.push(data);
-    });
-
-    assert.equal(vm.manualActivate(), true);
-
-    vm._handleEngineEvent({
-      event: 'result',
-      text: 'i was saying search for java tutorial',
-      confidence: 0.34,
-      noSpeechProbability: 0.5,
-      mode: 'conversation'
-    });
-
-    assert.deepEqual(results.map(result => result.text), ['search for java tutorial']);
-    assert.equal(vm.getStatus().conversationActive, true);
-    vm.destroy();
-  });
-
-  it('should use NLP-corrected STT text for typo-heavy search commands', async function() {
-    const { vm } = createVoiceManager();
-    const results = [];
-
-    await vm.initialize();
-    vm.on('speechResult', (data) => {
-      results.push(data);
-    });
-
-    assert.equal(vm.manualActivate(), true);
-
-    vm._handleEngineEvent({
-      event: 'result',
-      text: 'serch chatgpt in chrome',
-      confidence: 0.38,
-      noSpeechProbability: 0.5,
-      mode: 'conversation'
-    });
-
-    assert.deepEqual(results.map(result => result.text), ['search chatgpt in chrome']);
-    assert.equal(vm.getStatus().conversationActive, true);
-    vm.destroy();
-  });
-
-  it('should recover actionable commands from recognition alternates', async function() {
-    const { vm } = createVoiceManager();
-    const results = [];
-
-    await vm.initialize();
-    vm.on('speechResult', (data) => {
-      results.push(data);
-    });
-
-    vm._handleEngineEvent({
-      event: 'result',
-      text: 'lola',
-      confidence: 0.72,
-      mode: 'conversation',
-      alternates: [
-        { text: 'open chrome', confidence: 0.56 },
-        { text: 'open edge', confidence: 0.41 }
-      ]
-    });
-
-    assert.equal(results.length, 1);
-    assert.equal(results[0].text, 'open chrome');
-    vm.destroy();
-  });
-
-  it('should recover a command alternate when the primary result is filler noise', async function() {
-    const { vm } = createVoiceManager();
-    const results = [];
-
-    await vm.initialize();
-    vm.on('speechResult', (data) => {
-      results.push(data);
-    });
-
-    vm._handleEngineEvent({
-      event: 'result',
-      text: 'the tool',
-      confidence: 0.88,
-      mode: 'conversation',
-      alternates: [
-        { text: 'open youtube', confidence: 0.62 },
-        { text: 'the tool', confidence: 0.88 }
-      ]
-    });
-
-    assert.equal(results.length, 1);
-    assert.equal(results[0].text, 'open youtube');
-    vm.destroy();
-  });
-
-  it('should ignore one-word non-actionable recognition noise before routing', async function() {
-    const { vm } = createVoiceManager();
-    let speechResult = false;
-
-    await vm.initialize();
-    vm.on('speechResult', () => {
-      speechResult = true;
-    });
-
-    assert.equal(vm.manualActivate(), true);
-
-    vm._handleEngineEvent({
-      event: 'result',
-      text: 'lola',
-      confidence: 0.91,
-      mode: 'conversation'
-    });
-
-    assert.equal(speechResult, false);
-    assert.equal(vm.getStatus().state, 'LISTENING');
-    vm.destroy();
-  });
-
-  it('should hold incomplete command fragments instead of routing them', async function() {
-    const { vm } = createVoiceManager();
-    let speechResult = false;
-
-    await vm.initialize();
-    vm.on('speechResult', () => {
-      speechResult = true;
-    });
-
-    assert.equal(vm.manualActivate(), true);
-
-    vm._handleEngineEvent({
-      event: 'result',
-      text: 'open',
-      confidence: 0.9,
-      noSpeechProbability: 0.2,
-      mode: 'conversation'
-    });
-
-    assert.equal(speechResult, false);
-    assert.equal(vm.pendingVoiceFragment.verb, 'open');
-    assert.equal(vm.getStatus().state, 'LISTENING');
-    vm.destroy();
-  });
-
-  it('should recover a split utterance when the target arrives after an incomplete fragment', async function() {
-    const { vm } = createVoiceManager({
-      voice: {
-        conversationIgnoredSpeechLimit: 3
-      }
-    });
-    const results = [];
-
-    await vm.initialize();
-    vm.on('speechResult', (data) => {
-      results.push(data);
-    });
-
-    assert.equal(vm.manualActivate(), true);
-
-    vm._handleEngineEvent({
-      event: 'result',
-      text: 'open',
-      confidence: 0.9,
-      noSpeechProbability: 0.2,
-      mode: 'conversation'
-    });
-    vm._handleEngineEvent({
-      event: 'result',
-      text: 'chrome',
-      confidence: 0.72,
-      noSpeechProbability: 0.2,
-      mode: 'conversation'
-    });
-
-    assert.deepEqual(results.map(result => result.text), ['open chrome']);
-    assert.equal(vm.pendingVoiceFragment, null);
-    vm.destroy();
-  });
-
-  it('should not recover repetitive whisper noise into a command', async function() {
-    const { vm } = createVoiceManager();
-    let speechResult = false;
-
-    await vm.initialize();
-    vm.on('speechResult', () => {
-      speechResult = true;
-    });
-
-    assert.equal(vm.manualActivate(), true);
-
-    vm._handleEngineEvent({
-      event: 'result',
-      text: 'home. home. home. home. open',
-      confidence: 0.92,
-      noSpeechProbability: 0.18,
-      mode: 'conversation'
-    });
-
-    assert.equal(speechResult, false);
-    assert.equal(vm.getStatus().state, 'LISTENING');
-    vm.destroy();
-  });
-
-  it('should ignore short multi-word recognition noise before routing', async function() {
-    const { vm } = createVoiceManager({
-      voice: {
-        conversationIgnoredSpeechLimit: 3
-      }
-    });
-    let speechResult = false;
-
-    await vm.initialize();
-    vm.on('speechResult', () => {
-      speechResult = true;
-    });
-
-    assert.equal(vm.manualActivate(), true);
-
-    vm._handleEngineEvent({
-      event: 'result',
-      text: 'the know of',
-      confidence: 0.91,
-      mode: 'conversation'
-    });
-    vm._handleEngineEvent({
-      event: 'result',
-      text: 'the tool',
-      confidence: 0.91,
-      mode: 'conversation'
-    });
-
-    assert.equal(speechResult, false);
-    assert.equal(vm.getStatus().state, 'LISTENING');
-    vm.destroy();
-  });
-
-  it('should ignore common speech hallucination phrases from background noise', async function() {
-    const { vm } = createVoiceManager();
-    let speechResult = false;
-
-    await vm.initialize();
-    vm.on('speechResult', () => {
-      speechResult = true;
-    });
-
-    vm._handleEngineEvent({
-      event: 'result',
-      text: 'thank you',
-      confidence: 0.91,
-      noSpeechProbability: 0.2,
-      mode: 'command'
-    });
-
-    assert.equal(speechResult, false);
-    assert.equal(vm.getStatus().state, 'IDLE');
-    vm.destroy();
-  });
-
-  it('should include voice turn quality metadata with accepted transcripts', async function() {
-    const { vm } = createVoiceManager();
-    const results = [];
-
-    await vm.initialize();
-    vm.on('speechResult', (data) => {
-      results.push(data);
-    });
-
-    assert.equal(vm.manualActivate(), true);
-
-    vm._handleEngineEvent({
-      event: 'result',
-      text: 'open chrome',
-      confidence: 0.91,
-      noSpeechProbability: 0.1,
-      mode: 'conversation',
-      speaker: { verified: true, score: 0.92 }
-    });
-
-    assert.equal(results.length, 1);
-    assert.equal(results[0].voiceTurn.decision, 'execute');
-    assert.equal(results[0].voiceTurn.speaker.status, 'verified');
-    assert.equal(results[0].utterance.voiceTurn.quality > 0, true);
-    vm.destroy();
-  });
-
-  it('should accept short conversational greetings after manual activation', async function() {
-    const { vm } = createVoiceManager();
-    const results = [];
-
-    await vm.initialize();
-    vm.on('speechResult', (data) => {
-      results.push(data);
-    });
-
-    assert.equal(vm.manualActivate(), true);
-
-    vm._handleEngineEvent({
-      event: 'result',
-      text: 'hello',
-      confidence: 0.7,
-      noSpeechProbability: 0.62,
-      mode: 'conversation'
-    });
-
-    assert.equal(results.length, 1);
-    assert.equal(results[0].text, 'hello');
-    assert.equal(results[0].voiceTurn.signals.conversational, true);
-    vm.destroy();
-  });
-
-  it('should block commands when speaker verification reports a mismatch', async function() {
-    const { vm } = createVoiceManager();
-    let speechResult = false;
-
-    await vm.initialize();
-    vm.on('speechResult', () => {
-      speechResult = true;
-    });
-
-    assert.equal(vm.manualActivate(), true);
-
-    vm._handleEngineEvent({
-      event: 'result',
-      text: 'open chrome',
-      confidence: 0.95,
-      mode: 'conversation',
-      speaker: { verified: false, score: 0.2 }
-    });
-
-    assert.equal(speechResult, false);
-    assert.equal(vm.getStatus().state, 'LISTENING');
-    vm.destroy();
-  });
-
-  it('should reject noisy dictation phrases that look like fuzzy commands', async function() {
-    const { vm } = createVoiceManager({
-      voice: {
-        conversationIgnoredSpeechLimit: 10
-      }
-    });
-    let speechResult = false;
-
-    await vm.initialize();
-    vm.on('speechResult', () => {
-      speechResult = true;
     });
 
     assert.equal(vm.manualActivate(), true);
 
     for (const text of [
+      'open',
+      'thanks for watching',
+      'home. home. home. home. open',
       'Although you do a',
-      'Albany until',
-      "Old then you'd go",
-      'all chat you do a',
-      'all the new dial',
-      'old the you d go'
+      'open chrome'
     ]) {
       vm._handleEngineEvent({
         event: 'result',
         text,
-        confidence: 0.72,
         mode: 'conversation'
       });
     }
 
-    assert.equal(speechResult, false);
+    assert.deepEqual(results.map(result => result.text), [
+      'open',
+      'thanks for watching',
+      'home. home. home. home. open',
+      'Although you do a',
+      'open chrome'
+    ]);
+    assert.equal(results.every(result => !Object.prototype.hasOwnProperty.call(result, 'confidence')), true);
+    assert.equal(results.every(result => !Object.prototype.hasOwnProperty.call(result, 'voiceTurn')), true);
     assert.equal(vm.getStatus().conversationActive, true);
     vm.destroy();
   });
 
-  it('should still allow question-style voice requests', async function() {
-    const { vm } = createVoiceManager();
-    const results = [];
+  it('should publish final transcript events with text-only STT metadata', async function() {
+    const { vm, eventBus } = createVoiceManager();
+    const sttCompleted = [];
+    const finalTranscripts = [];
+
+    eventBus.subscribe('stt.completed', payload => sttCompleted.push(payload));
+    eventBus.subscribe('voice.finalTranscript', payload => finalTranscripts.push(payload));
 
     await vm.initialize();
-    vm.on('speechResult', (data) => {
-      results.push(data);
-    });
-
-    assert.equal(vm.manualActivate(), true);
-
     vm._handleEngineEvent({
       event: 'result',
-      text: 'what is the time',
-      confidence: 0.72,
-      mode: 'conversation'
-    });
-    vm._handleEngineEvent({
-      event: 'result',
-      text: 'when apple wwdc event',
-      confidence: 0.72,
-      mode: 'conversation'
+      text: 'search node js',
+      mode: 'command',
+      backend: 'fake-stt'
     });
 
-    assert.deepEqual(results.map(result => result.text), ['what is the time', 'when apple wwdc event']);
+    assert.equal(sttCompleted.length, 1);
+    assert.equal(finalTranscripts.length, 1);
+    assert.deepEqual(sttCompleted[0].payload, {
+      text: 'search node js',
+      backend: 'fake-stt'
+    });
+    assert.deepEqual(finalTranscripts[0].payload, {
+      text: 'search node js',
+      mode: 'command',
+      backend: 'fake-stt'
+    });
     vm.destroy();
   });
 
-  it('should stop re-arming conversation listening after repeated ignored noise', async function() {
-    const { vm } = createVoiceManager({
-      voice: {
-        conversationIgnoredSpeechLimit: 1,
-        stt: {
-          minConfidence: 0.55
-        }
-      }
-    });
-    const listenCommands = [];
+  it('should treat an empty STT result as no recognized speech', async function() {
+    const { vm } = createVoiceManager();
+    let speechResult = false;
     let timeout = null;
 
     await vm.initialize();
-    vm.on('test:stdin', (payload) => {
-      if (payload.command === 'listen') {
-        listenCommands.push(payload);
-      }
+    vm.on('speechResult', () => {
+      speechResult = true;
     });
     vm.on('listeningTimeout', (data) => {
       timeout = data;
     });
 
     assert.equal(vm.manualActivate(), true);
-
     vm._handleEngineEvent({
       event: 'result',
-      text: 'background noise',
-      confidence: 0.2,
-      mode: 'conversation'
-    });
-    assert.equal(vm.getStatus().conversationActive, true);
-
-    vm._handleEngineEvent({
-      event: 'result',
-      text: 'background noise again',
-      confidence: 0.2,
-      mode: 'conversation'
+      text: '',
+      mode: 'conversation',
+      timeoutMs: 20000
     });
 
-    assert.equal(vm.getStatus().conversationActive, false);
-    assert.equal(vm.getStatus().active, false);
+    assert.equal(speechResult, false);
     assert.ok(timeout);
-    assert.equal(timeout.reason, 'low-transcript-confidence');
-    assert.equal(listenCommands.length, 2);
+    assert.equal(timeout.reason, 'no-speech-detected');
+    assert.equal(vm.getStatus().state, 'IDLE');
+    vm.destroy();
+  });
+
+  it('should forward partial transcripts without classification metadata', async function() {
+    const { vm, eventBus } = createVoiceManager();
+    const partials = [];
+
+    eventBus.subscribe('voice.partialTranscript', payload => partials.push(payload));
+    await vm.initialize();
+
+    vm._handleEngineEvent({
+      event: 'partial_result',
+      text: ' open chrome ',
+      mode: 'conversation',
+      backend: 'fake-stt'
+    });
+
+    assert.deepEqual(partials[0].payload, {
+      text: 'open chrome',
+      mode: 'conversation',
+      backend: 'fake-stt'
+    });
     vm.destroy();
   });
 

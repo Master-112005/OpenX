@@ -50,25 +50,15 @@ describe('Whisper Stream STT Engine', function() {
     assert.equal(engine._buildArgs().includes('--keep-context'), false);
   });
 
-  it('should parse transcript lines and ignore whisper diagnostics', function() {
+  it('should parse transcript text and ignore whisper diagnostics', function() {
     const engine = new WhisperStreamSpeechEngine({});
 
     assert.equal(engine._parseTranscriptLine('[00:00:00.000] Open Chrome.'), 'open chrome');
     assert.equal(engine._parseTranscriptLine('\u001b[2K\r Home. Home. Home. Home. Open.'), 'home. home. home. home. open');
-    assert.equal(engine._parseTranscriptLine('2k 2k aye. open chrome'), 'open chrome');
+    assert.equal(engine._parseTranscriptLine('2k 2k aye. open chrome'), '2k 2k aye. open chrome');
     assert.equal(engine._parseTranscriptLine('whisper_init_from_file: loading model'), '');
-    assert.equal(engine._parseTranscriptLine('{"text":"Search ChatGPT"}'), 'search chatgpt');
-    assert.equal(engine._parseTranscriptLine('{"text":"blank_audio"}'), '');
-  });
-
-  it('should preserve transcript metadata from JSON whisper output', function() {
-    const engine = new WhisperStreamSpeechEngine({});
-    const payload = engine._parseTranscriptPayload('{"text":"Open Chrome","confidence":0.83,"no_speech_prob":0.12,"compression_ratio":1.4}');
-
-    assert.equal(payload.text, 'open chrome');
-    assert.equal(payload.confidence, 0.83);
-    assert.equal(payload.noSpeechProbability, 0.12);
-    assert.equal(payload.compressionRatio, 1.4);
+    assert.equal(engine._parseTranscriptLine('{"text":"Search ChatGPT","confidence":0.83}'), 'search chatgpt');
+    assert.equal(engine._parseTranscriptLine('{"text":"blank_audio"}'), 'blank_audio');
   });
 
   it('should advertise an after-last-speech timeout policy for listen sessions', function() {
@@ -93,41 +83,9 @@ describe('Whisper Stream STT Engine', function() {
 
     assert.equal(activated.timeoutPolicy, 'after-last-speech');
     assert.equal(activated.timeoutMs, 20000);
+    assert.equal(engine.state, 'LISTENING');
     engine.shutdown();
-  });
-
-  it('should estimate lower confidence for common no-speech hallucinations', function() {
-    const engine = new WhisperStreamSpeechEngine({});
-    const quality = engine._estimateTranscriptQuality('thanks for watching', {
-      chunks: ['thanks for watching', 'thanks for watching']
-    });
-
-    assert.equal(quality.confidence < 0.6, true);
-    assert.equal(quality.noSpeechProbability >= 0.9, true);
-  });
-
-  it('should not mark short conversational greetings as no-speech', function() {
-    const engine = new WhisperStreamSpeechEngine({});
-    const quality = engine._estimateTranscriptQuality('hello', {
-      chunks: ['hello']
-    });
-
-    assert.equal(quality.confidence >= 0.85, true);
-    assert.equal(quality.noSpeechProbability < 0.55, true);
-  });
-
-  it('should wait longer before finalizing incomplete command fragments', function() {
-    const engine = new WhisperStreamSpeechEngine({
-      voice: {
-        whisper: {
-          finalDebounceMs: 1600,
-          incompleteUtteranceDebounceMs: 5000
-        }
-      }
-    });
-
-    assert.equal(engine._getFinalDebounceMs({ chunks: ['open'] }), 5000);
-    assert.equal(engine._getFinalDebounceMs({ chunks: ['open chrome'] }), 1600);
+    assert.equal(engine.state, 'IDLE');
   });
 
   it('should compose final transcript without duplicating incremental chunks', function() {
@@ -141,7 +99,7 @@ describe('Whisper Stream STT Engine', function() {
     }), 'home home home open');
   });
 
-  it('should emit transcript quality metadata with final whisper results', function(done) {
+  it('should emit only transcript contract fields with final whisper results', function(done) {
     const engine = new WhisperStreamSpeechEngine({});
 
     engine.on('event', payload => {
@@ -150,9 +108,12 @@ describe('Whisper Stream STT Engine', function() {
       }
 
       assert.equal(payload.text, 'open chrome');
-      assert.equal(Number.isFinite(payload.confidence), true);
-      assert.equal(Number.isFinite(payload.noSpeechProbability), true);
-      assert.equal(Number.isFinite(payload.compressionRatio), true);
+      assert.equal(payload.isFinal, true);
+      assert.equal(payload.mode, 'conversation');
+      assert.equal(payload.backend, 'whisper-stream');
+      assert.equal(Object.prototype.hasOwnProperty.call(payload, 'confidence'), false);
+      assert.equal(Object.prototype.hasOwnProperty.call(payload, 'noSpeechProbability'), false);
+      assert.equal(Object.prototype.hasOwnProperty.call(payload, 'compressionRatio'), false);
       done();
     });
 
@@ -160,11 +121,42 @@ describe('Whisper Stream STT Engine', function() {
       mode: 'conversation',
       startSpeechTimeoutMs: 20000,
       chunks: ['open chrome'],
-      segments: [],
       finalized: false,
       finalTimer: null,
       inactivityTimer: null
     };
     engine._finalizeSession('final-transcript');
+    assert.equal(engine.state, 'IDLE');
+  });
+
+  it('should return an empty transcript instead of classifying no speech', function(done) {
+    const engine = new WhisperStreamSpeechEngine({});
+
+    engine.on('event', payload => {
+      if (payload.event !== 'result') {
+        return;
+      }
+
+      assert.deepEqual({
+        event: payload.event,
+        text: payload.text,
+        isFinal: payload.isFinal
+      }, {
+        event: 'result',
+        text: '',
+        isFinal: true
+      });
+      done();
+    });
+
+    engine.activeSession = {
+      mode: 'conversation',
+      startSpeechTimeoutMs: 20000,
+      chunks: [],
+      finalized: false,
+      finalTimer: null,
+      inactivityTimer: null
+    };
+    engine._finalizeSession('session-timeout');
   });
 });
