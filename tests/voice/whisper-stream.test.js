@@ -52,6 +52,7 @@ describe('Whisper Stream STT Engine', function() {
     assert.equal(engine._parseTranscriptLine('2k 2k aye. open chrome'), 'open chrome');
     assert.equal(engine._parseTranscriptLine('whisper_init_from_file: loading model'), '');
     assert.equal(engine._parseTranscriptLine('{"text":"Search ChatGPT"}'), 'search chatgpt');
+    assert.equal(engine._parseTranscriptLine('{"text":"blank_audio"}'), '');
   });
 
   it('should advertise an after-last-speech timeout policy for listen sessions', function() {
@@ -77,5 +78,51 @@ describe('Whisper Stream STT Engine', function() {
     assert.equal(activated.timeoutPolicy, 'after-last-speech');
     assert.equal(activated.timeoutMs, 20000);
     engine.shutdown();
+  });
+
+  it('should estimate lower confidence for common no-speech hallucinations', function() {
+    const engine = new WhisperStreamSpeechEngine({});
+    const quality = engine._estimateTranscriptQuality('thanks for watching', {
+      chunks: ['thanks for watching', 'thanks for watching']
+    });
+
+    assert.equal(quality.confidence < 0.6, true);
+    assert.equal(quality.noSpeechProbability >= 0.9, true);
+  });
+
+  it('should not mark short conversational greetings as no-speech', function() {
+    const engine = new WhisperStreamSpeechEngine({});
+    const quality = engine._estimateTranscriptQuality('hello', {
+      chunks: ['hello']
+    });
+
+    assert.equal(quality.confidence >= 0.85, true);
+    assert.equal(quality.noSpeechProbability < 0.55, true);
+  });
+
+  it('should emit transcript quality metadata with final whisper results', function(done) {
+    const engine = new WhisperStreamSpeechEngine({});
+
+    engine.on('event', payload => {
+      if (payload.event !== 'result') {
+        return;
+      }
+
+      assert.equal(payload.text, 'open chrome');
+      assert.equal(Number.isFinite(payload.confidence), true);
+      assert.equal(Number.isFinite(payload.noSpeechProbability), true);
+      assert.equal(Number.isFinite(payload.compressionRatio), true);
+      done();
+    });
+
+    engine.activeSession = {
+      mode: 'conversation',
+      startSpeechTimeoutMs: 20000,
+      chunks: ['open chrome'],
+      finalized: false,
+      finalTimer: null,
+      inactivityTimer: null
+    };
+    engine._finalizeSession('final-transcript');
   });
 });

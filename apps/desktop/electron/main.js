@@ -448,7 +448,18 @@ async function initializeAssistant() {
       chatWindow.webContents.send('voice:result', data);
     }
     if (assistant && data.text) {
-      const result = await assistant.processVoiceInput(data.text);
+      let result;
+      try {
+        result = await assistant.processVoiceInput(data.text);
+      } catch (error) {
+        const message = error?.message || String(error || 'Unknown voice processing error');
+        console.error('Voice command processing failed:', message);
+        result = {
+          success: false,
+          response: "I heard you, but I couldn't process that command.",
+          error: message
+        };
+      }
       if (chatWindow && chatWindow.webContents) {
         chatWindow.webContents.send('voice:processed', {
           transcript: data.text,

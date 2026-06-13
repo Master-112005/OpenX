@@ -384,6 +384,8 @@ class VoiceManager extends EventEmitter {
     this.logger.info(`Heard: "${normalizedText}"`, {
       mode: data?.mode || 'command',
       confidence: selected.confidence,
+      decision: reliability.action || reliability.voiceTurn?.decision || 'execute',
+      quality: reliability.voiceTurn?.quality ?? null,
       backend: data.backend || 'windows-sapi'
     });
 
@@ -402,12 +404,14 @@ class VoiceManager extends EventEmitter {
     this.eventBus.publish(EVENTS.STT_COMPLETED, {
       text: normalizedText,
       confidence: selected.confidence,
+      voiceTurn: reliability.voiceTurn,
       backend: data.backend || 'windows-sapi'
     });
     this.eventBus.publish(EVENTS.VOICE_FINAL_TRANSCRIPT, {
       text: normalizedText,
       confidence: selected.confidence,
       mode: data.mode || 'command',
+      voiceTurn: reliability.voiceTurn,
       backend: data.backend || 'windows-sapi'
     });
     
@@ -415,7 +419,8 @@ class VoiceManager extends EventEmitter {
       id: 'stt-' + Date.now(),
       text: normalizedText,
       confidence: selected.confidence,
-      backend: data.backend || 'windows-sapi'
+      backend: data.backend || 'windows-sapi',
+      voiceTurn: reliability.voiceTurn
     };
 
     this.emit('speechResult', {
@@ -424,6 +429,7 @@ class VoiceManager extends EventEmitter {
       isFinal: true,
       backend: data.backend || 'windows-sapi',
       mode: data.mode || 'command',
+      voiceTurn: reliability.voiceTurn,
       utterance
     });
     this.eventBus.publish(EVENTS.VOICE_PROCESSING_FINISHED, {
@@ -718,7 +724,8 @@ class VoiceManager extends EventEmitter {
 
     const mode = String(data?.mode || 'command');
     const confidence = Number(data?.confidence);
-    const commandLike = this._looksLikeActionableTranscript(normalized);
+    const conversational = this._looksLikeConversationalTranscript(normalized);
+    const commandLike = this._looksLikeActionableTranscript(normalized) || conversational;
     const defaultMinConfidence = mode === 'confirmation'
       ? Number(this.config?.voice?.stt?.confirmationMinConfidence ?? 0.45)
       : Number(this.config?.voice?.stt?.minConfidence ?? 0.55);
@@ -731,9 +738,23 @@ class VoiceManager extends EventEmitter {
       return { accepted: false, reason: 'low-transcript-confidence' };
     }
 
-    const gate = this.confidenceGate.assess(normalized, Number.isFinite(confidence) ? confidence : 0.8);
-    if (gate.action === 'ignore' && !commandLike) {
-      return { accepted: false, reason: gate.reason };
+    const gate = this.confidenceGate.assess(normalized, Number.isFinite(confidence) ? confidence : 0.8, {
+      ...data,
+      mode,
+      commandLike
+    });
+    const hardRejectReasons = new Set([
+      'knownHallucination',
+      'repetitive',
+      'speakerMismatch',
+      'speaker-not-verified',
+      'tooShort'
+    ]);
+    if (
+      gate.action === 'ignore'
+      && (!commandLike || gate.turn?.reasons?.some(reason => hardRejectReasons.has(reason)))
+    ) {
+      return { accepted: false, reason: gate.reason, voiceTurn: gate.turn };
     }
 
     const noSpeechProbability = Number(data?.noSpeechProbability);
@@ -742,13 +763,14 @@ class VoiceManager extends EventEmitter {
       Number.isFinite(noSpeechProbability)
       && noSpeechProbability > maxNoSpeechProbability
       && (noSpeechProbability > 0.85 || !commandLike)
+      && !conversational
     ) {
-      return { accepted: false, reason: 'transcript-marked-no-speech' };
+      return { accepted: false, reason: 'transcript-marked-no-speech', voiceTurn: gate.turn };
     }
 
     const tokens = normalized.split(/\s+/).filter(Boolean);
     if (this._isNonActionableTranscript(tokens, mode, normalized)) {
-      return { accepted: false, reason: 'non-actionable-transcript' };
+      return { accepted: false, reason: 'non-actionable-transcript', voiceTurn: gate.turn };
     }
 
     const noisePhrases = new Set([
@@ -757,18 +779,36 @@ class VoiceManager extends EventEmitter {
       'subscribe',
       'music',
       'background music',
+      'blank audio',
+      'blank_audio',
+      'no speech',
+      'no_speech',
+      'oh',
       'silence'
     ]);
     if (noisePhrases.has(normalized)) {
-      return { accepted: false, reason: 'known-hallucination-phrase' };
+      return { accepted: false, reason: 'known-hallucination-phrase', voiceTurn: gate.turn };
     }
 
     const uniqueTokens = new Set(tokens);
     if (tokens.length >= 5 && uniqueTokens.size <= 2) {
-      return { accepted: false, reason: 'repetitive-transcript' };
+      return { accepted: false, reason: 'repetitive-transcript', voiceTurn: gate.turn };
     }
 
-    return { accepted: true };
+    return {
+      accepted: true,
+      action: gate.action === 'ignore' ? 'execute' : gate.action,
+      reason: gate.action === 'ignore' ? 'actionable-low-confidence' : gate.reason,
+      voiceTurn: gate.turn
+        ? {
+            ...gate.turn,
+            decision: gate.action === 'ignore' ? 'execute' : gate.turn.decision,
+            reasons: gate.action === 'ignore'
+              ? Array.from(new Set([...(gate.turn.reasons || []), 'actionable-low-confidence']))
+              : gate.turn.reasons
+          }
+        : gate.turn
+    };
   }
 
   _selectReliableTranscript(data = {}) {
@@ -922,6 +962,14 @@ class VoiceManager extends EventEmitter {
       return false;
     }
 
+    if (
+      this._looksLikeQuestionTranscript(text)
+      || this._looksLikeActionableTranscript(text)
+      || this._looksLikeConversationalTranscript(text)
+    ) {
+      return false;
+    }
+
     const allowedSingleTokenCommands = new Set([
       'help',
       'pause',
@@ -937,10 +985,6 @@ class VoiceManager extends EventEmitter {
 
     if (tokens.length === 1) {
       return !allowedSingleTokenCommands.has(tokens[0]);
-    }
-
-    if (this._looksLikeQuestionTranscript(text) || this._looksLikeActionableTranscript(text)) {
-      return false;
     }
 
     return true;
@@ -997,6 +1041,35 @@ class VoiceManager extends EventEmitter {
 
     const tokens = normalized.split(/\s+/).filter(Boolean);
     return tokens.some(token => targetTokens.has(token)) || tokens.length >= 5;
+  }
+
+  _looksLikeConversationalTranscript(text) {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+      return false;
+    }
+
+    const directPhrases = new Set([
+      'bye',
+      'good afternoon',
+      'good evening',
+      'good morning',
+      'hello',
+      'help',
+      'hey',
+      'hi',
+      'how are you',
+      'thanks',
+      'what can you do',
+      'what is your name',
+      'whats your name'
+    ]);
+    if (directPhrases.has(normalized)) {
+      return true;
+    }
+
+    return /^(?:hi|hello|hey|good)\b/.test(normalized)
+      && normalized.split(/\s+/).filter(Boolean).length <= 5;
   }
 
   _looksLikeActionableTranscript(text) {

@@ -1,5 +1,4 @@
 const fs = require('fs');
-const path = require('path');
 const Normalizer = require('../../shared/index').Normalizer;
 
 function isPlainObject(value) {

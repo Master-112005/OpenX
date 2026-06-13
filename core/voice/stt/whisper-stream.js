@@ -222,10 +222,14 @@ class WhisperStreamSpeechEngine extends EventEmitter {
       return;
     }
 
+    const quality = this._estimateTranscriptQuality(text, session);
     this.emit('event', {
       event: 'result',
       text,
-      confidence: 0.92,
+      confidence: quality.confidence,
+      noSpeechProbability: quality.noSpeechProbability,
+      compressionRatio: quality.compressionRatio,
+      chunkCount: session.chunks.length,
       isFinal: true,
       speechDetected: true,
       mode: session.mode,
@@ -260,7 +264,7 @@ class WhisperStreamSpeechEngine extends EventEmitter {
 
     try {
       const parsed = JSON.parse(raw);
-      return this.normalizer.normalize(parsed.text || parsed.transcript || '');
+      return this._normalizeTranscriptCandidate(parsed.text || parsed.transcript || '');
     } catch (error) {}
 
     const cleaned = raw
@@ -268,7 +272,67 @@ class WhisperStreamSpeechEngine extends EventEmitter {
       .replace(/^\([^)]+\)\s*/g, '')
       .replace(/^\d{2}:\d{2}:\d{2}(?:\.\d+)?\s*/g, '');
 
-    return this.normalizer.normalize(cleaned);
+    return this._normalizeTranscriptCandidate(cleaned);
+  }
+
+  _estimateTranscriptQuality(text, session = {}) {
+    const normalized = this.normalizer.normalize(text);
+    const tokens = normalized.split(/\s+/).filter(Boolean);
+    const uniqueRatio = tokens.length > 0 ? new Set(tokens).size / tokens.length : 0;
+    const repeatedChunkRatio = this._repeatedChunkRatio(session.chunks || []);
+    const shortPhrase = tokens.length <= 2;
+    const conversational = this._looksConversational(normalized);
+    const knownNoise = this._isNoSpeechMarker(normalized)
+      || /^(?:thank you|thanks for watching|music|background music|foreign|silence|subscribe)$/i.test(normalized);
+
+    let confidence = 0.88;
+    if (tokens.length >= 3) confidence += 0.04;
+    if (tokens.length >= 6) confidence += 0.03;
+    if (shortPhrase && !conversational) confidence -= 0.18;
+    if (uniqueRatio > 0 && uniqueRatio < 0.5) confidence -= 0.18;
+    if (repeatedChunkRatio > 0.35) confidence -= 0.18;
+    if (knownNoise) confidence -= 0.45;
+
+    const noSpeechProbability = Math.max(
+      knownNoise ? 0.9 : 0,
+      shortPhrase && !conversational ? 0.62 : 0.18,
+      repeatedChunkRatio > 0.35 ? 0.58 : 0.18
+    );
+    const compressionRatio = uniqueRatio > 0 ? 1 / uniqueRatio : 3;
+
+    return {
+      confidence: Math.max(0.1, Math.min(0.96, Number(confidence.toFixed(2)))),
+      noSpeechProbability: Number(Math.min(0.98, noSpeechProbability).toFixed(2)),
+      compressionRatio: Number(Math.max(1, compressionRatio).toFixed(2))
+    };
+  }
+
+  _normalizeTranscriptCandidate(value) {
+    const normalized = this.normalizer.normalize(value);
+    if (!normalized || this._isNoSpeechMarker(normalized)) {
+      return '';
+    }
+    return normalized;
+  }
+
+  _isNoSpeechMarker(text) {
+    return /^(?:blank audio|blank_audio|no speech|no_speech|nospeech|silence)$/i.test(String(text || '').trim());
+  }
+
+  _looksConversational(text) {
+    const normalized = String(text || '').trim().toLowerCase();
+    return /^(?:hi|hello|hey|good morning|good afternoon|good evening|how are you|help|what can you do|what is your name|whats your name)$/.test(normalized);
+  }
+
+  _repeatedChunkRatio(chunks = []) {
+    const normalized = chunks
+      .map(chunk => this.normalizer.normalize(chunk))
+      .filter(Boolean);
+    if (normalized.length <= 1) {
+      return 0;
+    }
+    const unique = new Set(normalized);
+    return 1 - (unique.size / normalized.length);
   }
 
   _buildArgs() {

@@ -673,7 +673,6 @@ class FileController {
       for (const entry of entries) {
         const entryPath = path.join(directory, entry.name);
         const isDirectory = entry.isDirectory();
-        const entryName = entry.name.toLowerCase();
         const isMatch = options.fuzzyName && entry.isFile()
           ? this._fileNameLooksLike(entry.name, options.fuzzyName)
           : this._entryNameMatchesQuery(entry.name, lowerQuery);

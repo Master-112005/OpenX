@@ -500,6 +500,82 @@ describe('Voice Manager & Audio Engine Integration', function() {
     vm.destroy();
   });
 
+  it('should include voice turn quality metadata with accepted transcripts', async function() {
+    const { vm } = createVoiceManager();
+    const results = [];
+
+    await vm.initialize();
+    vm.on('speechResult', (data) => {
+      results.push(data);
+    });
+
+    assert.equal(vm.manualActivate(), true);
+
+    vm._handleEngineEvent({
+      event: 'result',
+      text: 'open chrome',
+      confidence: 0.91,
+      noSpeechProbability: 0.1,
+      mode: 'conversation',
+      speaker: { verified: true, score: 0.92 }
+    });
+
+    assert.equal(results.length, 1);
+    assert.equal(results[0].voiceTurn.decision, 'execute');
+    assert.equal(results[0].voiceTurn.speaker.status, 'verified');
+    assert.equal(results[0].utterance.voiceTurn.quality > 0, true);
+    vm.destroy();
+  });
+
+  it('should accept short conversational greetings after manual activation', async function() {
+    const { vm } = createVoiceManager();
+    const results = [];
+
+    await vm.initialize();
+    vm.on('speechResult', (data) => {
+      results.push(data);
+    });
+
+    assert.equal(vm.manualActivate(), true);
+
+    vm._handleEngineEvent({
+      event: 'result',
+      text: 'hello',
+      confidence: 0.7,
+      noSpeechProbability: 0.62,
+      mode: 'conversation'
+    });
+
+    assert.equal(results.length, 1);
+    assert.equal(results[0].text, 'hello');
+    assert.equal(results[0].voiceTurn.signals.conversational, true);
+    vm.destroy();
+  });
+
+  it('should block commands when speaker verification reports a mismatch', async function() {
+    const { vm } = createVoiceManager();
+    let speechResult = false;
+
+    await vm.initialize();
+    vm.on('speechResult', () => {
+      speechResult = true;
+    });
+
+    assert.equal(vm.manualActivate(), true);
+
+    vm._handleEngineEvent({
+      event: 'result',
+      text: 'open chrome',
+      confidence: 0.95,
+      mode: 'conversation',
+      speaker: { verified: false, score: 0.2 }
+    });
+
+    assert.equal(speechResult, false);
+    assert.equal(vm.getStatus().state, 'LISTENING');
+    vm.destroy();
+  });
+
   it('should reject noisy dictation phrases that look like fuzzy commands', async function() {
     const { vm } = createVoiceManager({
       voice: {
