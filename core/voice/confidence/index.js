@@ -32,6 +32,8 @@ class VoiceConfidenceGate {
         'speaker-not-verified',
         'knownHallucination',
         'highNoSpeech',
+        'incompleteCommand',
+        'repeatedLeadIn',
         'repetitive',
         'tooShort'
       ].find(reason => turn.reasons.includes(reason));

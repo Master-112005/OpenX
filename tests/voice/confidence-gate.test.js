@@ -33,6 +33,29 @@ describe('Voice Confidence Gate', function() {
     assert.equal(result.turn.signals.knownHallucination, true);
   });
 
+  it('should reject incomplete command fragments before routing', function() {
+    const gate = new VoiceConfidenceGate();
+    const result = gate.assess('open', 0.9, {
+      mode: 'conversation',
+      noSpeechProbability: 0.2
+    });
+
+    assert.equal(result.action, 'ignore');
+    assert.equal(result.reason, 'incompleteCommand');
+    assert.equal(result.turn.signals.incompleteCommand, true);
+  });
+
+  it('should reject repeated lead-in hallucinations before routing', function() {
+    const gate = new VoiceConfidenceGate();
+    const result = gate.assess('home home home home open', 0.9, {
+      mode: 'conversation',
+      noSpeechProbability: 0.1
+    });
+
+    assert.equal(result.action, 'ignore');
+    assert.equal(result.reason, 'repeatedLeadIn');
+  });
+
   it('should reject commands when speaker verification reports a mismatch', function() {
     const gate = new VoiceConfidenceGate();
     const result = gate.assess('open chrome', 0.95, {

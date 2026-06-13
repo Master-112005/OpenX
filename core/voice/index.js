@@ -54,6 +54,7 @@ class VoiceManager extends EventEmitter {
     this.pendingFollowUpListen = null;
     this.pendingListenAfterResume = null;
     this.resumeListenFallbackTimer = null;
+    this.pendingVoiceFragment = null;
     
     this._setupTtsListeners();
     this._setupSessionListeners();
@@ -369,6 +370,13 @@ class VoiceManager extends EventEmitter {
     const normalizedText = selected.text;
     const reliability = selected.reliability;
     if (!reliability.accepted) {
+      if (reliability.reason === 'incompleteCommand' || reliability.reason === 'incomplete-command-fragment') {
+        this.pendingVoiceFragment = {
+          verb: normalizedText,
+          mode: data?.mode || 'command',
+          createdAt: Date.now()
+        };
+      }
       this._handleIgnoredSpeech({
         mode: data?.mode || 'command',
         reason: reliability.reason,
@@ -379,6 +387,7 @@ class VoiceManager extends EventEmitter {
       return;
     }
 
+    this.pendingVoiceFragment = null;
     this.sessionManager.touch(this._getVoiceInactivityTimeoutMs());
 
     this.logger.info(`Heard: "${normalizedText}"`, {
@@ -745,6 +754,8 @@ class VoiceManager extends EventEmitter {
     });
     const hardRejectReasons = new Set([
       'knownHallucination',
+      'incompleteCommand',
+      'repeatedLeadIn',
       'repetitive',
       'speakerMismatch',
       'speaker-not-verified',
@@ -781,10 +792,12 @@ class VoiceManager extends EventEmitter {
       'background music',
       'blank audio',
       'blank_audio',
+      'boom',
       'no speech',
       'no_speech',
       'oh',
-      'silence'
+      'silence',
+      'yes yes'
     ]);
     if (noisePhrases.has(normalized)) {
       return { accepted: false, reason: 'known-hallucination-phrase', voiceTurn: gate.turn };
@@ -793,6 +806,10 @@ class VoiceManager extends EventEmitter {
     const uniqueTokens = new Set(tokens);
     if (tokens.length >= 5 && uniqueTokens.size <= 2) {
       return { accepted: false, reason: 'repetitive-transcript', voiceTurn: gate.turn };
+    }
+
+    if (this._isIncompleteCommandFragment(normalized, mode)) {
+      return { accepted: false, reason: 'incomplete-command-fragment', voiceTurn: gate.turn };
     }
 
     return {
@@ -868,21 +885,44 @@ class VoiceManager extends EventEmitter {
       });
     };
 
-    this._buildRecoveredTranscriptVariants(data.text).forEach(variant => {
-      pushCandidate(variant.text, variant.confidence);
-    });
-    this._buildNlpTranscriptVariants(data.text).forEach(variant => {
-      pushCandidate(variant, Number(data.confidence) > 0 ? Number(data.confidence) : 0.72);
-    });
+    if (
+      this.pendingVoiceFragment?.verb
+      && Date.now() - Number(this.pendingVoiceFragment.createdAt || 0) > 8000
+    ) {
+      this.pendingVoiceFragment = null;
+    }
+
+    const rawText = this._normalizeTranscript(data.text);
+    const allowRecovery = !this._isUnreliableTranscriptForRecovery(rawText);
+
+    if (this.pendingVoiceFragment?.verb && data?.text && allowRecovery) {
+      const target = this._normalizeTranscript(data.text);
+      if (target && !this._isIncompleteCommandFragment(target, data?.mode || 'command')) {
+        pushCandidate(`${this.pendingVoiceFragment.verb} ${target}`, Number(data.confidence) > 0 ? Number(data.confidence) : 0.72);
+      }
+    }
+
+    if (allowRecovery) {
+      this._buildRecoveredTranscriptVariants(data.text).forEach(variant => {
+        pushCandidate(variant.text, variant.confidence);
+      });
+      this._buildNlpTranscriptVariants(data.text).forEach(variant => {
+        pushCandidate(variant, Number(data.confidence) > 0 ? Number(data.confidence) : 0.72);
+      });
+    }
     pushCandidate(data.text, data.confidence);
     if (Array.isArray(data.alternates)) {
       for (const alternate of data.alternates) {
-        this._buildRecoveredTranscriptVariants(alternate?.text).forEach(variant => {
-          pushCandidate(variant.text, variant.confidence);
-        });
-        this._buildNlpTranscriptVariants(alternate?.text).forEach(variant => {
-          pushCandidate(variant, Number(alternate?.confidence) > 0 ? Number(alternate.confidence) : 0.72);
-        });
+        const alternateRawText = this._normalizeTranscript(alternate?.text);
+        const allowAlternateRecovery = !this._isUnreliableTranscriptForRecovery(alternateRawText);
+        if (allowAlternateRecovery) {
+          this._buildRecoveredTranscriptVariants(alternate?.text).forEach(variant => {
+            pushCandidate(variant.text, variant.confidence);
+          });
+          this._buildNlpTranscriptVariants(alternate?.text).forEach(variant => {
+            pushCandidate(variant, Number(alternate?.confidence) > 0 ? Number(alternate.confidence) : 0.72);
+          });
+        }
         pushCandidate(alternate?.text, alternate?.confidence);
       }
     }
@@ -942,6 +982,10 @@ class VoiceManager extends EventEmitter {
     }
 
     const text = String(normalized || '').trim().toLowerCase();
+    if (this._isIncompleteCommandFragment(text, mode)) {
+      return true;
+    }
+
     const allowedPhrases = new Set([
       'help',
       'show help',
@@ -1070,6 +1114,124 @@ class VoiceManager extends EventEmitter {
 
     return /^(?:hi|hello|hey|good)\b/.test(normalized)
       && normalized.split(/\s+/).filter(Boolean).length <= 5;
+  }
+
+  _isIncompleteCommandFragment(text, mode = 'command') {
+    if (mode === 'confirmation') {
+      return false;
+    }
+
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized || /\s/.test(normalized)) {
+      return false;
+    }
+
+    const incompleteVerbs = new Set([
+      'attach',
+      'call',
+      'close',
+      'copy',
+      'create',
+      'delete',
+      'draft',
+      'extract',
+      'find',
+      'launch',
+      'message',
+      'minimize',
+      'move',
+      'open',
+      'read',
+      'rename',
+      'search',
+      'send',
+      'share',
+      'show',
+      'switch'
+    ]);
+
+    return incompleteVerbs.has(normalized);
+  }
+
+  _isUnreliableTranscriptForRecovery(text) {
+    const normalized = String(text || '').trim().toLowerCase();
+    if (!normalized) {
+      return true;
+    }
+
+    const compact = normalized
+      .replace(/[^\w\s]/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const tokens = compact.split(/\s+/).filter(Boolean);
+    const noisePhrases = new Set([
+      'background music',
+      'blank audio',
+      'blank_audio',
+      'boom',
+      'foreign',
+      'music',
+      'no speech',
+      'no_speech',
+      'oh',
+      'silence',
+      'thank you',
+      'thanks for watching',
+      'yes yes'
+    ]);
+    if (noisePhrases.has(compact)) {
+      return true;
+    }
+
+    if (tokens.length >= 4) {
+      const [lastToken] = tokens.slice(-1);
+      const leadingTokens = tokens.slice(0, -1);
+      const counts = new Map();
+      for (const token of leadingTokens) {
+        counts.set(token, (counts.get(token) || 0) + 1);
+      }
+      const maxLeadCount = Math.max(...counts.values());
+      if (maxLeadCount >= 3 && this._isLikelyActionToken(lastToken)) {
+        return true;
+      }
+    }
+
+    return tokens.length >= 5 && new Set(tokens).size / tokens.length <= 0.45;
+  }
+
+  _isLikelyActionToken(token) {
+    return new Set([
+      'attach',
+      'call',
+      'clean',
+      'close',
+      'continue',
+      'copy',
+      'create',
+      'delete',
+      'draft',
+      'extract',
+      'find',
+      'go',
+      'launch',
+      'message',
+      'minimize',
+      'move',
+      'open',
+      'pause',
+      'play',
+      'read',
+      'rename',
+      'resume',
+      'search',
+      'send',
+      'share',
+      'show',
+      'skip',
+      'start',
+      'stop',
+      'switch'
+    ]).has(String(token || '').toLowerCase());
   }
 
   _looksLikeActionableTranscript(text) {

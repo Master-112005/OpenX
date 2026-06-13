@@ -12,5 +12,6 @@ describe('Transcript Normalizer', function() {
 
     assert.equal(normalizer.normalize('Uh, Open   Chrome.'), 'open chrome');
     assert.equal(normalizer.normalize('okay search for ChatGPT!!!'), 'search for chatgpt');
+    assert.equal(normalizer.normalize('oh hello'), 'hello');
   });
 });

@@ -75,6 +75,7 @@ class WhisperStreamSpeechEngine extends EventEmitter {
       startSpeechTimeoutMs,
       maxDurationMs,
       chunks: [],
+      segments: [],
       finalized: false,
       finalTimer: null,
       inactivityTimer: null
@@ -162,22 +163,27 @@ class WhisperStreamSpeechEngine extends EventEmitter {
   }
 
   _handleStdout(chunk) {
-    const lines = String(chunk || '')
+    const payloads = String(chunk || '')
       .split(/\r?\n/)
-      .map(line => this._parseTranscriptLine(line))
-      .filter(Boolean);
+      .map(line => this._parseTranscriptPayload(line))
+      .filter(payload => payload && payload.text);
 
-    for (const text of lines) {
+    for (const payload of payloads) {
       if (!this.activeSession || this.activeSession.finalized) {
         continue;
       }
 
+      const text = payload.text;
       this.activeSession.chunks.push(text);
+      this.activeSession.segments.push(payload);
       this.activeSession.lastActivityAt = Date.now();
       this._armSessionInactivityTimer(this.activeSession.startSpeechTimeoutMs);
+      this._logRawTranscriptPayload(payload);
       this.emit('event', {
         event: 'partial_result',
         text,
+        confidence: payload.confidence,
+        noSpeechProbability: payload.noSpeechProbability,
         isFinal: false,
         mode: this.activeSession.mode,
         backend: 'whisper-stream'
@@ -186,9 +192,7 @@ class WhisperStreamSpeechEngine extends EventEmitter {
       if (this.activeSession.finalTimer) {
         clearTimeout(this.activeSession.finalTimer);
       }
-      const debounceMs = Number(this.whisperConfig.finalDebounceMs) > 0
-        ? Number(this.whisperConfig.finalDebounceMs)
-        : 1200;
+      const debounceMs = this._getFinalDebounceMs(this.activeSession);
       this.activeSession.finalTimer = setTimeout(() => {
         this._finalizeSession('final-transcript');
       }, debounceMs);
@@ -210,7 +214,7 @@ class WhisperStreamSpeechEngine extends EventEmitter {
     }
     this.activeSession = null;
 
-    const text = this.normalizer.normalize(session.chunks.join(' '));
+    const text = this._composeSessionTranscript(session);
     if (!text) {
       this.emit('event', {
         event: 'session_timeout',
@@ -253,18 +257,32 @@ class WhisperStreamSpeechEngine extends EventEmitter {
   }
 
   _parseTranscriptLine(line) {
-    const raw = String(line || '').trim();
+    return this._parseTranscriptPayload(line)?.text || '';
+  }
+
+  _parseTranscriptPayload(line) {
+    const raw = this._cleanWhisperOutput(line);
     if (!raw) {
-      return '';
+      return null;
     }
 
     if (/^(?:whisper_|main:|system_info:|sampling|processing|init|error:)/i.test(raw)) {
-      return '';
+      return null;
     }
 
     try {
       const parsed = JSON.parse(raw);
-      return this._normalizeTranscriptCandidate(parsed.text || parsed.transcript || '');
+      const text = this._normalizeTranscriptCandidate(parsed.text || parsed.transcript || '');
+      if (!text) {
+        return null;
+      }
+      return {
+        text,
+        raw,
+        confidence: this._readNumber(parsed.confidence, parsed.probability, parsed.avg_logprob),
+        noSpeechProbability: this._readNumber(parsed.noSpeechProbability, parsed.no_speech_prob, parsed.noSpeechProb),
+        compressionRatio: this._readNumber(parsed.compressionRatio, parsed.compression_ratio)
+      };
     } catch (error) {}
 
     const cleaned = raw
@@ -272,7 +290,11 @@ class WhisperStreamSpeechEngine extends EventEmitter {
       .replace(/^\([^)]+\)\s*/g, '')
       .replace(/^\d{2}:\d{2}:\d{2}(?:\.\d+)?\s*/g, '');
 
-    return this._normalizeTranscriptCandidate(cleaned);
+    const text = this._normalizeTranscriptCandidate(cleaned);
+    if (!text) {
+      return null;
+    }
+    return { text, raw };
   }
 
   _estimateTranscriptQuality(text, session = {}) {
@@ -282,8 +304,9 @@ class WhisperStreamSpeechEngine extends EventEmitter {
     const repeatedChunkRatio = this._repeatedChunkRatio(session.chunks || []);
     const shortPhrase = tokens.length <= 2;
     const conversational = this._looksConversational(normalized);
+    const repeatedLeadIn = this._hasRepeatedLeadIn(tokens);
     const knownNoise = this._isNoSpeechMarker(normalized)
-      || /^(?:thank you|thanks for watching|music|background music|foreign|silence|subscribe)$/i.test(normalized);
+      || /^(?:boom|thank you|thanks for watching|music|background music|foreign|silence|subscribe|yes yes)$/i.test(normalized);
 
     let confidence = 0.88;
     if (tokens.length >= 3) confidence += 0.04;
@@ -291,20 +314,167 @@ class WhisperStreamSpeechEngine extends EventEmitter {
     if (shortPhrase && !conversational) confidence -= 0.18;
     if (uniqueRatio > 0 && uniqueRatio < 0.5) confidence -= 0.18;
     if (repeatedChunkRatio > 0.35) confidence -= 0.18;
+    if (repeatedLeadIn) confidence -= 0.45;
     if (knownNoise) confidence -= 0.45;
 
-    const noSpeechProbability = Math.max(
+    const estimatedNoSpeechProbability = Math.max(
       knownNoise ? 0.9 : 0,
+      repeatedLeadIn ? 0.88 : 0,
       shortPhrase && !conversational ? 0.62 : 0.18,
       repeatedChunkRatio > 0.35 ? 0.58 : 0.18
     );
-    const compressionRatio = uniqueRatio > 0 ? 1 / uniqueRatio : 3;
+    const estimatedCompressionRatio = uniqueRatio > 0 ? 1 / uniqueRatio : 3;
+    const measuredConfidence = this._averageSegmentMetric(session.segments, 'confidence');
+    const measuredNoSpeechProbability = this._maxSegmentMetric(session.segments, 'noSpeechProbability');
+    const measuredCompressionRatio = this._maxSegmentMetric(session.segments, 'compressionRatio');
 
     return {
-      confidence: Math.max(0.1, Math.min(0.96, Number(confidence.toFixed(2)))),
-      noSpeechProbability: Number(Math.min(0.98, noSpeechProbability).toFixed(2)),
-      compressionRatio: Number(Math.max(1, compressionRatio).toFixed(2))
+      confidence: Math.max(0.1, Math.min(0.96, Number((Number.isFinite(measuredConfidence) ? measuredConfidence : confidence).toFixed(2)))),
+      noSpeechProbability: Number(Math.min(0.98, Number.isFinite(measuredNoSpeechProbability) ? measuredNoSpeechProbability : estimatedNoSpeechProbability).toFixed(2)),
+      compressionRatio: Number(Math.max(1, Number.isFinite(measuredCompressionRatio) ? measuredCompressionRatio : estimatedCompressionRatio).toFixed(2))
     };
+  }
+
+  _getFinalDebounceMs(session = {}) {
+    const baseMs = Number(this.whisperConfig.finalDebounceMs) > 0
+      ? Number(this.whisperConfig.finalDebounceMs)
+      : 1600;
+    const incompleteMs = Number(this.whisperConfig.incompleteUtteranceDebounceMs) > 0
+      ? Number(this.whisperConfig.incompleteUtteranceDebounceMs)
+      : 5000;
+    const text = this.normalizer.normalize((session.chunks || []).join(' '));
+
+    return this._isLikelyIncompleteUtterance(text)
+      ? Math.max(baseMs, incompleteMs)
+      : baseMs;
+  }
+
+  _composeSessionTranscript(session = {}) {
+    const normalizedChunks = (Array.isArray(session.chunks) ? session.chunks : [])
+      .map(chunk => this.normalizer.normalize(chunk))
+      .filter(Boolean);
+    if (!normalizedChunks.length) {
+      return '';
+    }
+
+    const compacted = [];
+    for (const chunk of normalizedChunks) {
+      const previous = compacted[compacted.length - 1];
+      if (!previous || previous !== chunk) {
+        compacted.push(chunk);
+      }
+    }
+
+    const last = compacted[compacted.length - 1];
+    const lastTokens = this._tokenize(last);
+    if (this._hasRepeatedLeadIn(lastTokens)) {
+      return last;
+    }
+
+    if (compacted.length === 1) {
+      return last;
+    }
+
+    const previous = compacted[compacted.length - 2];
+    const previousTokens = this._tokenize(previous);
+    if (previousTokens.length > 0 && lastTokens.length >= previousTokens.length) {
+      const prefix = lastTokens.slice(0, previousTokens.length).join(' ');
+      if (prefix === previousTokens.join(' ')) {
+        return last;
+      }
+    }
+
+    return this.normalizer.normalize(compacted.join(' '));
+  }
+
+  _isLikelyIncompleteUtterance(text) {
+    const normalized = this.normalizer.normalize(text);
+    if (!normalized || /\s/.test(normalized)) {
+      return false;
+    }
+
+    return new Set([
+      'attach',
+      'call',
+      'close',
+      'copy',
+      'create',
+      'delete',
+      'draft',
+      'extract',
+      'find',
+      'launch',
+      'message',
+      'minimize',
+      'move',
+      'open',
+      'read',
+      'rename',
+      'search',
+      'send',
+      'share',
+      'show',
+      'switch'
+    ]).has(normalized);
+  }
+
+  _readNumber(...values) {
+    for (const value of values) {
+      const number = Number(value);
+      if (Number.isFinite(number)) {
+        return number;
+      }
+    }
+    return undefined;
+  }
+
+  _cleanWhisperOutput(value) {
+    return String(value || '')
+      .replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, ' ')
+      .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, ' ')
+      .replace(/\r/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  _averageSegmentMetric(segments = [], key) {
+    const values = (Array.isArray(segments) ? segments : [])
+      .map(segment => Number(segment?.[key]))
+      .filter(Number.isFinite);
+    if (!values.length) {
+      return undefined;
+    }
+    return values.reduce((total, value) => total + value, 0) / values.length;
+  }
+
+  _maxSegmentMetric(segments = [], key) {
+    const values = (Array.isArray(segments) ? segments : [])
+      .map(segment => Number(segment?.[key]))
+      .filter(Number.isFinite);
+    if (!values.length) {
+      return undefined;
+    }
+    return Math.max(...values);
+  }
+
+  _logRawTranscriptPayload(payload = {}) {
+    const raw = String(payload.raw || '').trim();
+    if (!raw) {
+      return;
+    }
+
+    const metadata = {
+      raw: raw.slice(0, 300),
+      text: payload.text,
+      confidence: Number.isFinite(Number(payload.confidence)) ? Number(payload.confidence) : null,
+      noSpeechProbability: Number.isFinite(Number(payload.noSpeechProbability)) ? Number(payload.noSpeechProbability) : null
+    };
+
+    if (this.whisperConfig.logRawOutput === true) {
+      this.logger.info('[WHISPER] Raw transcript', metadata);
+    } else {
+      this.logger.debug('[WHISPER] Raw transcript', metadata);
+    }
   }
 
   _normalizeTranscriptCandidate(value) {
@@ -313,6 +483,55 @@ class WhisperStreamSpeechEngine extends EventEmitter {
       return '';
     }
     return normalized;
+  }
+
+  _tokenize(text) {
+    return String(text || '')
+      .toLowerCase()
+      .split(/\s+/)
+      .map(token => token.replace(/^[^\w]+|[^\w]+$/g, ''))
+      .filter(Boolean);
+  }
+
+  _hasRepeatedLeadIn(tokens = []) {
+    if (!Array.isArray(tokens) || tokens.length < 4) {
+      return false;
+    }
+
+    const actionTokens = new Set([
+      'attach',
+      'call',
+      'close',
+      'copy',
+      'create',
+      'delete',
+      'draft',
+      'extract',
+      'find',
+      'launch',
+      'message',
+      'minimize',
+      'move',
+      'open',
+      'read',
+      'rename',
+      'search',
+      'send',
+      'share',
+      'show',
+      'switch'
+    ]);
+    const [lastToken] = tokens.slice(-1);
+    if (!actionTokens.has(lastToken)) {
+      return false;
+    }
+
+    const counts = new Map();
+    for (const token of tokens.slice(0, -1)) {
+      counts.set(token, (counts.get(token) || 0) + 1);
+    }
+
+    return Math.max(...counts.values()) >= 3;
   }
 
   _isNoSpeechMarker(text) {
@@ -348,8 +567,26 @@ class WhisperStreamSpeechEngine extends EventEmitter {
       '-l', String(this.whisperConfig.language || this.voiceConfig.stt?.language || 'en')
     ];
 
+    const captureDeviceId = Number(this.whisperConfig.captureDeviceId);
+    if (Number.isInteger(captureDeviceId) && captureDeviceId >= 0) {
+      args.push('--capture', String(captureDeviceId));
+    }
+
+    const audioContext = Number(this.whisperConfig.audioContext);
+    if (Number.isInteger(audioContext) && audioContext > 0) {
+      args.push('--audio-ctx', String(audioContext));
+    }
+
+    if (this.whisperConfig.noFallback !== false) {
+      args.push('--no-fallback');
+    }
+
+    if (this.whisperConfig.saveAudio === true) {
+      args.push('--save-audio');
+    }
+
     if (this.whisperConfig.keepContext === true) {
-      args.splice(args.length - 2, 0, '--keep-context');
+      args.push('--keep-context');
     }
 
     return args;

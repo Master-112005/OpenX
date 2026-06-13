@@ -3,6 +3,7 @@ const FILLER_WORDS = new Set([
   'ahem',
   'er',
   'hmm',
+  'oh',
   'okay',
   'um',
   'uh'

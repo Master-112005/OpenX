@@ -1,5 +1,6 @@
 const DEFAULT_HALLUCINATION_PHRASES = [
   'background music',
+  'boom',
   'blank audio',
   'blank_audio',
   'captioned by',
@@ -13,7 +14,8 @@ const DEFAULT_HALLUCINATION_PHRASES = [
   'silence',
   'subscribe',
   'thank you',
-  'thanks for watching'
+  'thanks for watching',
+  'yes yes'
 ];
 
 const DESTRUCTIVE_PATTERN = /\b(?:delete|erase|format|restart|shutdown|shut\s+down|terminate|kill|power\s+off|remove)\b/i;
@@ -65,6 +67,30 @@ const ACTION_TOKENS = new Set([
   'undo',
   'unmute',
   'watch'
+]);
+
+const INCOMPLETE_ACTION_TOKENS = new Set([
+  'attach',
+  'call',
+  'close',
+  'copy',
+  'create',
+  'delete',
+  'draft',
+  'extract',
+  'find',
+  'launch',
+  'message',
+  'minimize',
+  'move',
+  'open',
+  'read',
+  'rename',
+  'search',
+  'send',
+  'share',
+  'show',
+  'switch'
 ]);
 
 const QUESTION_START = /^(?:what|who|when|where|why|how|which|can|could|is|are|do|does|did)\b/i;
@@ -127,7 +153,7 @@ class VoiceTurnAnalyzer {
 
   analyze(turn = {}) {
     const text = String(turn.text || '').trim().toLowerCase();
-    const tokens = text.split(/\s+/).filter(Boolean);
+    const tokens = this._tokenize(text);
     const rawConfidence = Number(turn.confidence);
     const confidence = Number.isFinite(rawConfidence) ? clamp(rawConfidence) : 0.5;
     const noSpeechProbability = Number(turn.noSpeechProbability);
@@ -142,6 +168,8 @@ class VoiceTurnAnalyzer {
       destructive: DESTRUCTIVE_PATTERN.test(text),
       knownHallucination: this.hallucinationPhrases.has(text),
       repetitive: tokens.length >= 5 && uniqueTokenRatio(tokens) <= 0.45,
+      repeatedLeadIn: this._hasRepeatedLeadIn(tokens),
+      incompleteCommand: tokens.length === 1 && INCOMPLETE_ACTION_TOKENS.has(tokens[0]) && mode !== 'confirmation',
       tooShort: tokens.length === 0 || (
         tokens.length === 1
         && !ACTION_TOKENS.has(tokens[0])
@@ -158,6 +186,8 @@ class VoiceTurnAnalyzer {
     if (signals.destructive) quality -= 0.2;
     if (signals.knownHallucination) quality -= 0.5;
     if (signals.repetitive) quality -= 0.25;
+    if (signals.repeatedLeadIn) quality -= 0.45;
+    if (signals.incompleteCommand) quality -= 0.4;
     if (signals.tooShort) quality -= 0.25;
     if (signals.highNoSpeech) quality -= Math.min(0.45, (noSpeechProbability - this.maxNoSpeechProbability) * 1.2);
     if (signals.highCompression) quality -= 0.25;
@@ -185,7 +215,7 @@ class VoiceTurnAnalyzer {
       reasons.push('actionable-low-confidence');
     }
 
-    if (signals.knownHallucination || signals.tooShort || signals.repetitive) {
+    if (signals.knownHallucination || signals.tooShort || signals.repetitive || signals.repeatedLeadIn || signals.incompleteCommand) {
       decision = 'ignore';
     }
     if (signals.highNoSpeech && quality < this.confirmationThreshold && !signals.conversational) {
@@ -212,6 +242,30 @@ class VoiceTurnAnalyzer {
       return true;
     }
     return tokens.some(token => ACTION_TOKENS.has(token));
+  }
+
+  _tokenize(text) {
+    return String(text || '')
+      .toLowerCase()
+      .split(/\s+/)
+      .map(token => token.replace(/^[^\w]+|[^\w]+$/g, ''))
+      .filter(Boolean);
+  }
+
+  _hasRepeatedLeadIn(tokens) {
+    if (!Array.isArray(tokens) || tokens.length < 4) {
+      return false;
+    }
+
+    const [lastToken] = tokens.slice(-1);
+    const leadingTokens = tokens.slice(0, -1);
+    const counts = new Map();
+    for (const token of leadingTokens) {
+      counts.set(token, (counts.get(token) || 0) + 1);
+    }
+
+    const maxLeadCount = Math.max(...counts.values());
+    return maxLeadCount >= 3 && ACTION_TOKENS.has(lastToken);
   }
 
   _looksConversational(text, tokens) {

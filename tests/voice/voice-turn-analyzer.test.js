@@ -59,6 +59,19 @@ describe('Voice Turn Analyzer', function() {
     assert.equal(turn.signals.knownHallucination, true);
   });
 
+  it('should reject repeated noise lead-ins before an action word', function() {
+    const analyzer = new VoiceTurnAnalyzer();
+    const turn = analyzer.analyze({
+      text: 'home home home home open',
+      confidence: 0.9,
+      noSpeechProbability: 0.1,
+      mode: 'conversation'
+    });
+
+    assert.equal(turn.accepted, false);
+    assert.equal(turn.signals.repeatedLeadIn, true);
+  });
+
   it('should require confirmation for destructive actions', function() {
     const analyzer = new VoiceTurnAnalyzer();
     const turn = analyzer.analyze({

@@ -445,6 +445,90 @@ describe('Voice Manager & Audio Engine Integration', function() {
     vm.destroy();
   });
 
+  it('should hold incomplete command fragments instead of routing them', async function() {
+    const { vm } = createVoiceManager();
+    let speechResult = false;
+
+    await vm.initialize();
+    vm.on('speechResult', () => {
+      speechResult = true;
+    });
+
+    assert.equal(vm.manualActivate(), true);
+
+    vm._handleEngineEvent({
+      event: 'result',
+      text: 'open',
+      confidence: 0.9,
+      noSpeechProbability: 0.2,
+      mode: 'conversation'
+    });
+
+    assert.equal(speechResult, false);
+    assert.equal(vm.pendingVoiceFragment.verb, 'open');
+    assert.equal(vm.getStatus().state, 'LISTENING');
+    vm.destroy();
+  });
+
+  it('should recover a split utterance when the target arrives after an incomplete fragment', async function() {
+    const { vm } = createVoiceManager({
+      voice: {
+        conversationIgnoredSpeechLimit: 3
+      }
+    });
+    const results = [];
+
+    await vm.initialize();
+    vm.on('speechResult', (data) => {
+      results.push(data);
+    });
+
+    assert.equal(vm.manualActivate(), true);
+
+    vm._handleEngineEvent({
+      event: 'result',
+      text: 'open',
+      confidence: 0.9,
+      noSpeechProbability: 0.2,
+      mode: 'conversation'
+    });
+    vm._handleEngineEvent({
+      event: 'result',
+      text: 'chrome',
+      confidence: 0.72,
+      noSpeechProbability: 0.2,
+      mode: 'conversation'
+    });
+
+    assert.deepEqual(results.map(result => result.text), ['open chrome']);
+    assert.equal(vm.pendingVoiceFragment, null);
+    vm.destroy();
+  });
+
+  it('should not recover repetitive whisper noise into a command', async function() {
+    const { vm } = createVoiceManager();
+    let speechResult = false;
+
+    await vm.initialize();
+    vm.on('speechResult', () => {
+      speechResult = true;
+    });
+
+    assert.equal(vm.manualActivate(), true);
+
+    vm._handleEngineEvent({
+      event: 'result',
+      text: 'home. home. home. home. open',
+      confidence: 0.92,
+      noSpeechProbability: 0.18,
+      mode: 'conversation'
+    });
+
+    assert.equal(speechResult, false);
+    assert.equal(vm.getStatus().state, 'LISTENING');
+    vm.destroy();
+  });
+
   it('should ignore short multi-word recognition noise before routing', async function() {
     const { vm } = createVoiceManager({
       voice: {
