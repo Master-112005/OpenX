@@ -123,6 +123,148 @@ class ActionRouter {
     );
   }
 
+  _isIncompleteCommand(rawCommandText, preparedInput = {}) {
+    const raw = String(rawCommandText || '').trim();
+    const corrected = String(preparedInput?.correctedText || raw).trim().toLowerCase();
+    if (!corrected) {
+      return true;
+    }
+
+    if (/^(?:hi|hello|hey|good\s+(?:morning|afternoon|evening)|how\s+are\s+you|what\s+can\s+you\s+do|what\s+is\s+your\s+name|whats\s+your\s+name)\b/i.test(corrected)) {
+      return false;
+    }
+
+    const standaloneCommands = new Set([
+      'cancel',
+      'continue',
+      'help',
+      'mute',
+      'next',
+      'pause',
+      'previous',
+      'resume',
+      'skip',
+      'stop',
+      'unmute',
+      'volume down',
+      'volume up'
+    ]);
+    if (standaloneCommands.has(corrected)) {
+      return false;
+    }
+
+    const tokens = Array.isArray(preparedInput?.tokens) && preparedInput.tokens.length
+      ? preparedInput.tokens
+      : Normalizer.tokenize(corrected);
+    if (!tokens.length) {
+      return true;
+    }
+
+    const actionAliases = new Set([
+      'attach',
+      'call',
+      'close',
+      'copy',
+      'create',
+      'delete',
+      'draft',
+      'extract',
+      'find',
+      'google',
+      'launch',
+      'look',
+      'message',
+      'minimize',
+      'move',
+      'open',
+      'read',
+      'remind',
+      'rename',
+      'run',
+      'search',
+      'send',
+      'set',
+      'share',
+      'show',
+      'start',
+      'switch',
+      'turn'
+    ]);
+    const actionIndex = tokens.findIndex(token => actionAliases.has(token));
+    if (actionIndex < 0) {
+      return false;
+    }
+
+    const ignorableTargetTokens = new Set([
+      'a',
+      'an',
+      'any',
+      'for',
+      'from',
+      'it',
+      'me',
+      'my',
+      'now',
+      'of',
+      'on',
+      'one',
+      'please',
+      'some',
+      'that',
+      'the',
+      'them',
+      'there',
+      'this',
+      'to',
+      'up',
+      'with',
+      'you',
+      'your'
+    ]);
+    const targetTokens = tokens
+      .slice(actionIndex + 1)
+      .filter(token => !ignorableTargetTokens.has(token));
+
+    if (targetTokens.length > 0) {
+      return false;
+    }
+
+    const action = tokens[actionIndex];
+    if (action === 'remind' && /^remind\s+me\b/i.test(corrected)) {
+      return true;
+    }
+
+    return [
+      'attach',
+      'call',
+      'close',
+      'copy',
+      'create',
+      'delete',
+      'draft',
+      'extract',
+      'find',
+      'google',
+      'launch',
+      'look',
+      'message',
+      'minimize',
+      'move',
+      'open',
+      'read',
+      'rename',
+      'run',
+      'search',
+      'send',
+      'set',
+      'share',
+      'show',
+      'start',
+      'switch',
+      'turn'
+    ].includes(action);
+  }
+
   async _completeIntent(commandId, intentResult, rawCommandText, source, preparedInput = null) {
     let entities = intentResult.entities || this.entityExtractor.extract(
       intentResult.intent,
@@ -1328,6 +1470,43 @@ class ActionRouter {
     return null;
   }
 
+  _resolveBareKnowledgeSearchIntent(rawText, preparedInput) {
+    const input = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
+    if (!input || /^(?:what|who|when|where|why|how|which)\b/.test(input)) {
+      return null;
+    }
+
+    if (/^(?:open|close|launch|start|run|play|pause|resume|stop|send|message|call|create|delete|move|copy|rename|set|turn|switch|minimize|maximize)\b/.test(input)) {
+      return null;
+    }
+
+    const query = preparedInput?.query || {};
+    if (query.isLocal) {
+      return null;
+    }
+
+    const hasKnowledgeSignal = this._looksLikeWebSearchQuery(input) ||
+      /\b(?:ipl|cricket|fifa|world\s+cup|match(?:es)?|fixtures?|schedule|score|scores|winner|winners|champion|champions|event|release|released|premiere|price|latest|current|today'?s?|news|best|top|list|movie|movies|paper|journal|research|documentation|docs|tutorials?|examples?|guide)\b/.test(input);
+    if (!hasKnowledgeSignal) {
+      return null;
+    }
+
+    const browserSearchIntent = this.intentRegistry.get('browser.search');
+    if (!browserSearchIntent) {
+      return null;
+    }
+
+    const entities = this._buildSearchEntities(rawText, preparedInput);
+    return {
+      intent: browserSearchIntent,
+      confidence: 0.9,
+      entities: {
+        ...entities,
+        query: String(rawText || input).trim().toLowerCase().replace(/\btoday\s+s\b/g, "today's")
+      }
+    };
+  }
+
   _looksLikeWebSearchQuery(input) {
     const text = String(input || '').toLowerCase();
     return /\b(?:tutorials?|documentation|docs?|examples?|guide|learn|react|angular|node|javascript|typescript|python|java|api|framework|weather|news|score|scores|latest|best|capital|difference|meaning)\b/.test(text);
@@ -1671,6 +1850,7 @@ class ActionRouter {
 
   _resolveLocalInfoIntent(rawText, preparedInput) {
     const input = this._normalizeSystemCommandText(preparedInput?.correctedText || rawText);
+    const publicKnowledgeContext = /\b(?:ipl|cricket|fifa|world\s+cup|match(?:es)?|fixtures?|schedule|score|scores|winner|winners|champion|champions|event|release|released|premiere|price|news|movie|movies)\b/.test(input);
     const systemTimeIntent = this.intentRegistry.get('system.time');
     const systemDateIntent = this.intentRegistry.get('system.date');
     const systemStatusIntent = this.intentRegistry.get('system.status');
@@ -1684,7 +1864,7 @@ class ActionRouter {
       return systemTimeIntent ? { intent: systemTimeIntent, confidence: 1, entities: {} } : null;
     }
 
-    if (/\b(?:date|day|today)\b/.test(input) && /^(?:what|which|tell|show|current|date|day)\b/.test(input)) {
+    if (!publicKnowledgeContext && /\b(?:date|day|today)\b/.test(input) && /^(?:what|which|tell|show|current|date|day)\b/.test(input)) {
       return systemDateIntent ? { intent: systemDateIntent, confidence: 1, entities: {} } : null;
     }
 

@@ -1003,7 +1003,11 @@ class Assistant extends EventEmitter {
       .find(entry => entry?.success && entry?.intent === 'file.list' && entry?.entities?.path);
 
     if (!lastFileList) {
-      return this._resolveVoiceReference(input);
+      const lastFileSearch = this.context.getHistory(8)
+        .slice()
+        .reverse()
+        .find(entry => entry?.success && /^(?:file\.search|file\.smartFind)$/.test(entry?.intent || '') && entry?.input);
+      return lastFileSearch?.input || this._resolveVoiceReference(input);
     }
 
     const entities = lastFileList.entities || {};

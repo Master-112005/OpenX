@@ -1756,9 +1756,15 @@ describe('Action Router', function() {
     };
     const router = new ActionRouter(config, stubEngine);
     const result = await router.process('show me', 'chat');
+    const open = await router.process('open', 'chat');
+    const searchFor = await router.process('search for', 'chat');
+    const normal = await router.process('open chrome', 'chat');
 
     assert.equal(result.success, false);
     assert.equal(result.intent, undefined);
+    assert.equal(open.success, false);
+    assert.equal(searchFor.success, false);
+    assert.equal(normal.intent, 'app.open');
   });
 
   it('should keep local system and file requests out of web search', async function() {
