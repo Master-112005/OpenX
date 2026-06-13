@@ -52,6 +52,16 @@ describe('Response Generator', function() {
     assert.ok(result.toLowerCase().includes('cannot find the java app'));
   });
 
+  it('should humanize verification failures', function() {
+    const gen = new ResponseGenerator();
+    const result = gen.generate('error', 'executionFailed', {
+      error: 'Expected file was not found'
+    });
+
+    assert.ok(result.toLowerCase().includes('could not verify'));
+    assert.ok(result.toLowerCase().includes('file'));
+  });
+
   it('should speak local time and date answers', function() {
     const gen = new ResponseGenerator();
     const time = gen.generate('success', 'system.time', { result: { data: { time: '2:45 PM' } } });
@@ -101,6 +111,59 @@ describe('Response Generator', function() {
     assert.ok(!result.includes('Full list'));
   });
 
+  it('should describe site-specific browser searches', function() {
+    const gen = new ResponseGenerator();
+    const result = gen.generate('success', 'browser.siteSearch', {
+      entities: { site: 'google photos', query: 'classmates' }
+    });
+
+    assert.ok(result.includes('google photos'));
+    assert.ok(result.includes('classmates'));
+  });
+
+  it('should summarize visible browser tabs', function() {
+    const gen = new ResponseGenerator();
+    const result = gen.generate('success', 'browser.listTabs', {
+      result: {
+        data: {
+          browserName: 'chrome',
+          count: 2,
+          tabs: [{ title: 'ChatGPT' }, { title: 'Google Photos' }]
+        }
+      }
+    });
+
+    assert.ok(result.includes('2 visible chrome tabs'));
+    assert.ok(result.includes('ChatGPT'));
+    assert.ok(result.includes('Google Photos'));
+  });
+
+  it('should describe email draft preparation and missing details', function() {
+    const gen = new ResponseGenerator();
+    const needsDetails = gen.generate('success', 'email.compose', {
+      result: {
+        data: {
+          contactName: 'rakesh',
+          email: 'rakesh@example.com',
+          needsDetails: true
+        }
+      }
+    });
+    const draft = gen.generate('success', 'email.compose', {
+      result: {
+        data: {
+          contactName: 'rakesh',
+          email: 'rakesh@example.com',
+          subject: 'Project update'
+        }
+      }
+    });
+
+    assert.ok(needsDetails.includes('rakesh@example.com'));
+    assert.ok(needsDetails.includes('subject and message'));
+    assert.ok(draft.includes('Project update'));
+  });
+
   it('should summarize local file listings', function() {
     const gen = new ResponseGenerator();
     const result = gen.generate('success', 'file.list', {
@@ -118,6 +181,37 @@ describe('Response Generator', function() {
 
     assert.ok(result.includes('Projects'));
     assert.ok(result.includes('notes.txt'));
+  });
+
+  it('should describe visible apps separately from raw process counts', function() {
+    const gen = new ResponseGenerator();
+    const result = gen.generate('success', 'system.processes', {
+      result: {
+        data: {
+          target: 'apps',
+          count: 2,
+          names: ['chrome', 'spotify']
+        }
+      }
+    });
+
+    assert.ok(result.includes('2 visible apps'));
+    assert.ok(result.includes('chrome'));
+    assert.ok(result.includes('spotify'));
+    assert.ok(!result.toLowerCase().includes('active processes'));
+  });
+
+  it('should answer direct visible app status questions', function() {
+    const gen = new ResponseGenerator();
+    const open = gen.generate('success', 'system.processes', {
+      result: { data: { target: 'apps', queryApp: 'chrome', isOpen: true } }
+    });
+    const closed = gen.generate('success', 'system.processes', {
+      result: { data: { target: 'apps', queryApp: 'instagram', isOpen: false } }
+    });
+
+    assert.ok(open.includes('chrome is open'));
+    assert.ok(closed.includes('do not see instagram open'));
   });
 
   it('should report failed configured mode commands', function() {
@@ -143,7 +237,27 @@ describe('Response Generator', function() {
   it('should use formal addressing by default', function() {
     const gen = new ResponseGenerator();
     const result = gen.generate('info', 'idle');
-    assert.equal(result, 'Awaiting your next command, sir.');
+    assert.equal(result, 'Ready when you are, sir.');
+  });
+
+  it('should vary short conversational greetings', function() {
+    const gen = new ResponseGenerator();
+    const hello = gen.generate('success', 'greeting', {
+      entities: { greetingType: 'hello' },
+      input: 'hello'
+    });
+    const hi = gen.generate('success', 'greeting', {
+      entities: { greetingType: 'hi' },
+      input: 'hi'
+    });
+    const hey = gen.generate('success', 'greeting', {
+      entities: { greetingType: 'hey' },
+      input: 'hey'
+    });
+
+    assert.notEqual(hello, hi);
+    assert.notEqual(hi, hey);
+    assert.notEqual(hello, hey);
   });
 
   it('should support a configured honorific', function() {

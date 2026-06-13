@@ -250,6 +250,80 @@ describe('File Management Automation', function() {
     assert.ok(result.data.results.includes(target));
   });
 
+  it('should skip excluded heavy folders during recursive search', function() {
+    const validDir = path.join(tempProfile, 'Documents', 'Projects');
+    const excludedDir = path.join(tempProfile, 'Documents', 'node_modules', 'cache');
+    fs.mkdirSync(validDir, { recursive: true });
+    fs.mkdirSync(excludedDir, { recursive: true });
+
+    const validTarget = path.join(validDir, 'Resume.docx');
+    const excludedTarget = path.join(excludedDir, 'Resume.docx');
+    fs.writeFileSync(validTarget, 'resume', 'utf8');
+    fs.writeFileSync(excludedTarget, 'dependency copy', 'utf8');
+
+    const result = engine.files.search('Resume.docx');
+
+    assert.equal(result.success, true);
+    assert.ok(result.data.results.includes(validTarget));
+    assert.equal(result.data.results.includes(excludedTarget), false);
+    assert.ok(result.data.searchStats.skippedDirectories >= 1);
+  });
+
+  it('should return bounded partial search stats instead of scanning forever', function() {
+    const result = engine.files.search('file-that-does-not-exist.docx', {
+      maxDirectories: 1,
+      maxElapsedMs: 10000
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(result.data.searchStats.partial, true);
+    assert.equal(result.data.searchStats.partialReason, 'directory-limit');
+    assert.ok(result.data.searchStats.visitedDirectories >= 1);
+  });
+
+  it('should include smart file search stats for validation feedback', function() {
+    const targetDir = path.join(tempProfile, 'Downloads');
+    const target = path.join(targetDir, 'Latest Notes.pdf');
+    fs.writeFileSync(target, 'pdf', 'utf8');
+
+    const result = engine.files.smartFind({
+      location: 'downloads',
+      fileType: 'pdf',
+      sortBy: 'createdDesc'
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(result.data.entries[0].path, target);
+    assert.equal(result.data.searchStats.kind, 'file.smartFind');
+    assert.ok(result.data.searchStats.visitedDirectories >= 1);
+  });
+
+  it('should match compact and spaced file search names', function() {
+    const nested = path.join(tempProfile, 'Documents', 'College');
+    fs.mkdirSync(nested, { recursive: true });
+    const target = path.join(nested, 'DLNLP Lab Manual.docx');
+    fs.writeFileSync(target, 'manual', 'utf8');
+
+    const compact = engine.files.search('dlnlp labmanual');
+    const spaced = engine.files.search('dlnlp lab manual.docx');
+
+    assert.equal(compact.success, true);
+    assert.ok(compact.data.results.includes(target));
+    assert.equal(compact.data.entries.find(entry => entry.path === target).type, 'file');
+    assert.ok(spaced.data.results.includes(target));
+  });
+
+  it('should fuzzy match unique folder open requests without exact folder names', function() {
+    const target = path.join(tempProfile, 'Documents', 'Projects', 'DLNLP Node Folder');
+    fs.mkdirSync(target, { recursive: true });
+
+    const result = engine.folders.open('dlnlpnode');
+
+    assert.equal(result.success, true);
+    assert.equal(result.data.path, target);
+    assert.equal(result.data.folderName, 'DLNLP Node Folder');
+  });
+
   it('should ask which same-name file to open across subfolders', function() {
     const firstDir = path.join(tempProfile, 'Documents', 'Jobs');
     const secondDir = path.join(tempProfile, 'Downloads', 'Backup');

@@ -373,13 +373,7 @@ Implemented modules:
 | Module | Responsibility |
 | ------ | -------------- |
 | `core/context-awareness/context-engine.js` | Aggregates active window, process, audio, fullscreen, microphone, mode, and activity history into normalized context snapshots |
-| `core/context-awareness/mode-engine.js` | Scores modes, applies thresholds, smoothing, cooldowns, hysteresis, and emits mode transitions |
-| `core/modes/dev-mode.js` | Scores development activity and exposes developer-focused behavior flags |
-| `core/modes/stream-mode.js` | Scores OBS/Streamlabs/microphone streaming activity and suppresses noisy feedback |
-| `core/modes/game-mode.js` | Scores fullscreen/game/Steam activity and minimizes assistant overhead |
-| `core/modes/media-mode.js` | Scores Spotify/YouTube/media activity and prioritizes media commands |
-| `core/modes/work-mode.js` | Scores Teams/Outlook/Zoom/productivity activity and reduces interruptions |
-| `core/modes/focus-mode.js` | Scores long uninterrupted/fullscreen/manual focus activity and minimizes responses |
+| `core/context-awareness/mode-engine.js` | Data-driven mode profile scoring, behavior flags, thresholds, smoothing, cooldowns, hysteresis, and mode transition events |
 
 Context flow:
 

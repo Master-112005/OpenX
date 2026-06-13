@@ -21,7 +21,11 @@ class ContextManager {
       confidence: result?.confidence || 0,
       success: result?.success || false,
       entities: result?.entities || {},
-      response: result?.response || ''
+      response: result?.response || '',
+      data: result?.data || null,
+      languageUnderstanding: result?.languageUnderstanding || null,
+      validation: result?.validation || result?.data?.validation || null,
+      verification: result?.verification || result?.data?.verification || null
     };
 
     this.history.push(entry);
@@ -79,13 +83,94 @@ class ContextManager {
     return this.history.slice(-count).map(h => h.input);
   }
 
+  getCommandsToday() {
+    const start = new Date();
+    start.setHours(0, 0, 0, 0);
+    return this.history.filter(entry => entry.timestamp >= start.getTime());
+  }
+
+  getFirstCommandToday() {
+    return this.getCommandsToday()[0] || null;
+  }
+
+  getLastCommand() {
+    return this.history[this.history.length - 1] || null;
+  }
+
+  findRecent(predicate, limit = 20) {
+    if (typeof predicate !== 'function') {
+      return null;
+    }
+    return this.history
+      .slice(-limit)
+      .reverse()
+      .find(predicate) || null;
+  }
+
+  findRecentAll(predicate, limit = 20) {
+    if (typeof predicate !== 'function') {
+      return [];
+    }
+    return this.history
+      .slice(-limit)
+      .reverse()
+      .filter(predicate);
+  }
+
+  getLastSearch() {
+    return this.findRecent(entry =>
+      entry?.success &&
+      ['browser.search', 'browser.siteSearch', 'browser.openFirstResult'].includes(entry.intent) &&
+      (entry.entities?.query || entry.data?.query)
+    );
+  }
+
+  getFirstSearchToday() {
+    return this.getCommandsToday().find(entry =>
+      entry?.success &&
+      ['browser.search', 'browser.siteSearch', 'browser.openFirstResult'].includes(entry.intent) &&
+      (entry.entities?.query || entry.data?.query)
+    ) || null;
+  }
+
+  getLastAppAction(intent = null) {
+    return this.findRecent(entry =>
+      entry?.success &&
+      entry.intent &&
+      entry.intent.startsWith('app.') &&
+      (!intent || entry.intent === intent) &&
+      entry.entities?.appName
+    );
+  }
+
+  getPreviousAppOpen() {
+    const opened = this.findRecentAll(entry =>
+      entry?.success &&
+      entry.intent === 'app.open' &&
+      entry.entities?.appName,
+    30);
+    return opened[1] || null;
+  }
+
+  getLastFileReference() {
+    return this.findRecent(entry => Boolean(this._fileReferenceFromEntry(entry)), 30);
+  }
+
+  getFileReference(entry) {
+    return this._fileReferenceFromEntry(entry);
+  }
+
   getConversationSummary() {
     const successful = this.history.filter(h => h.success).length;
     const total = this.history.length;
+    const verified = this.history.filter(h => h.verification?.status === 'passed').length;
+    const failedVerification = this.history.filter(h => h.verification?.status === 'failed').length;
     return {
       totalCommands: total,
       successfulCommands: successful,
       failedCommands: total - successful,
+      verifiedCommands: verified,
+      failedVerificationCommands: failedVerification,
       lastInteraction: this.lastInteraction,
       sessionKeys: Array.from(this.sessionData.keys())
     };
@@ -100,6 +185,40 @@ class ContextManager {
         this.sessionData.delete(key);
       }
     }
+  }
+
+  _fileReferenceFromEntry(entry) {
+    if (!entry || !entry.intent || !entry.success) {
+      return null;
+    }
+
+    if (!/^file\./.test(entry.intent)) {
+      return null;
+    }
+
+    const entities = entry.entities || {};
+    const data = entry.data || {};
+    const opened = data.opened || null;
+    const firstResult = Array.isArray(data.results) ? data.results[0] : null;
+    const firstEntry = Array.isArray(data.entries) ? data.entries[0] : null;
+    const candidate = opened || firstResult || firstEntry || {};
+    const name = candidate.name ||
+      entities.filename ||
+      entities.fileName ||
+      entities.query ||
+      entities.source ||
+      '';
+    const filePath = candidate.path || entities.path || entities.selectedPath || '';
+    if (!name && !filePath) {
+      return null;
+    }
+
+    return {
+      name: String(name || filePath).trim(),
+      path: String(filePath || '').trim(),
+      intent: entry.intent,
+      input: entry.input
+    };
   }
 }
 

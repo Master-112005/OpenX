@@ -12,6 +12,7 @@ const SystemController = require('./system/index');
 const WindowsController = require('./windows/index');
 const SchedulerController = require('./scheduler/index');
 const ScreenshotController = require('./screenshot/index');
+const ActionVerifier = require('./common/action-verifier');
 
 class AutomationEngine {
   constructor(config) {
@@ -30,6 +31,14 @@ class AutomationEngine {
     this.windows = new WindowsController(config);
     this.scheduler = new SchedulerController(config);
     this.screenshot = new ScreenshotController(config);
+    this.verifier = new ActionVerifier({
+      apps: this.apps,
+      browser: this.browser,
+      files: this.files,
+      folders: this.folders,
+      windows: this.windows,
+      system: this.system
+    });
 
     this._actionMap = {
       'volume.up': (entities) => entities.value ? this.volume.setVolume(entities.value) : this.volume.increaseVolume(),
@@ -84,6 +93,7 @@ class AutomationEngine {
       'file.copy': (entities) => this.files.copy(entities.source, entities.destination),
       'file.move': (entities) => this.files.move(entities.source, entities.destination),
       'file.search': (entities) => this.files.search(entities.query),
+      'file.smartFind': (entities) => this.files.smartFind(entities),
       'file.list': (entities) => this.files.list(entities.path, { fileType: entities.fileType }),
       'folder.create': (entities) => this.folders.create(entities.folderName, entities.path),
       'folder.delete': (entities) => this.folders.delete(entities.folderName, entities.path),
@@ -91,7 +101,10 @@ class AutomationEngine {
       'folder.open': (entities) => this.folders.open(entities.folderName, entities),
       'browser.open': (entities) => this.browser.open(entities.url),
       'browser.search': (entities) => this.browser.search(entities.query, entities),
+      'browser.siteSearch': (entities) => this.browser.siteSearch(entities.site, entities.query, entities),
       'browser.openFirstResult': (entities) => this.browser.openFirstResult(entities.query),
+      'browser.closeTab': (entities) => this._closeBrowserTab(entities),
+      'browser.listTabs': (entities) => this._listBrowserTabs(entities),
       'media.play': (entities) => this.media.play(entities.mediaQuery, entities.mediaPlatform),
       'media.next': () => this.media.next(),
       'media.previous': () => this.media.previous(),
@@ -103,6 +116,11 @@ class AutomationEngine {
         entities.contactName,
         entities.messageText,
         entities.platform
+      ),
+      'email.compose': (entities) => this.communications.composeEmail(
+        entities.contactName,
+        entities.subject,
+        entities.body
       ),
       'call.start': (entities) => this.communications.startCall(
         entities.contactName,
@@ -127,7 +145,10 @@ class AutomationEngine {
       'system.memory': () => this.system.getMemoryUsage(),
       'system.battery': () => this.system.getBatteryStatus(),
       'system.disk': () => this.system.getDiskSpace(),
-      'system.processes': () => this.system.getProcessCount(),
+      'system.processes': (entities) => entities?.target === 'apps'
+        ? this.system.getRunningApps(entities)
+        : this.system.getProcessCount(),
+      'system.insight': (entities) => this.system.getInsight(entities.insightType),
       'system.bluetooth': (entities) => this.system.bluetooth(entities.enabled),
       'assistant.identity': () => ({ success: true, data: { name: 'JARVIS' } }),
       'assistant.userName': () => ({ success: true, data: { known: false } }),
@@ -144,17 +165,224 @@ class AutomationEngine {
     const handler = this._actionMap[actionId];
     if (!handler) {
       this.logger.error(`Unknown action: ${actionId}`);
-      return { success: false, error: `Unknown action: ${actionId}` };
+      return this.verifier.verify(actionId, entities || {}, {
+        success: false,
+        error: `Unknown action: ${actionId}`
+      });
     }
 
     try {
       this.logger.info(`Executing: ${actionId}`, entities);
       const result = await handler(entities || {});
-      return result;
+      return this.verifier.verify(actionId, entities || {}, result);
     } catch (err) {
       this.logger.error(`Action execution failed: ${actionId}`, err);
-      return { success: false, error: err.message };
+      return this.verifier.verify(actionId, entities || {}, {
+        success: false,
+        error: err.message
+      });
     }
+  }
+
+  _closeBrowserTab(entities = {}) {
+    const requested = Normalizer.normalizeText(entities.browserName || 'browser');
+    const tabQuery = Normalizer.normalizeText(entities.tabQuery || '');
+    const browserMap = {
+      browser: {
+        windowName: 'browser',
+        preferredProcessNames: ['chrome', 'msedge', 'firefox'],
+        preferredTitleTokens: []
+      },
+      chrome: {
+        windowName: 'chrome',
+        preferredProcessNames: ['chrome'],
+        preferredTitleTokens: ['chrome']
+      },
+      edge: {
+        windowName: 'edge',
+        preferredProcessNames: ['msedge'],
+        preferredTitleTokens: ['edge']
+      },
+      firefox: {
+        windowName: 'firefox',
+        preferredProcessNames: ['firefox'],
+        preferredTitleTokens: ['firefox']
+      }
+    };
+    const target = browserMap[requested] || browserMap.browser;
+    const titleTokens = tabQuery
+      ? Normalizer.tokenize(tabQuery).filter(token => token.length > 1)
+      : target.preferredTitleTokens;
+    if (tabQuery) {
+      return this._closeTargetedBrowserTabs(requested, target, tabQuery, titleTokens);
+    }
+
+    const windowName = tabQuery || target.windowName;
+    const result = this.windows.sendKeys(windowName, '^w', {
+      preferredProcessNames: target.preferredProcessNames,
+      preferredTitleTokens: titleTokens
+    });
+
+    if (!result?.success) {
+      if (tabQuery) {
+        return {
+          success: false,
+          error: `Could not find a ${tabQuery} tab in ${requested}`
+        };
+      }
+      return result;
+    }
+
+    return {
+      success: true,
+      data: {
+        ...result.data,
+        action: 'closeTab',
+        browserName: requested,
+        tabQuery
+      }
+    };
+  }
+
+  _listBrowserTabs(entities = {}) {
+    const requested = Normalizer.normalizeText(entities.browserName || 'browser');
+    const browserMap = {
+      browser: ['chrome', 'msedge', 'firefox'],
+      chrome: ['chrome'],
+      edge: ['msedge'],
+      firefox: ['firefox']
+    };
+    const processNames = browserMap[requested] || browserMap.browser;
+    const windows = typeof this.windows.listWindows === 'function'
+      ? this.windows.listWindows()
+      : this.windows.session?.listWindows?.() || [];
+    const tabs = windows
+      .filter(window => processNames.includes(Normalizer.normalizeText(window.processName)))
+      .map(window => ({
+        title: this._cleanBrowserWindowTitle(window.title, window.processName),
+        rawTitle: window.title,
+        processName: window.processName,
+        handle: window.handle
+      }))
+      .filter(tab => tab.title)
+      .slice(0, 12);
+
+    return {
+      success: true,
+      data: {
+        browserName: requested,
+        count: tabs.length,
+        tabs,
+        limitation: 'visible-browser-windows'
+      }
+    };
+  }
+
+  _cleanBrowserWindowTitle(title, processName) {
+    const browserLabel = Normalizer.normalizeText(processName) === 'chrome'
+      ? / - Google Chrome$/i
+      : Normalizer.normalizeText(processName) === 'msedge'
+        ? / - Microsoft Edge$/i
+        : / - Mozilla Firefox$/i;
+    return String(title || '').replace(browserLabel, '').trim();
+  }
+
+  _closeTargetedBrowserTabs(requested, target, tabQuery, titleTokens) {
+    const closeLimit = 8;
+    const closed = [];
+    let lastResult = null;
+
+    for (let attempt = 0; attempt < closeLimit; attempt += 1) {
+      const result = this.windows.sendKeys(tabQuery, '^w', {
+        preferredProcessNames: target.preferredProcessNames,
+        preferredTitleTokens: titleTokens,
+        requireTitleTokenMatch: true
+      });
+
+      if (!result?.success) {
+        if (closed.length > 0) {
+          return this._browserTabCloseSuccess(requested, tabQuery, closed, true);
+        }
+        return {
+          success: false,
+          error: `Could not find a ${tabQuery} tab in ${requested}`
+        };
+      }
+
+      lastResult = result;
+      closed.push(result.data);
+      this._sleep(450);
+
+      const stillOpen = this._findTargetedBrowserTab(requested, target, tabQuery, titleTokens);
+      if (!stillOpen) {
+        return this._browserTabCloseSuccess(requested, tabQuery, closed, true);
+      }
+
+      const sameHandle = result.data?.matchedHandle && String(stillOpen.handle) === String(result.data.matchedHandle);
+      const sameTitle = Normalizer.normalizeText(stillOpen.title) === Normalizer.normalizeText(result.data?.matchedWindow || '');
+      if (sameHandle && sameTitle && attempt >= 1) {
+        return {
+          success: false,
+          error: `I tried to close the ${tabQuery} tab in ${requested}, but it still appears to be active`,
+          data: {
+            action: 'closeTab',
+            browserName: requested,
+            tabQuery,
+            matchedWindow: result.data?.matchedWindow,
+            verified: false
+          }
+        };
+      }
+    }
+
+    return {
+      success: false,
+      error: `I could not verify that every ${tabQuery} tab in ${requested} closed`,
+      data: {
+        ...(lastResult?.data || {}),
+        action: 'closeTab',
+        browserName: requested,
+        tabQuery,
+        closedCount: closed.length,
+        verified: false
+      }
+    };
+  }
+
+  _findTargetedBrowserTab(requested, target, tabQuery, titleTokens) {
+    const finder = typeof this.windows.findWindow === 'function'
+      ? this.windows.findWindow.bind(this.windows)
+      : this.windows.session?.findWindow?.bind(this.windows.session);
+    if (!finder) {
+      return null;
+    }
+
+    return finder(tabQuery, {
+      preferredProcessNames: target.preferredProcessNames,
+      preferredTitleTokens: titleTokens,
+      requireTitleTokenMatch: true
+    });
+  }
+
+  _browserTabCloseSuccess(requested, tabQuery, closed, verified) {
+    const lastClosed = closed[closed.length - 1] || {};
+    return {
+      success: true,
+      data: {
+        ...lastClosed,
+        action: 'closeTab',
+        browserName: requested,
+        tabQuery,
+        closedCount: closed.length,
+        verified
+      }
+    };
+  }
+
+  _sleep(milliseconds) {
+    if (!milliseconds) return;
+    const buffer = new SharedArrayBuffer(4);
+    Atomics.wait(new Int32Array(buffer), 0, 0, milliseconds);
   }
 
   registerAction(actionId, handler) {

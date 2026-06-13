@@ -173,6 +173,22 @@ const INTENT_DEFINITIONS = [
     description: 'Search for files'
   },
   {
+    id: 'file.smartFind',
+    patterns: ['find newest file', 'find recent document', 'find largest file', 'show recent documents'],
+    permissionLevel: 'low',
+    action: 'file.smartFind',
+    entities: [
+      { name: 'query', type: 'string', required: false },
+      { name: 'location', type: 'string', required: false },
+      { name: 'fileType', type: 'string', required: false },
+      { name: 'sortBy', type: 'string', required: false },
+      { name: 'timeFilter', type: 'string', required: false },
+      { name: 'openResult', type: 'boolean', required: false },
+      { name: 'groupDuplicates', type: 'boolean', required: false }
+    ],
+    description: 'Find files by personal context, recency, size, type, or topic'
+  },
+  {
     id: 'file.list',
     patterns: ['list files', 'show files', 'what files are in', 'what files are on', 'list folder'],
     permissionLevel: 'low',
@@ -238,12 +254,39 @@ const INTENT_DEFINITIONS = [
     description: 'Search the web'
   },
   {
+    id: 'browser.siteSearch',
+    patterns: ['search in website', 'search on website', 'search inside website', 'find in website'],
+    permissionLevel: 'low',
+    action: 'browser.siteSearch',
+    entities: [
+      { name: 'site', type: 'string', required: true },
+      { name: 'query', type: 'string', required: true }
+    ],
+    description: 'Search inside a supported website or browser settings page'
+  },
+  {
     id: 'browser.openFirstResult',
     patterns: ['open first result', 'open first link', 'click first result', 'click first link', 'click the first search result'],
     permissionLevel: 'low',
     action: 'browser.openFirstResult',
     entities: [{ name: 'query', type: 'string', required: false }],
     description: 'Open the first result from the last browser search'
+  },
+  {
+    id: 'browser.closeTab',
+    patterns: ['close tab', 'close current tab', 'close active tab', 'close empty tab', 'close blank tab'],
+    permissionLevel: 'low',
+    action: 'browser.closeTab',
+    entities: [{ name: 'browserName', type: 'string', required: false }],
+    description: 'Close the current browser tab'
+  },
+  {
+    id: 'browser.listTabs',
+    patterns: ['what tabs are open', 'list tabs', 'show open tabs', 'which tabs are open'],
+    permissionLevel: 'low',
+    action: 'browser.listTabs',
+    entities: [{ name: 'browserName', type: 'string', required: false }],
+    description: 'List visible browser tabs and browser windows'
   },
   {
     id: 'system.time',
@@ -288,6 +331,18 @@ const INTENT_DEFINITIONS = [
       { name: 'platform', type: 'string', required: false }
     ],
     description: 'Prepare a message for a contact'
+  },
+  {
+    id: 'email.compose',
+    patterns: ['send email to', 'send mail to', 'email', 'mail'],
+    permissionLevel: 'low',
+    action: 'email.compose',
+    entities: [
+      { name: 'contactName', type: 'string', required: true },
+      { name: 'subject', type: 'string', required: false },
+      { name: 'body', type: 'string', required: false }
+    ],
+    description: 'Prepare an email draft for a contact'
   },
   {
     id: 'call.start',
@@ -407,6 +462,14 @@ const INTENT_DEFINITIONS = [
     action: 'system.processes',
     entities: [],
     description: 'List running processes'
+  },
+  {
+    id: 'system.insight',
+    patterns: ['top memory app', 'top cpu process', 'what is slowing down my computer', 'show storage usage', 'recently installed apps'],
+    permissionLevel: 'low',
+    action: 'system.insight',
+    entities: [{ name: 'insightType', type: 'string', required: true }],
+    description: 'Answer system insight questions with local machine evidence'
   },
   {
     id: 'system.bluetooth',

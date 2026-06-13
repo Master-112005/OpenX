@@ -518,7 +518,7 @@ class EntityExtractor {
   }
 
   _extractQuery(text, raw) {
-    const patterns = ['search for ', 'search web ', 'search ', 'look up ', 'google ', 'find file ', 'search file ', 'look for file ', 'find '];
+    const patterns = ['search for ', 'search web ', 'search ', 'look up ', 'google ', 'find file ', 'search file ', 'look for file ', 'locate ', 'find '];
     for (const p of patterns) {
       if (text.includes(p)) {
         const after = raw.split(new RegExp(p, 'i'))[1];

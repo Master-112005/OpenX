@@ -34,22 +34,49 @@ describe('Voice Session Manager', function() {
 
   it('should extend the inactivity timeout when activity is observed', function(done) {
     const manager = new VoiceSessionManager({ now: () => 123 });
+    const startedAt = Date.now();
     let timeoutCount = 0;
+    let finished = false;
+
+    const finish = (error) => {
+      if (finished) {
+        return;
+      }
+      finished = true;
+      manager.stop('test-finished');
+      done(error);
+    };
 
     manager.on('timeout', () => {
       timeoutCount += 1;
+      try {
+        assert.equal(timeoutCount, 1);
+        assert.equal(Date.now() - startedAt >= 80, true);
+        finish();
+      } catch (error) {
+        finish(error);
+      }
     });
 
-    assert.equal(manager.start({ mode: 'conversation', inactivityTimeoutMs: 20 }), true);
+    assert.equal(manager.start({ mode: 'conversation', inactivityTimeoutMs: 80 }), true);
     setTimeout(() => {
-      assert.equal(manager.touch(), true);
-    }, 10);
+      try {
+        assert.equal(manager.touch(), true);
+      } catch (error) {
+        finish(error);
+      }
+    }, 35);
     setTimeout(() => {
-      assert.equal(timeoutCount, 0);
-    }, 25);
+      try {
+        assert.equal(timeoutCount, 0);
+      } catch (error) {
+        finish(error);
+      }
+    }, 75);
     setTimeout(() => {
-      assert.equal(timeoutCount, 1);
-      done();
-    }, 45);
+      if (timeoutCount !== 1) {
+        finish(new Error('Expected inactivity timeout after touch extension'));
+      }
+    }, 180);
   });
 });

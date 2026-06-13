@@ -3,7 +3,6 @@ const fs = require('fs');
 const path = require('path');
 const { spawn, spawnSync } = require('child_process');
 const Logger = require('../../shared/index').Logger;
-const TranscriptNormalizer = require('../transcript/transcript-normalizer');
 
 class WhisperStreamSpeechEngine extends EventEmitter {
   constructor(config = {}) {
@@ -12,9 +11,9 @@ class WhisperStreamSpeechEngine extends EventEmitter {
     this.voiceConfig = config?.voice || {};
     this.whisperConfig = this.voiceConfig.whisper || {};
     this.logger = new Logger({ level: config?.logging?.level || 'info' });
-    this.normalizer = new TranscriptNormalizer();
     this.process = null;
     this.ready = false;
+    this.state = 'IDLE';
     this.activeSession = null;
     this.restartCount = 0;
     this.maxRestarts = Number(this.whisperConfig.maxRestarts) >= 0
@@ -55,7 +54,8 @@ class WhisperStreamSpeechEngine extends EventEmitter {
     if (!this.ready) {
       this.emit('event', {
         event: 'error',
-        message: 'Whisper stream is not ready'
+        message: 'Whisper stream is not ready',
+        backend: 'whisper-stream'
       });
       return;
     }
@@ -68,6 +68,7 @@ class WhisperStreamSpeechEngine extends EventEmitter {
       ? Number(options.maxDurationMs)
       : Number(this.voiceConfig.stt?.maxDurationMs || startSpeechTimeoutMs);
 
+    this.state = 'LISTENING';
     this.activeSession = {
       mode,
       startedAt: Date.now(),
@@ -77,9 +78,11 @@ class WhisperStreamSpeechEngine extends EventEmitter {
       chunks: [],
       finalized: false,
       finalTimer: null,
-      inactivityTimer: null
+      inactivityTimer: null,
+      speechDetected: false
     };
 
+    this.logger.info('STT session started', { mode, backend: 'whisper-stream' });
     this.emit('event', {
       event: 'stt_session_activated',
       mode,
@@ -91,6 +94,7 @@ class WhisperStreamSpeechEngine extends EventEmitter {
     });
 
     this._ensureProcess();
+    this.logger.info('Microphone recording started', { backend: 'whisper-stream' });
     this._armSessionInactivityTimer(startSpeechTimeoutMs);
   }
 
@@ -108,6 +112,7 @@ class WhisperStreamSpeechEngine extends EventEmitter {
     this._finalizeSession('shutdown');
     this._stopProcess();
     this.ready = false;
+    this.state = 'IDLE';
     this.removeAllListeners();
   }
 
@@ -162,19 +167,30 @@ class WhisperStreamSpeechEngine extends EventEmitter {
   }
 
   _handleStdout(chunk) {
-    const lines = String(chunk || '')
+    const transcripts = String(chunk || '')
       .split(/\r?\n/)
       .map(line => this._parseTranscriptLine(line))
       .filter(Boolean);
 
-    for (const text of lines) {
+    for (const text of transcripts) {
       if (!this.activeSession || this.activeSession.finalized) {
         continue;
+      }
+
+      if (!this.activeSession.speechDetected) {
+        this.activeSession.speechDetected = true;
+        this.logger.info('Speech detected', { backend: 'whisper-stream' });
+        this.emit('event', {
+          event: 'speech_started',
+          mode: this.activeSession.mode,
+          backend: 'whisper-stream'
+        });
       }
 
       this.activeSession.chunks.push(text);
       this.activeSession.lastActivityAt = Date.now();
       this._armSessionInactivityTimer(this.activeSession.startSpeechTimeoutMs);
+      this._logTranscriptChunk(text);
       this.emit('event', {
         event: 'partial_result',
         text,
@@ -186,12 +202,10 @@ class WhisperStreamSpeechEngine extends EventEmitter {
       if (this.activeSession.finalTimer) {
         clearTimeout(this.activeSession.finalTimer);
       }
-      const debounceMs = Number(this.whisperConfig.finalDebounceMs) > 0
-        ? Number(this.whisperConfig.finalDebounceMs)
-        : 1200;
       this.activeSession.finalTimer = setTimeout(() => {
+        this.logger.info('Silence detected', { backend: 'whisper-stream' });
         this._finalizeSession('final-transcript');
-      }, debounceMs);
+      }, this._getFinalDebounceMs());
     }
   }
 
@@ -210,27 +224,22 @@ class WhisperStreamSpeechEngine extends EventEmitter {
     }
     this.activeSession = null;
 
-    const text = this.normalizer.normalize(session.chunks.join(' '));
-    if (!text) {
-      this.emit('event', {
-        event: 'session_timeout',
-        mode: session.mode,
-        reason: reason === 'session-timeout' ? 'no-speech-detected' : reason,
-        timeoutMs: session.startSpeechTimeoutMs,
-        backend: 'whisper-stream'
-      });
-      return;
-    }
+    this.logger.info('Recording stopped', { reason, backend: 'whisper-stream' });
+    this.state = 'TRANSCRIBING';
+    this.logger.info('Transcribing audio', { backend: 'whisper-stream' });
 
+    const text = this._composeSessionTranscript(session);
+    this.logger.info(`Transcript: "${text}"`, { backend: 'whisper-stream' });
     this.emit('event', {
       event: 'result',
       text,
-      confidence: 0.92,
       isFinal: true,
-      speechDetected: true,
       mode: session.mode,
-      backend: 'whisper-stream'
+      backend: 'whisper-stream',
+      timeoutMs: session.startSpeechTimeoutMs
     });
+    this.state = 'IDLE';
+    this.logger.info('STT session completed', { mode: session.mode, backend: 'whisper-stream' });
   }
 
   _armSessionInactivityTimer(timeoutMs) {
@@ -244,31 +253,103 @@ class WhisperStreamSpeechEngine extends EventEmitter {
 
     const duration = Math.max(1000, Number(timeoutMs) || 20000);
     this.activeSession.inactivityTimer = setTimeout(() => {
+      this.logger.info('Silence detected', { backend: 'whisper-stream' });
       this._finalizeSession('session-timeout');
     }, duration);
   }
 
   _parseTranscriptLine(line) {
-    const raw = String(line || '').trim();
-    if (!raw) {
-      return '';
-    }
-
-    if (/^(?:whisper_|main:|system_info:|sampling|processing|init|error:)/i.test(raw)) {
+    const raw = this._cleanWhisperOutput(line);
+    if (!raw || /^(?:whisper_|main:|system_info:|sampling|processing|init|error:)/i.test(raw)) {
       return '';
     }
 
     try {
       const parsed = JSON.parse(raw);
-      return this.normalizer.normalize(parsed.text || parsed.transcript || '');
+      return this._normalizeTranscriptText(parsed.text || parsed.transcript || '');
     } catch (error) {}
 
-    const cleaned = raw
-      .replace(/^\[[^\]]+\]\s*/g, '')
-      .replace(/^\([^)]+\)\s*/g, '')
-      .replace(/^\d{2}:\d{2}:\d{2}(?:\.\d+)?\s*/g, '');
+    return this._normalizeTranscriptText(
+      raw
+        .replace(/^\[[^\]]+\]\s*/g, '')
+        .replace(/^\([^)]+\)\s*/g, '')
+        .replace(/^\d{2}:\d{2}:\d{2}(?:\.\d+)?\s*/g, '')
+    );
+  }
 
-    return this.normalizer.normalize(cleaned);
+  _composeSessionTranscript(session = {}) {
+    const chunks = (Array.isArray(session.chunks) ? session.chunks : [])
+      .map(chunk => this._normalizeTranscriptText(chunk))
+      .filter(Boolean);
+    if (!chunks.length) {
+      return '';
+    }
+
+    const compacted = [];
+    for (const chunk of chunks) {
+      const previous = compacted[compacted.length - 1];
+      if (!previous || previous !== chunk) {
+        compacted.push(chunk);
+      }
+    }
+
+    const last = compacted[compacted.length - 1];
+    if (compacted.length === 1) {
+      return last;
+    }
+
+    const previous = compacted[compacted.length - 2];
+    const previousTokens = this._tokenize(previous);
+    const lastTokens = this._tokenize(last);
+    if (previousTokens.length > 0 && lastTokens.length >= previousTokens.length) {
+      const prefix = lastTokens.slice(0, previousTokens.length).join(' ');
+      if (prefix === previousTokens.join(' ')) {
+        return last;
+      }
+    }
+
+    return this._normalizeTranscriptText(compacted.join(' '));
+  }
+
+  _getFinalDebounceMs() {
+    return Number(this.whisperConfig.finalDebounceMs) > 0
+      ? Number(this.whisperConfig.finalDebounceMs)
+      : 1600;
+  }
+
+  _cleanWhisperOutput(value) {
+    return String(value || '')
+      .replace(/\x1B\[[0-?]*[ -/]*[@-~]/g, ' ')
+      .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, ' ')
+      .replace(/\r/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  _normalizeTranscriptText(value) {
+    return String(value || '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .replace(/[.!?]+$/g, '')
+      .trim()
+      .toLowerCase();
+  }
+
+  _tokenize(text) {
+    return String(text || '')
+      .toLowerCase()
+      .split(/\s+/)
+      .map(token => token.replace(/^[^\w]+|[^\w]+$/g, ''))
+      .filter(Boolean);
+  }
+
+  _logTranscriptChunk(text) {
+    const payload = { text };
+    if (this.whisperConfig.logRawOutput === true) {
+      this.logger.info('[WHISPER] Transcript chunk', payload);
+    } else {
+      this.logger.debug('[WHISPER] Transcript chunk', payload);
+    }
   }
 
   _buildArgs() {
@@ -284,8 +365,26 @@ class WhisperStreamSpeechEngine extends EventEmitter {
       '-l', String(this.whisperConfig.language || this.voiceConfig.stt?.language || 'en')
     ];
 
+    const captureDeviceId = Number(this.whisperConfig.captureDeviceId);
+    if (Number.isInteger(captureDeviceId) && captureDeviceId >= 0) {
+      args.push('--capture', String(captureDeviceId));
+    }
+
+    const audioContext = Number(this.whisperConfig.audioContext);
+    if (Number.isInteger(audioContext) && audioContext > 0) {
+      args.push('--audio-ctx', String(audioContext));
+    }
+
+    if (this.whisperConfig.noFallback !== false) {
+      args.push('--no-fallback');
+    }
+
+    if (this.whisperConfig.saveAudio === true) {
+      args.push('--save-audio');
+    }
+
     if (this.whisperConfig.keepContext === true) {
-      args.splice(args.length - 2, 0, '--keep-context');
+      args.push('--keep-context');
     }
 
     return args;

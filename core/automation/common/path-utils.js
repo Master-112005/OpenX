@@ -3,6 +3,24 @@ const os = require('os');
 const path = require('path');
 const Normalizer = require('../../shared/index').Normalizer;
 
+const DEFAULT_EXCLUDED_SEARCH_DIRECTORIES = new Set([
+  '$recycle.bin',
+  '.git',
+  '.hg',
+  '.svn',
+  'appdata',
+  'application data',
+  'cache',
+  'cookies',
+  'local settings',
+  'node_modules',
+  'program files',
+  'program files (x86)',
+  'programdata',
+  'system volume information',
+  'windows'
+]);
+
 function cleanEntityName(value, options = {}) {
   const { stripTypeWords = false } = options;
   if (!value || typeof value !== 'string') return null;
@@ -53,6 +71,20 @@ function normalizeLocation(value) {
 
 function dedupe(paths) {
   return Array.from(new Set(paths.filter(Boolean).map(candidate => path.resolve(candidate))));
+}
+
+function shouldDescendIntoSearchDirectory(name, options = {}) {
+  const normalized = String(name || '').trim().toLowerCase();
+  if (!normalized || normalized.startsWith('.')) {
+    return false;
+  }
+
+  const excluded = options.excludedDirectories || DEFAULT_EXCLUDED_SEARCH_DIRECTORIES;
+  return !excluded.has(normalized);
+}
+
+function hasSearchTimeRemaining(startedAt, maxElapsedMs) {
+  return !Number.isFinite(maxElapsedMs) || maxElapsedMs <= 0 || Date.now() - startedAt < maxElapsedMs;
 }
 
 function resolveDirectory(location, options = {}) {
@@ -137,6 +169,8 @@ function findEntriesByName(name, options = {}) {
   const wantedDirectory = type === 'directory';
   const wantedName = name.toLowerCase();
   const maxMatches = options.maxMatches ?? 20;
+  const maxElapsedMs = options.maxElapsedMs ?? 1200;
+  const startedAt = Date.now();
   const matches = [];
   const candidateRoots = dedupe(roots.length > 0 ? roots : [
     process.cwd(),
@@ -162,10 +196,22 @@ function findEntriesByName(name, options = {}) {
     .map(root => ({ directory: root, depth: 0 }));
   const maxDepth = options.maxDepth ?? 4;
   const maxDirectories = options.maxDirectories ?? 1500;
+  const visited = new Set();
   let visitedDirectories = 0;
 
-  while (queue.length > 0 && visitedDirectories < maxDirectories) {
-    const { directory, depth } = queue.shift();
+  for (
+    let cursor = 0;
+    cursor < queue.length &&
+      visitedDirectories < maxDirectories &&
+      hasSearchTimeRemaining(startedAt, maxElapsedMs);
+    cursor += 1
+  ) {
+    const { directory, depth } = queue[cursor];
+    const directoryKey = path.resolve(directory).toLowerCase();
+    if (visited.has(directoryKey)) {
+      continue;
+    }
+    visited.add(directoryKey);
     visitedDirectories += 1;
 
     let entries = [];
@@ -189,7 +235,7 @@ function findEntriesByName(name, options = {}) {
       if (
         depth < maxDepth &&
         entry.isDirectory() &&
-        !entry.name.startsWith('.')
+        shouldDescendIntoSearchDirectory(entry.name, options)
       ) {
         queue.push({ directory: entryPath, depth: depth + 1 });
       }
@@ -244,6 +290,7 @@ module.exports = {
   normalizeLocation,
   resolveDestinationPath,
   resolveDirectory,
+  shouldDescendIntoSearchDirectory,
   splitNameAndLocation,
   cleanEntityName
 };

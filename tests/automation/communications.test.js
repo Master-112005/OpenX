@@ -167,4 +167,39 @@ describe('Communications Controller', function() {
     assert.equal(result.success, true);
     assert.equal(launchedUri, 'whatsapp://call?phone=919876543210');
   });
+
+  it('should ask for subject and message when preparing an email with only a contact', async function() {
+    const { controller } = createController({
+      rakesh: { email: 'rakesh@example.com', aliases: ['rakes'] }
+    });
+    let launchedUri = null;
+    controller._launchUri = (uri) => {
+      launchedUri = uri;
+    };
+
+    const result = await controller.composeEmail('rakes', '', '');
+
+    assert.equal(result.success, true);
+    assert.equal(result.data.needsDetails, true);
+    assert.equal(result.data.contactName, 'rakesh');
+    assert.equal(result.data.email, 'rakesh@example.com');
+    assert.equal(launchedUri, null);
+  });
+
+  it('should prepare a mailto draft for a saved email contact', async function() {
+    const { controller } = createController({
+      rakesh: { email: 'rakesh@example.com' }
+    });
+    let launchedUri = null;
+    controller._launchUri = (uri) => {
+      launchedUri = uri;
+    };
+
+    const result = await controller.composeEmail('rakesh', 'Project update', 'The build passed.');
+
+    assert.equal(result.success, true);
+    assert.equal(result.data.delivery, 'draft');
+    assert.equal(result.data.email, 'rakesh@example.com');
+    assert.equal(launchedUri, 'mailto:rakesh%40example.com?subject=Project+update&body=The+build+passed.');
+  });
 });

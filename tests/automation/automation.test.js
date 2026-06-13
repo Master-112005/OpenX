@@ -1,4 +1,7 @@
 const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 describe('Automation Engine', function() {
   let AutomationEngine;
@@ -20,7 +23,10 @@ describe('Automation Engine', function() {
     assert.ok(actions.includes('folder.move'));
     assert.ok(actions.includes('browser.open'));
     assert.ok(actions.includes('browser.search'));
+    assert.ok(actions.includes('browser.closeTab'));
+    assert.ok(actions.includes('browser.listTabs'));
     assert.ok(actions.includes('message.compose'));
+    assert.ok(actions.includes('email.compose'));
     assert.ok(actions.includes('call.start'));
     assert.ok(actions.includes('timer.set'));
     assert.ok(actions.includes('alarm.set'));
@@ -43,12 +49,15 @@ describe('Automation Engine', function() {
     const result = await engine.execute('test.action', {});
     assert.ok(result.success);
     assert.equal(result.data.value, 42);
+    assert.equal(result.verification.status, 'unknown');
   });
 
   it('should return error for unknown action', async function() {
     const engine = new AutomationEngine({});
     const result = await engine.execute('nonexistent.action', {});
     assert.equal(result.success, false);
+    assert.equal(result.validation.status, 'unknown');
+    assert.equal(result.verification.status, 'unknown');
   });
 
   it('should start configured app modes', async function() {
@@ -159,6 +168,7 @@ describe('Automation Engine', function() {
     assert.ok(actions.includes('system.battery'));
     assert.ok(actions.includes('system.disk'));
     assert.ok(actions.includes('system.processes'));
+    assert.ok(actions.includes('system.bluetooth'));
     assert.ok(actions.includes('system.time'));
     assert.ok(actions.includes('system.date'));
     assert.ok(actions.includes('system.calculate'));
@@ -170,6 +180,97 @@ describe('Automation Engine', function() {
 
     assert.equal(result.success, true);
     assert.equal(result.data.result, 605);
+    assert.equal(result.validation.status, 'passed');
+  });
+
+  it('should attach validation and verification evidence to file actions', async function() {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-verify-'));
+    const engine = new AutomationEngine({});
+
+    const result = await engine.execute('file.create', {
+      filename: 'verified.txt',
+      path: tmpDir
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(result.validation.status, 'passed');
+    assert.equal(result.verification.status, 'passed');
+    assert.equal(result.verification.check, 'file-exists');
+    assert.equal(fs.existsSync(path.join(tmpDir, 'verified.txt')), true);
+
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('should execute smart file discovery by type, recency, and size', async function() {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-smart-find-'));
+    const oldFile = path.join(tempDir, 'old-notes.txt');
+    const pdfFile = path.join(tempDir, 'resume.pdf');
+    const largeFile = path.join(tempDir, 'large.bin');
+    fs.writeFileSync(oldFile, 'old', 'utf8');
+    fs.writeFileSync(pdfFile, 'resume', 'utf8');
+    fs.writeFileSync(largeFile, Buffer.alloc(1024 * 16));
+    const oldDate = new Date(Date.now() - 220 * 24 * 60 * 60 * 1000);
+    fs.utimesSync(oldFile, oldDate, oldDate);
+
+    const engine = new AutomationEngine({});
+    const pdf = await engine.execute('file.smartFind', {
+      location: tempDir,
+      fileType: 'pdf',
+      sortBy: 'modifiedDesc'
+    });
+    const large = await engine.execute('file.smartFind', {
+      location: tempDir,
+      sortBy: 'sizeDesc'
+    });
+    const stale = await engine.execute('file.smartFind', {
+      location: tempDir,
+      timeFilter: 'olderThan6MonthsAccess',
+      sortBy: 'accessedAsc'
+    });
+
+    assert.equal(pdf.success, true);
+    assert.equal(pdf.data.entries[0].name, 'resume.pdf');
+    assert.equal(large.success, true);
+    assert.equal(large.data.entries[0].name, 'large.bin');
+    assert.equal(stale.success, true);
+    assert.equal(stale.data.entries[0].name, 'old-notes.txt');
+
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('should fail a successful action result when postcondition verification fails', async function() {
+    const engine = new AutomationEngine({});
+    engine.registerAction('file.create', () => ({
+      success: true,
+      data: {
+        path: path.join(os.tmpdir(), `missing-${Date.now()}.txt`),
+        filename: 'missing.txt'
+      }
+    }));
+
+    const result = await engine.execute('file.create', {
+      filename: 'missing.txt'
+    });
+
+    assert.equal(result.success, false);
+    assert.equal(result.verification.status, 'failed');
+    assert.match(result.error, /Expected file was not found/);
+  });
+
+  it('should verify app close results against visible windows', async function() {
+    const engine = new AutomationEngine({});
+    engine.windows.listWindows = () => [];
+    engine.apps._resolveProcessCandidates = () => ['chrome'];
+    engine.apps._findRunningProcesses = () => [];
+
+    const result = await engine.verifier.verify('app.close', { appName: 'chrome' }, {
+      success: true,
+      data: { app: 'chrome', closeMethod: 'window' }
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(result.verification.status, 'passed');
+    assert.equal(result.verification.check, 'app-closed');
   });
 
   it('should execute expanded local calculation forms', async function() {
@@ -189,6 +290,120 @@ describe('Automation Engine', function() {
       assert.equal(result.success, true, expression);
       assert.equal(result.data.result, expected, expression);
     }
+  });
+
+  it('should execute visible app listing separately from process count', async function() {
+    const SystemController = require('../../core/automation/system/index');
+    const system = new SystemController({});
+    system.getRunningApps = (entities) => ({
+      success: true,
+      data: {
+        target: 'apps',
+        count: 2,
+        names: ['chrome', 'spotify'],
+        queryApp: entities?.queryApp,
+        isOpen: entities?.queryApp === 'chrome'
+      }
+    });
+
+    const engine = new AutomationEngine({});
+    engine.system = system;
+    engine._actionMap['system.processes'] = (entities) => entities?.target === 'apps'
+      ? engine.system.getRunningApps(entities)
+      : engine.system.getProcessCount();
+
+    const result = await engine.execute('system.processes', { target: 'apps', queryApp: 'chrome' });
+
+    assert.equal(result.success, true);
+    assert.equal(result.data.target, 'apps');
+    assert.equal(result.data.count, 2);
+    assert.deepEqual(result.data.names, ['chrome', 'spotify']);
+    assert.equal(result.data.queryApp, 'chrome');
+    assert.equal(result.data.isOpen, true);
+  });
+
+  it('should close targeted browser tabs by title query', async function() {
+    const engine = new AutomationEngine({});
+    let captured = null;
+    engine.windows.sendKeys = (windowName, keys, options) => {
+      captured = { windowName, keys, options };
+      return {
+        success: true,
+        data: { matchedWindow: 'Google Photos - Google Chrome', matchedHandle: 200 }
+      };
+    };
+    engine.windows.findWindow = () => null;
+
+    const result = await engine.execute('browser.closeTab', {
+      browserName: 'chrome',
+      tabQuery: 'google photos'
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(captured.windowName, 'google photos');
+    assert.equal(captured.keys, '^w');
+    assert.deepEqual(captured.options.preferredProcessNames, ['chrome']);
+    assert.deepEqual(captured.options.preferredTitleTokens, ['google', 'photos']);
+    assert.equal(captured.options.requireTitleTokenMatch, true);
+    assert.equal(result.data.action, 'closeTab');
+    assert.equal(result.data.browserName, 'chrome');
+    assert.equal(result.data.tabQuery, 'google photos');
+    assert.equal(result.data.closedCount, 1);
+    assert.equal(result.data.verified, true);
+  });
+
+  it('should fail targeted browser tab close without closing a fallback tab', async function() {
+    const engine = new AutomationEngine({});
+    engine.windows.sendKeys = () => ({ success: false, error: 'Window not found' });
+
+    const result = await engine.execute('browser.closeTab', {
+      browserName: 'chrome',
+      tabQuery: 'google photos'
+    });
+
+    assert.equal(result.success, false);
+    assert.match(result.error, /Could not find a google photos tab in chrome/);
+  });
+
+  it('should not report targeted browser tab close success when verification fails', async function() {
+    const engine = new AutomationEngine({});
+    engine._sleep = () => {};
+    engine.windows.sendKeys = () => ({
+      success: true,
+      data: {
+        matchedWindow: 'Google Photos - Google Chrome',
+        matchedHandle: 200
+      }
+    });
+    engine.windows.findWindow = () => ({
+      handle: 200,
+      title: 'Google Photos - Google Chrome',
+      processName: 'chrome'
+    });
+
+    const result = await engine.execute('browser.closeTab', {
+      browserName: 'chrome',
+      tabQuery: 'google photos'
+    });
+
+    assert.equal(result.success, false);
+    assert.equal(result.data.verified, false);
+    assert.match(result.error, /still appears to be active/);
+  });
+
+  it('should list visible browser tabs from browser windows', async function() {
+    const engine = new AutomationEngine({});
+    engine.windows.listWindows = () => ([
+      { handle: 100, title: 'ChatGPT - Google Chrome', processName: 'chrome' },
+      { handle: 200, title: 'Google Photos - Google Chrome', processName: 'chrome' },
+      { handle: 300, title: 'Inbox - Microsoft Edge', processName: 'msedge' }
+    ]);
+
+    const result = await engine.execute('browser.listTabs', { browserName: 'chrome' });
+
+    assert.equal(result.success, true);
+    assert.equal(result.data.count, 2);
+    assert.deepEqual(result.data.tabs.map(tab => tab.title), ['ChatGPT', 'Google Photos']);
   });
 
   it('should parse human reminder day phrases', function() {

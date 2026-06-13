@@ -1,4 +1,7 @@
 const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 describe('Assistant Confirmation Flow', function() {
   let Assistant;
@@ -207,6 +210,73 @@ describe('Assistant Confirmation Flow', function() {
 
     assert.equal(second.success, true);
     assert.equal(seenInputs[1], 'list files in desktop');
+  });
+
+  it('should retry the last actionable command from natural follow-up language', async function() {
+    const seenInputs = [];
+    const router = {
+      process: async input => {
+        seenInputs.push(input);
+        return {
+          commandId: `cmd-${seenInputs.length}`,
+          success: true,
+          intent: 'media.resume',
+          entities: {},
+          response: 'Resumed playback.'
+        };
+      }
+    };
+
+    const assistant = new Assistant({}, {
+      router,
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    await assistant.processCommand('unpause');
+    const repeated = await assistant.processCommand('try again');
+
+    assert.equal(repeated.success, true);
+    assert.equal(seenInputs[1], 'unpause');
+  });
+
+  it('should retry the last failed command before repeating a successful one', async function() {
+    const seenInputs = [];
+    const router = {
+      process: async input => {
+        seenInputs.push(input);
+        if (input === 'close github tab') {
+          return {
+            commandId: 'cmd-failed',
+            success: false,
+            intent: 'browser.closeTab',
+            entities: { tabQuery: 'github' },
+            response: 'I could not find that tab.',
+            error: 'Could not find a github tab'
+          };
+        }
+        return {
+          commandId: 'cmd-success',
+          success: true,
+          intent: 'app.open',
+          entities: { appName: 'chrome' },
+          response: 'Opened chrome.'
+        };
+      }
+    };
+
+    const assistant = new Assistant({}, {
+      router,
+      automation: {},
+      eventBus: { publish() {} },
+      learning: { enabled: false }
+    });
+
+    await assistant.processCommand('open chrome');
+    await assistant.processCommand('close github tab');
+    await assistant.processCommand('try again');
+
+    assert.equal(seenInputs[2], 'close github tab');
   });
 
   it('should refuse unrelated follow-up speech until confirmation is resolved', async function() {
@@ -519,31 +589,571 @@ describe('Assistant Confirmation Flow', function() {
     assert.deepEqual(routedInputs, ['close youtube', 'open youtube']);
   });
 
-  it('should resolve chat pronouns from recent command context before routing', async function() {
+  it('should ask for feedback after actionable commands and record positive feedback', async function() {
+    const feedback = [];
+    const learning = {
+      enabled: true,
+      askForFeedback: true,
+      findCorrection: () => null,
+      learnFromText: () => null,
+      recordFeedback: entry => feedback.push(entry)
+    };
+    const router = {
+      process: async () => ({
+        commandId: 'cmd-feedback',
+        success: true,
+        intent: 'app.open',
+        confidence: 1,
+        entities: { appName: 'chrome' },
+        response: 'Opened chrome.'
+      })
+    };
+
+    const assistant = new Assistant({}, {
+      router,
+      learning,
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    const first = await assistant.processCommand('open chrome');
+    const second = await assistant.processCommand('yes');
+
+    assert.match(first.response, /Did that work correctly/i);
+    assert.equal(second.learned, true);
+    assert.equal(feedback[0].rating, 'positive');
+    assert.equal(assistant.getStatus().awaitingFeedback, false);
+  });
+
+  it('should learn a correction from negative feedback and reuse it later', async function() {
+    const corrections = new Map();
+    const learning = {
+      enabled: true,
+      askForFeedback: true,
+      findCorrection: input => {
+        const key = input.toLowerCase();
+        return corrections.has(key) ? { correction: corrections.get(key) } : null;
+      },
+      rememberCorrection: (input, correction) => {
+        corrections.set(input.toLowerCase(), correction);
+        return { input, correction };
+      },
+      learnFromText: () => null,
+      recordFeedback: () => {}
+    };
     const routedInputs = [];
     const router = {
-      process: async (input) => {
+      process: async input => {
         routedInputs.push(input);
         return {
           commandId: `cmd-${routedInputs.length}`,
           success: true,
-          intent: input.startsWith('close') ? 'app.close' : 'app.open',
-          entities: { appName: 'chrome' },
-          response: input.startsWith('close') ? 'Closed chrome.' : 'Opened chrome.'
+          intent: input.includes('google photos') ? 'browser.openFirstResult' : 'app.open',
+          confidence: 1,
+          entities: input.includes('google photos') ? { query: 'google photos' } : { appName: 'photos' },
+          response: input.includes('google photos') ? 'Opened Google Photos.' : 'Opened Photos.'
         };
       }
     };
 
     const assistant = new Assistant({}, {
       router,
+      learning,
       automation: {},
       eventBus: { publish() {} }
     });
 
-    await assistant.processCommand('open chrome', 'chat');
-    await assistant.processCommand('close it', 'chat');
-    await assistant.processCommand('open it again', 'chat');
+    await assistant.processCommand('open photos');
+    await assistant.processCommand('no, open google photos');
+    await assistant.processCommand('open photos');
 
-    assert.deepEqual(routedInputs, ['open chrome', 'close chrome', 'open chrome']);
+    assert.deepEqual(routedInputs, ['open photos', 'open google photos', 'open google photos']);
+  });
+
+  it('should resolve polite references like close that to the last app target', async function() {
+    const routedInputs = [];
+    const router = {
+      process: async input => {
+        routedInputs.push(input);
+        return {
+          commandId: `cmd-ref-${routedInputs.length}`,
+          success: true,
+          intent: input.startsWith('close') ? 'app.close' : 'app.open',
+          confidence: 1,
+          entities: { appName: 'instagram' },
+          response: input.startsWith('close') ? 'Closed instagram.' : 'Opened instagram.'
+        };
+      }
+    };
+
+    const assistant = new Assistant({}, {
+      router,
+      learning: { enabled: false },
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    await assistant.processCommand('can you please open instagram');
+    await assistant.processCommand('can please close that');
+
+    assert.deepEqual(routedInputs, ['can you please open instagram', 'close instagram']);
+  });
+
+  it('should resolve app status context before window follow-ups', async function() {
+    const routedInputs = [];
+    const router = {
+      process: async input => {
+        routedInputs.push(input);
+        if (input === 'is chrome running') {
+          return {
+            commandId: 'cmd-app-status',
+            success: true,
+            intent: 'system.processes',
+            confidence: 1,
+            entities: { target: 'apps', queryApp: 'chrome' },
+            response: 'Chrome is open.'
+          };
+        }
+        return {
+          commandId: 'cmd-window',
+          success: true,
+          intent: 'window.maximize',
+          confidence: 1,
+          entities: { windowName: 'chrome' },
+          response: 'Maximized chrome.'
+        };
+      }
+    };
+
+    const assistant = new Assistant({}, {
+      router,
+      learning: { enabled: false },
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    await assistant.processCommand('is chrome running');
+    await assistant.processCommand('maxmize it');
+
+    assert.deepEqual(routedInputs, ['is chrome running', 'maximize chrome']);
+  });
+
+  it('should keep personal email and calendar requests out of blind web search', async function() {
+    const routedInputs = [];
+    const router = {
+      process: async input => {
+        routedInputs.push(input);
+        return {
+          commandId: 'cmd-mail',
+          success: true,
+          intent: 'browser.siteSearch',
+          confidence: 1,
+          entities: { site: 'gmail', query: 'internship' },
+          response: 'Searching Gmail.'
+        };
+      }
+    };
+
+    const assistant = new Assistant({}, {
+      router,
+      learning: { enabled: false },
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    const mail = await assistant.processCommand('search my emails for internship');
+    const calendar = await assistant.processCommand('what meetings do I have today');
+
+    assert.equal(mail.intent, 'browser.siteSearch');
+    assert.deepEqual(routedInputs, ['search internship in gmail']);
+    assert.equal(calendar.intent, 'assistant.context');
+    assert.match(calendar.response, /Calendar reading is not connected/i);
+  });
+
+  it('should answer session search history and carry topic into year follow-ups', async function() {
+    const routedInputs = [];
+    const router = {
+      process: async input => {
+        routedInputs.push(input);
+        return {
+          commandId: `cmd-search-${routedInputs.length}`,
+          success: true,
+          intent: 'browser.search',
+          confidence: 1,
+          entities: { query: input.replace(/^search\s+(?:for\s+)?/i, '') },
+          data: { query: input.replace(/^search\s+(?:for\s+)?/i, '') },
+          response: 'Search complete.'
+        };
+      }
+    };
+
+    const assistant = new Assistant({}, {
+      router,
+      learning: { enabled: false },
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    await assistant.processCommand('search for IPL winners');
+    const lastSearch = await assistant.processCommand('what was the last thing I searched');
+    await assistant.processCommand('what about 2022');
+    await assistant.processCommand('what about the year before that');
+
+    assert.match(lastSearch.response, /IPL winners/i);
+    assert.deepEqual(routedInputs, [
+      'search for IPL winners',
+      'who won IPL in 2022',
+      'who won IPL in 2021'
+    ]);
+  });
+
+  it('should resolve file pronouns to the last discussed file', async function() {
+    const routedInputs = [];
+    const filePath = 'C:\\Users\\rakes\\Documents\\Resume.docx';
+    const router = {
+      process: async input => {
+        routedInputs.push(input);
+        if (input === 'find Resume.docx') {
+          return {
+            commandId: 'cmd-file-search',
+            success: true,
+            intent: 'file.search',
+            confidence: 1,
+            entities: { query: 'Resume.docx' },
+            data: { results: [{ name: 'Resume.docx', path: filePath }] },
+            response: 'Found Resume.docx.'
+          };
+        }
+        return {
+          commandId: 'cmd-file-follow',
+          success: true,
+          intent: 'file.search',
+          confidence: 1,
+          entities: { query: filePath },
+          response: 'Located file.'
+        };
+      }
+    };
+
+    const assistant = new Assistant({}, {
+      router,
+      learning: { enabled: false },
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    await assistant.processCommand('find Resume.docx');
+    await assistant.processCommand('where is it located');
+    const name = await assistant.processCommand('what is its file name');
+
+    assert.deepEqual(routedInputs, [
+      'find Resume.docx',
+      `what is the location of ${filePath}`
+    ]);
+    assert.match(name.response, /Resume\.docx/);
+  });
+
+  it('should learn corrective phrasing against the last failed command', async function() {
+    const learnedRules = [];
+    const routedInputs = [];
+    const learning = {
+      enabled: true,
+      askForFeedback: false,
+      findCorrection: () => null,
+      learnFromText: () => null,
+      rememberCorrection: (input, correction) => {
+        learnedRules.push({ input, correction });
+        return { input, correction };
+      },
+      recordFeedback: () => {}
+    };
+    const router = {
+      process: async input => {
+        routedInputs.push(input);
+        if (input === 'can please close that') {
+          return {
+            commandId: 'cmd-failed-close',
+            success: false,
+            intent: 'app.close',
+            confidence: 0.99,
+            entities: { appName: 'can' },
+            response: 'Could not close can.'
+          };
+        }
+        return {
+          commandId: 'cmd-fixed-close',
+          success: true,
+          intent: 'app.close',
+          confidence: 1,
+          entities: { appName: 'instagram' },
+          response: 'Closed instagram.'
+        };
+      }
+    };
+
+    const assistant = new Assistant({}, {
+      router,
+      learning,
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    await assistant.processCommand('can please close that');
+    const fixed = await assistant.processCommand('i said to close the instagram');
+
+    assert.equal(fixed.success, true);
+    assert.equal(fixed.learned, true);
+    assert.deepEqual(routedInputs, ['can please close that', 'close instagram']);
+    assert.deepEqual(learnedRules, [{ input: 'can please close that', correction: 'close instagram' }]);
+  });
+
+  it('should not ask for feedback repeatedly after the same confident action', async function() {
+    const ActiveLearningStore = require('../../core/assistant/learning/index');
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-learning-'));
+    const learning = new ActiveLearningStore({
+      app: { dataDir: tempDir },
+      activeLearning: { enabled: true, askForFeedback: true }
+    });
+    const router = {
+      process: async () => ({
+        commandId: 'cmd-repeat-feedback',
+        success: true,
+        intent: 'app.open',
+        confidence: 1,
+        entities: { appName: 'chrome' },
+        response: 'Opened chrome.'
+      })
+    };
+    const assistant = new Assistant({}, {
+      router,
+      learning,
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    const first = await assistant.processCommand('open chrome');
+    await assistant.processCommand('yes');
+    const second = await assistant.processCommand('open chrome');
+
+    assert.match(first.response, /Did that work correctly/i);
+    assert.doesNotMatch(second.response, /Did that work correctly/i);
+  });
+
+  it('should handle positive feedback attached to the next command', async function() {
+    const routedInputs = [];
+    const router = {
+      process: async input => {
+        routedInputs.push(input);
+        return {
+          commandId: `cmd-combined-${routedInputs.length}`,
+          success: true,
+          intent: 'app.open',
+          confidence: 1,
+          entities: { appName: 'chrome' },
+          response: 'Opened chrome.'
+        };
+      }
+    };
+    const assistant = new Assistant({}, {
+      router,
+      learning: {
+        enabled: true,
+        askForFeedback: true,
+        findCorrection: () => null,
+        learnFromText: () => null,
+        recordFeedback: () => {},
+        shouldAskForFeedback: () => true,
+        recordFeedbackPrompt: () => {}
+      },
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    await assistant.processCommand('open chrome');
+    const result = await assistant.processCommand('yesopen chrome');
+
+    assert.equal(result.success, true);
+    assert.deepEqual(routedInputs, ['open chrome', 'open chrome']);
+  });
+
+  it('should only remember a correction after the corrected command succeeds', async function() {
+    const learnedRules = [];
+    const router = {
+      process: async input => ({
+        commandId: `cmd-${input}`,
+        success: input !== 'open missing app',
+        intent: 'app.open',
+        confidence: 1,
+        entities: { appName: input.replace(/^open\s+/, '') },
+        response: input === 'open missing app' ? 'Could not open missing app.' : 'Opened app.'
+      })
+    };
+    const assistant = new Assistant({}, {
+      router,
+      learning: {
+        enabled: true,
+        askForFeedback: true,
+        findCorrection: () => null,
+        learnFromText: () => null,
+        rememberCorrection: (input, correction) => {
+          learnedRules.push({ input, correction });
+          return { input, correction };
+        },
+        recordFeedback: () => {},
+        shouldAskForFeedback: () => true,
+        recordFeedbackPrompt: () => {}
+      },
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    await assistant.processCommand('open photos');
+    const result = await assistant.processCommand('no, open missing app');
+
+    assert.equal(result.success, false);
+    assert.equal(result.learned, false);
+    assert.deepEqual(learnedRules, []);
+  });
+
+  it('should turn plain negative outcome reports into active learning recovery', async function() {
+    const feedback = [];
+    const learnedRules = [];
+    const routedInputs = [];
+    const router = {
+      process: async input => {
+        routedInputs.push(input);
+        const isCloseTab = /close\s+(?:the\s+)?(?:empty\s+)?tab/i.test(input);
+        return {
+          commandId: `cmd-${routedInputs.length}`,
+          success: true,
+          intent: isCloseTab ? 'browser.closeTab' : 'browser.open',
+          confidence: 1,
+          entities: isCloseTab ? { browserName: 'chrome' } : { url: 'about:blank' },
+          response: isCloseTab ? 'Closed tab.' : 'Opened blank tab.'
+        };
+      }
+    };
+    const assistant = new Assistant({}, {
+      router,
+      learning: {
+        enabled: true,
+        askForFeedback: false,
+        findCorrection: () => null,
+        learnFromText: () => null,
+        recordFeedback: entry => feedback.push(entry),
+        rememberCorrection: (input, correction) => {
+          learnedRules.push({ input, correction });
+          return { input, correction };
+        }
+      },
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    await assistant.processCommand('open a new tab in chrome');
+    const recovery = await assistant.processCommand('you did wrong');
+    const corrected = await assistant.processCommand('close the empty tab in chrome');
+
+    assert.equal(recovery.success, false);
+    assert.match(recovery.response, /What should I do instead next time/i);
+    assert.equal(corrected.success, true);
+    assert.deepEqual(learnedRules, [{
+      input: 'open a new tab in chrome',
+      correction: 'close empty tab in chrome'
+    }]);
+    assert.equal(feedback.some(entry => entry.rating === 'negative'), true);
+  });
+
+  it('should answer remembered personal facts without web search', async function() {
+    const ActiveLearningStore = require('../../core/assistant/learning/index');
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-learning-'));
+    const learning = new ActiveLearningStore({
+      app: { dataDir: tempDir },
+      activeLearning: { enabled: true, askForFeedback: false }
+    });
+    const routedInputs = [];
+    const router = {
+      process: async input => {
+        routedInputs.push(input);
+        return {
+          commandId: 'cmd-search',
+          success: true,
+          intent: 'browser.search',
+          entities: { query: input },
+          response: 'Searched web.'
+        };
+      }
+    };
+    const assistant = new Assistant({}, {
+      router,
+      learning,
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    const before = await assistant.processCommand('what is my name');
+    const remember = await assistant.processCommand('remember my name is rakes');
+    const after = await assistant.processCommand('what is my name');
+
+    assert.equal(before.intent, 'assistant.memory');
+    assert.equal(before.success, false);
+    assert.match(before.response, /do not know your name/i);
+    assert.equal(remember.learned, true);
+    assert.match(after.response, /your name is rakes/i);
+    assert.deepEqual(routedInputs, []);
+  });
+
+  it('should vary conversational greetings by user phrasing', async function() {
+    const assistant = new Assistant({}, {
+      automation: {
+        execute: async () => ({ success: true, data: {} })
+      },
+      eventBus: { publish() {} }
+    });
+
+    const morning = await assistant.processCommand('good morning');
+    const hello = await assistant.processCommand('hello');
+    const hi = await assistant.processCommand('hi');
+    const wellbeing = await assistant.processCommand('how are you');
+
+    assert.equal(morning.intent, 'greeting');
+    assert.equal(hello.intent, 'greeting');
+    assert.equal(hi.intent, 'greeting');
+    assert.equal(wellbeing.intent, 'greeting');
+    assert.notEqual(morning.response, hello.response);
+    assert.notEqual(hello.response, hi.response);
+    assert.notEqual(hello.response, wellbeing.response);
+  });
+
+  it('should keep validation and verification evidence in command context', async function() {
+    const router = {
+      process: async () => ({
+        commandId: 'cmd-verified-file',
+        success: true,
+        intent: 'file.create',
+        confidence: 1,
+        entities: { filename: 'report.txt' },
+        languageUnderstanding: { status: 'passed', intent: 'file.create' },
+        validation: { status: 'passed', check: 'required-entities' },
+        verification: { status: 'passed', check: 'file-exists' },
+        response: 'Created report.txt.'
+      })
+    };
+    const assistant = new Assistant({}, {
+      router,
+      learning: { enabled: false },
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    await assistant.processCommand('create report.txt');
+    const history = assistant.getContext().getHistory(1);
+    const summary = assistant.getContext().getConversationSummary();
+
+    assert.equal(history[0].validation.status, 'passed');
+    assert.equal(history[0].languageUnderstanding.status, 'passed');
+    assert.equal(history[0].verification.check, 'file-exists');
+    assert.equal(summary.verifiedCommands, 1);
+    assert.equal(summary.failedVerificationCommands, 0);
   });
 });

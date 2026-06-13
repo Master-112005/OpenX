@@ -63,6 +63,14 @@ function humanizeError(error) {
   if (lowered.includes('mode has no apps or commands configured')) return 'That mode does not have any apps or commands configured yet';
   if (lowered.includes('mode has no apps configured')) return 'That mode does not have any apps configured yet';
   if (lowered.includes('some mode apps failed')) return 'I started the mode, but one or more apps could not be opened';
+  if (lowered.includes('expected file was not found')) return 'I could not verify that the file was created';
+  if (lowered.includes('destination file was not found')) return 'I could not verify that the file reached the destination';
+  if (lowered.includes('source file still exists after move')) return 'I could not verify the move because the original file is still there';
+  if (lowered.includes('expected folder was not found')) return 'I could not verify that the folder exists';
+  if (lowered.includes('destination folder was not found')) return 'I could not verify that the folder reached the destination';
+  if (lowered.includes('source folder still exists after move')) return 'I could not verify the folder move because the original folder is still there';
+  if (lowered.includes('still appears to be open')) return message;
+  if (lowered.includes('could not verify')) return message;
   if (lowered.includes('file not found')) return 'Unable to find that file';
   if (lowered.includes('folder not found')) return 'Unable to find that folder';
   if (lowered.includes('source not found')) return 'Unable to find the source item';
@@ -80,6 +88,8 @@ function humanizeError(error) {
   if (lowered.includes('could not schedule')) return 'I could not schedule that right now';
   if (lowered.includes('contact not found')) return 'I could not find that contact in the assistant contact book';
   if (lowered.includes('contact does not have a phone number')) return 'That contact does not have a phone number saved';
+  if (lowered.includes('contact does not have an email address')) return 'I found the contact, but there is no email address saved for them';
+  if (lowered.includes('email draft needs')) return message;
   if (lowered.includes('messaging platform not supported')) return 'That messaging platform is not supported yet';
   if (lowered.includes('direct whatsapp calling is not supported')) return 'Direct WhatsApp calling is not available through this assistant yet';
   if (lowered.includes('whatsapp desktop automation failed')) return 'I could not complete the WhatsApp desktop action';
@@ -180,16 +190,16 @@ const RESPONSE_BUILDERS = {
     'app.open': context => {
       const name = valueFromContext(context, 'appName');
       return chooseVariant(`app.open:${name}`, [
-        `Opening ${name} now.`,
+        `Opening ${name}.`,
         `Launching ${name}.`,
-        `${name} is opening now.`
+        `${name} is coming up.`
       ]);
     },
     'app.close': context => {
       const name = valueFromContext(context, 'appName');
       return chooseVariant(`app.close:${name}`, [
-        `${name} has been closed.`,
-        `Closing ${name} now.`,
+        `${name} is closed.`,
+        `Closing ${name}.`,
         `Closed ${name}.`
       ]);
     },
@@ -279,9 +289,41 @@ const RESPONSE_BUILDERS = {
     },
     'file.search': context => {
       const count = valueFromContext(context, 'count', context.result?.data?.count || 0);
-      return count === 0
-        ? `I couldn't find any matching files.`
-        : `I've found ${count} matching ${count === 1 ? 'file' : 'files'}.`;
+      const entries = valueFromContext(context, 'entries', context.result?.data?.entries || []);
+      if (count === 0) {
+        return `I couldn't find a matching file or folder.`;
+      }
+
+      const names = Array.isArray(entries)
+        ? entries.slice(0, 5).map(entry => `${entry.name}${entry.type === 'folder' ? ' folder' : ''}`).join(', ')
+        : '';
+      const label = count === 1 ? 'item' : 'items';
+      return names
+        ? `I found ${count} matching ${label}: ${names}.`
+        : `I found ${count} matching ${label}.`;
+    },
+    'file.smartFind': context => {
+      const count = valueFromContext(context, 'count', context.result?.data?.count || 0);
+      const entries = valueFromContext(context, 'entries', context.result?.data?.entries || []);
+      const opened = valueFromContext(context, 'opened', context.result?.data?.opened || null);
+      const duplicates = valueFromContext(context, 'duplicates', context.result?.data?.duplicates || []);
+
+      if (opened?.name) {
+        return `Opening "${opened.name}" from ${pathLabel(opened.path) || path.dirname(opened.path)}.`;
+      }
+
+      if (Array.isArray(duplicates) && duplicates.length > 0) {
+        const first = duplicates[0].map(item => item.name).join(', ');
+        return `I found ${duplicates.length} possible duplicate group${duplicates.length === 1 ? '' : 's'}. First group: ${first}.`;
+      }
+
+      if (!count || !Array.isArray(entries) || entries.length === 0) {
+        return 'I could not find matching local files for that request.';
+      }
+
+      const names = entries.slice(0, 5).map(entry => `${entry.name}${entry.sizeMB ? ` (${entry.sizeMB} MB)` : ''}`).join(', ');
+      const label = count === 1 ? 'file' : 'files';
+      return `I found ${count} matching ${label}: ${names}.`;
     },
     'file.list': context => {
       const entries = valueFromContext(context, 'entries', []);
@@ -355,15 +397,22 @@ const RESPONSE_BUILDERS = {
         const top = results[0];
         const snippet = top.snippet || top.title || '';
         return snippet
-          ? `I found this for "${query}": ${snippet}`
+          ? `Here's what I found for "${query}": ${snippet}`
           : `I found results for "${query}".`;
       }
 
       return chooseVariant(`browser.search:${query}`, [
-        `I searched the web for "${query}".`,
-        `I looked that up in the background: "${query}".`,
-        `I checked the web for "${query}".`
+        `I checked the web for "${query}".`,
+        `I looked that up in the background.`,
+        `I searched for "${query}".`
       ]);
+    },
+    'browser.siteSearch': context => {
+      const site = valueFromContext(context, 'site', 'that site');
+      const query = valueFromContext(context, 'query', '');
+      return query
+        ? `Searching ${site} for "${query}".`
+        : `Opening ${site}.`;
     },
     'browser.openFirstResult': context => {
       const title = valueFromContext(context, 'title', '');
@@ -373,9 +422,35 @@ const RESPONSE_BUILDERS = {
       }
       return url ? `Opening the first search result: ${url}.` : 'Opening the first search result.';
     },
+    'browser.closeTab': context => {
+      const win = valueFromContext(context, 'matchedWindow', 'the browser');
+      const query = valueFromContext(context, 'tabQuery', '');
+      const closedCount = valueFromContext(context, 'closedCount', 1);
+      if (query) {
+        return closedCount > 1
+          ? `Closed ${closedCount} ${query} tabs in ${win}.`
+          : `Closed the ${query} tab in ${win}.`;
+      }
+      return chooseVariant(`browser.closeTab:${win}`, [
+        `Closed the current tab in ${win}.`,
+        `Closed that browser tab.`,
+        `The current browser tab is closed.`
+      ]);
+    },
+    'browser.listTabs': context => {
+      const tabs = valueFromContext(context, 'tabs', []);
+      const count = valueFromContext(context, 'count', 0);
+      const browserName = valueFromContext(context, 'browserName', 'browser');
+      if (!count || !Array.isArray(tabs) || tabs.length === 0) {
+        return `I do not see any visible ${browserName} tabs right now.`;
+      }
+      const names = tabs.slice(0, 6).map(tab => tab.title || tab.rawTitle).filter(Boolean).join(', ');
+      const more = count > 6 ? `, and ${count - 6} more` : '';
+      return `I can see ${count} visible ${browserName} tab${count === 1 ? '' : 's'}: ${names}${more}.`;
+    },
     'system.time': context => {
       const time = valueFromContext(context, 'time');
-      return time ? `The time is ${time}.` : 'I could not read the current time.';
+      return time ? `It's ${time}.` : 'I could not read the current time.';
     },
     'system.date': context => {
       const date = valueFromContext(context, 'date');
@@ -384,7 +459,7 @@ const RESPONSE_BUILDERS = {
     'system.calculate': context => {
       const result = valueFromContext(context, 'result');
       return result !== '' && result !== null && result !== undefined
-        ? `The answer is ${result}.`
+        ? `That is ${result}.`
         : 'I could not calculate that.';
     },
     'system.screenshot': context => {
@@ -408,11 +483,11 @@ const RESPONSE_BUILDERS = {
       }
       return `Now playing "${query}" on ${displayName}.`;
     },
-    'media.next': () => 'Skipped to the next track.',
-    'media.previous': () => 'Moved back to the previous track.',
-    'media.pause': () => 'Playback is paused.',
-    'media.resume': () => 'Playback has resumed.',
-    'media.stop': () => 'Playback is stopped.',
+    'media.next': () => 'Skipping to the next track.',
+    'media.previous': () => 'Going back to the previous track.',
+    'media.pause': () => 'Paused.',
+    'media.resume': () => 'Resuming playback.',
+    'media.stop': () => 'Stopped playback.',
     'media.search': context => {
       const query = valueFromContext(context, 'query', valueFromContext(context, 'mediaQuery', 'music'));
       const rawPlatform = valueFromContext(context, 'platform', valueFromContext(context, 'mediaPlatform', 'YouTube'));
@@ -430,6 +505,14 @@ const RESPONSE_BUILDERS = {
         return `I've prepared the WhatsApp message for ${contactName}. Please check it on your screen.`;
       }
       return `I've prepared the message for ${contactName} and it is ready for your review.`;
+    },
+    'email.compose': context => {
+      const contactName = valueFromContext(context, 'contactName');
+      const email = valueFromContext(context, 'email');
+      const subject = valueFromContext(context, 'subject', '');
+      return subject
+        ? `I've prepared an email draft to ${contactName} at ${email} with subject "${subject}". Please review it before sending.`
+        : `I found ${contactName}'s email address: ${email}. Tell me the subject and message to draft.`;
     },
     'call.start': context => {
       const contactName = valueFromContext(context, 'contactName');
@@ -511,6 +594,10 @@ const RESPONSE_BUILDERS = {
     },
     'system.battery': context => {
       const bat = valueFromContext(context, 'battery');
+      if (bat === 'N/A' || bat === undefined || bat === null || bat === '') {
+        const message = valueFromContext(context, 'message');
+        return message || 'No battery was detected.';
+      }
       return chooseVariant(`sys.battery:${bat}`, [
         `Battery is currently at ${bat}%.`,
         `Your battery level is ${bat}%.`,
@@ -529,11 +616,71 @@ const RESPONSE_BUILDERS = {
     },
     'system.processes': context => {
       const count = valueFromContext(context, 'count');
+      const target = valueFromContext(context, 'target', '');
+      const names = valueFromContext(context, 'names', []);
+      const queryApp = valueFromContext(context, 'queryApp', '');
+      const isOpen = valueFromContext(context, 'isOpen', null);
+      if (target === 'apps') {
+        if (queryApp) {
+          return isOpen
+            ? `${queryApp} is open.`
+            : `I do not see ${queryApp} open right now.`;
+        }
+        if (!count) {
+          return 'I do not see any visible apps open right now.';
+        }
+        const list = Array.isArray(names) && names.length > 0
+          ? `: ${names.join(', ')}`
+          : '';
+        return `I see ${count} visible app${count === 1 ? '' : 's'} running${list}.`;
+      }
       return chooseVariant(`sys.proc:${count}`, [
         `There are currently ${count} active processes running.`,
         `You've got ${count} active processes at the moment.`,
         `There are ${count} active processes right now.`
       ]);
+    },
+    'system.insight': context => {
+      const insightType = valueFromContext(context, 'insightType');
+      if (insightType === 'topMemoryApp' || insightType === 'topCpuProcess') {
+        const top = valueFromContext(context, 'top', context.result?.data?.top || null);
+        if (!top?.name) {
+          return 'I could not identify the top process right now.';
+        }
+        return insightType === 'topMemoryApp'
+          ? `${top.name} is using the most memory right now, about ${top.memoryMB} MB.`
+          : `${top.name} is the highest CPU process right now.`;
+      }
+
+      if (insightType === 'storageUsage') {
+        const folders = valueFromContext(context, 'folders', context.result?.data?.folders || []);
+        if (!Array.isArray(folders) || folders.length === 0) {
+          return 'I could not calculate folder storage usage right now.';
+        }
+        const summary = folders.slice(0, 3).map(folder => `${folder.name}: ${folder.sizeMB} MB`).join(', ');
+        return `The largest user folders are ${summary}.`;
+      }
+
+      if (insightType === 'recentlyInstalledApps') {
+        const apps = valueFromContext(context, 'apps', context.result?.data?.apps || []);
+        if (!Array.isArray(apps) || apps.length === 0) {
+          return 'I could not find recently installed applications.';
+        }
+        return `Recently installed applications include ${apps.slice(0, 5).map(app => app.name).join(', ')}.`;
+      }
+
+      if (insightType === 'systemSlowdown') {
+        const cpu = valueFromContext(context, 'cpu', context.result?.data?.cpu || null);
+        const memory = valueFromContext(context, 'memory', context.result?.data?.memory || null);
+        const parts = [];
+        if (cpu?.name) parts.push(`CPU: ${cpu.name}`);
+        if (memory?.name) parts.push(`memory: ${memory.name}`);
+        return parts.length > 0
+          ? `The likely pressure points are ${parts.join(', ')}.`
+          : 'I could not identify a clear slowdown source right now.';
+      }
+
+      return 'I checked the system insight.';
     },
     'system.bluetooth': context => {
       const enabled = valueFromContext(context, 'enabled', null);
@@ -579,16 +726,53 @@ const RESPONSE_BUILDERS = {
         `I've closed ${win} for you.`
       ]);
     },
-    'help': () => 'I can manage applications, open websites, handle files and folders, control playback, and adjust system settings. Tell me what you need.',
-    'greeting': () => chooseVariant('greeting', [
-      'Good day. How may I assist you?',
-      'Hello. What would you like me to do?',
-      'Ready when you are. Please give me your instruction.'
-    ]),
+    'help': () => 'I can open apps, search the web, manage files and folders, control media, and adjust system settings. Tell me the task in your own words.',
+    'greeting': context => {
+      const type = valueFromContext(context, 'greetingType', 'hello');
+      const input = valueFromContext(context, 'input', type);
+      const variantsByType = {
+        morning: [
+          'Good morning. What should we start with?',
+          'Good morning. I am ready when you are.',
+          'Morning. What can I help you with first?'
+        ],
+        afternoon: [
+          'Good afternoon. What would you like me to handle?',
+          'Good afternoon. I am ready to help.',
+          'Afternoon. What should I work on?'
+        ],
+        evening: [
+          'Good evening. What can I do for you?',
+          'Good evening. I am ready when you are.',
+          'Evening. What would you like handled?'
+        ],
+        wellbeing: [
+          'I am doing fine. What can I help with?',
+          'Doing well. What should I handle?',
+          'I am ready to help. What do you need?'
+        ],
+        hi: [
+          'Hi. What can I help with?',
+          'Hi. What do you need?',
+          'Hey. What should I handle?'
+        ],
+        hey: [
+          'Hey. What can I do for you?',
+          'Hey. What do you need?',
+          'I am here. What should I handle?'
+        ],
+        hello: [
+          'Hello. What can I help with?',
+          'Hello. What would you like me to do?',
+          'I am here. What should I handle?'
+        ]
+      };
+      return chooseVariant(`greeting:${type}:${input}`, variantsByType[type] || variantsByType.hello);
+    },
     'thanks': () => chooseVariant('thanks', [
       'You are welcome.',
-      'Glad to assist.',
-      'Always at your service.'
+      'No problem.',
+      'Anytime.'
     ]),
     default: () => 'Done.'
   },
@@ -597,9 +781,9 @@ const RESPONSE_BUILDERS = {
     unknownCommand: context => {
       const suggestions = Array.isArray(context?.suggestions) ? context.suggestions.filter(Boolean) : [];
       if (suggestions.length > 0) {
-        return `I could not confidently map that request to an action. Please rephrase it, or try: ${suggestions.join(', ')}`;
+        return `I am not sure which action you want. Try saying it another way, or try: ${suggestions.join(', ')}`;
       }
-      return 'I could not understand that clearly enough to take action. Please say it another way, or ask what I can do.';
+      return 'I am not sure what action you want. Please say it another way, or ask what I can do.';
     },
     executionFailed: context => humanizeError(context?.error),
     permissionDenied: () => 'I cannot do that with the current permission setting. You can change assistant permissions in Settings if you want me to act without asking.',
@@ -629,23 +813,18 @@ const RESPONSE_BUILDERS = {
     confirmRestart: () => 'Please confirm that you authorize the system to initiate a reboot',
     confirmAction: context => {
       const details = valueFromContext(context, 'details', valueFromContext(context, 'action'));
-      const intentId = valueFromContext(context, 'intent.id', context?.intent?.id || '');
-      const appName = valueFromContext(context, 'appName', context?.entities?.appName || '');
-      if (intentId === 'app.close' && appName) {
-        return `Please confirm: close ${appName}. Say yes to close it, or no to cancel.`;
-      }
-      return `Before I continue, please confirm this request: ${details}. Say yes to continue or no to cancel.`;
+      return `Before I do that, please confirm: ${details}. Say yes to continue or no to cancel.`;
     },
-    awaitingDecision: () => 'I am waiting for your decision. Please say proceed or cancel.',
+    awaitingDecision: () => 'Please say proceed or cancel.',
     cancelled: () => 'Understood. I have cancelled that action.',
     timedOut: () => 'The confirmation timed out, so I cancelled that request.',
     default: () => 'I need your confirmation before I proceed with that operation.'
   },
 
   info: {
-    listening: () => 'Listening now.',
-    processing: () => 'Working on that now.',
-    idle: () => 'Awaiting your next command.',
+    listening: () => 'Listening.',
+    processing: () => 'Working on it.',
+    idle: () => 'Ready when you are.',
     wakeWord: () => {
       const isTest = typeof global.it === 'function' || process.env.NODE_ENV === 'test';
       if (isTest) {

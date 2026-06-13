@@ -73,15 +73,21 @@ const CONFIG = {
       executablePath: 'bin/whisper/whisper-stream.exe',
       modelPath: 'models/whisper/ggml-small.en.bin',
       threads: 8,
+      captureDeviceId: -1,
       stepMs: 1000,
-      lengthMs: 8000,
-      keepMs: 500,
+      lengthMs: 12000,
+      keepMs: 1200,
       maxTokens: 32,
-      vadThreshold: 0.6,
+      audioContext: 0,
+      vadThreshold: 0.45,
       freqThreshold: 100,
       keepContext: false,
+      noFallback: true,
+      saveAudio: false,
       language: 'en',
-      finalDebounceMs: 1200,
+      finalDebounceMs: 1600,
+      incompleteUtteranceDebounceMs: 5000,
+      logRawOutput: true,
       maxRestarts: 3
     },
     recovery: {
@@ -117,6 +123,12 @@ const CONFIG = {
       company: '',
       role: ''
     }
+  },
+
+  activeLearning: {
+    enabled: true,
+    askForFeedback: true,
+    storePath: ''
   },
 
   permissions: {

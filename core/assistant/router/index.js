@@ -21,6 +21,7 @@ class ActionRouter {
     this.permissionValidator = new PermissionValidator(config);
     this.automationEngine = automationEngine;
     this.nlp = new NlpProcessor(this.intentRegistry);
+    this.learningStore = config?.learningStore || null;
     this.mediaUnderstanding = new MediaUnderstandingRouter({
       logging: config?.logging,
       contextProvider: config?.contextEngine || config?.contextProvider || null
@@ -74,11 +75,12 @@ class ActionRouter {
           input: rawCommandText,
           suggestions: this._suggestAlternatives(preparedInput)
         }),
-        normalizedInput: preparedInput.correctedText || parseResult.commandText
+        normalizedInput: preparedInput.correctedText || parseResult.commandText,
+        languageUnderstanding: this._buildLanguageUnderstanding(preparedInput, intentResult, [], 'failed')
       };
     }
 
-    return this._completeIntent(commandId, intentResult, rawCommandText, source);
+    return this._completeIntent(commandId, intentResult, rawCommandText, source, preparedInput);
   }
 
   _resolveIntent(rawCommandText, preparedInput, source) {
@@ -89,28 +91,31 @@ class ActionRouter {
     return (
       this._resolveExplicitReminderIntent(rawCommandText, preparedInput) ||
       this._resolveSystemSettingsIntent(rawCommandText, preparedInput) ||
+      this._resolveSystemInsightIntent(rawCommandText, preparedInput) ||
+      this._resolveWorkspaceSetupIntent(rawCommandText, preparedInput) ||
       this._resolveScreenshotIntent(rawCommandText, preparedInput) ||
+      this._resolveSmartFileIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitFileIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitFolderMoveIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitMediaControlIntent(rawCommandText, preparedInput) ||
       this._resolveMediaUnderstandingIntent(rawCommandText, source) ||
       this._resolveExplicitMediaIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitModeIntent(rawCommandText, preparedInput) ||
-      this._resolveLiveKnowledgeIntent(rawCommandText, preparedInput) ||
+      this._resolveBrowserTabIntent(rawCommandText, preparedInput) ||
+      this._resolveLocalInfoIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitAppIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitWindowIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitCommunicationIntent(rawCommandText, preparedInput) ||
       this._resolveBrowserFollowupIntent(rawCommandText, preparedInput) ||
-      this._resolveBrowserTabIntent(rawCommandText, preparedInput) ||
+      this._resolveSiteSearchIntent(rawCommandText, preparedInput) ||
+      this._resolvePersonalPhotoIntent(rawCommandText, preparedInput) ||
       this._resolveKnownWebOpenIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitOpenIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitAppOpenIntent(rawCommandText, preparedInput) ||
       this._resolveCalculationIntent(rawCommandText, preparedInput) ||
-      this._resolveLocalInfoIntent(rawCommandText, preparedInput) ||
       this._resolveLocalFileListIntent(rawCommandText, preparedInput) ||
       this._resolveAssistantConversationIntent(rawCommandText, preparedInput) ||
       this._resolveLocalFileSearchIntent(rawCommandText, preparedInput) ||
-      this._resolvePersonalPhotoIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitSearchIntent(rawCommandText, preparedInput) ||
       this._resolveBareKnowledgeSearchIntent(rawCommandText, preparedInput) ||
       this._resolveGeneralQuestionSearchIntent(rawCommandText, preparedInput) ||
@@ -118,20 +123,24 @@ class ActionRouter {
     );
   }
 
-  _isIncompleteCommand(rawText, preparedInput) {
-    const input = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
-    if (!input) {
-      return true;
-    }
-    return /^(?:show|show\s+me|open|close|find|search|look\s+up|play|set|turn|make|move|copy|delete|remove)\s*(?:me|it|that|this)?$/i.test(input);
-  }
-
-  async _completeIntent(commandId, intentResult, rawCommandText, source) {
-    const entities = intentResult.entities || this.entityExtractor.extract(
+  async _completeIntent(commandId, intentResult, rawCommandText, source, preparedInput = null) {
+    let entities = intentResult.entities || this.entityExtractor.extract(
       intentResult.intent,
       rawCommandText
     );
+    if (this.learningStore?.adaptEntities) {
+      entities = this.learningStore.adaptEntities(intentResult.intent.id, entities, {
+        rawCommandText,
+        source
+      });
+    }
     const missingRequired = this._checkRequiredEntities(intentResult.intent, entities);
+    const languageUnderstanding = this._buildLanguageUnderstanding(
+      preparedInput || this.nlp.prepare(rawCommandText),
+      intentResult,
+      missingRequired,
+      missingRequired.length > 0 ? 'incomplete' : 'passed'
+    );
 
     if (missingRequired.length > 0) {
       return {
@@ -144,7 +153,8 @@ class ActionRouter {
         }),
         intent: intentResult.intent.id,
         confidence: intentResult.confidence,
-        entities
+        entities,
+        languageUnderstanding
       };
     }
 
@@ -160,7 +170,8 @@ class ActionRouter {
         confidence: intentResult.confidence,
         entities,
         requiresConfirmation: permissionCheck.requiresConfirmation,
-        permissionLevel: intentResult.intent.permissionLevel
+        permissionLevel: intentResult.intent.permissionLevel,
+        languageUnderstanding
       };
     }
 
@@ -176,12 +187,12 @@ class ActionRouter {
         response: this._buildResponse('confirmation', 'confirmAction', {
           action: intentResult.intent.description,
           details: permissionCheck.confirmationMessage,
-          intent: intentResult.intent,
-          entities
-        })
+          intent: intentResult.intent
+        }),
+        languageUnderstanding
       };
     }
-    return this._execute(commandId, intentResult, entities, rawCommandText, source);
+    return this._execute(commandId, intentResult, entities, rawCommandText, source, languageUnderstanding);
   }
 
   _buildMultiCommandPlan(rawText, source) {
@@ -191,6 +202,12 @@ class ActionRouter {
     }
 
     if (this._looksLikeSingleMediaPlatformRequest(text)) {
+      return null;
+    }
+
+    const preparedWholeText = this.nlp.prepare(text);
+    const wholeLocalInfo = this._resolveLocalInfoIntent(text, preparedWholeText);
+    if (wholeLocalInfo?.intent?.id === 'system.processes' && wholeLocalInfo.entities?.queryApp) {
       return null;
     }
 
@@ -363,7 +380,7 @@ class ActionRouter {
     return this._execute(commandId, { intent, confidence: 1.0 }, entities, '', 'confirmation');
   }
 
-  async _execute(commandId, intentResult, entities, rawCommandText = '', source = 'chat') {
+  async _execute(commandId, intentResult, entities, rawCommandText = '', source = 'chat', languageUnderstanding = null) {
     try {
       const result = await this.automationEngine.execute(intentResult.intent.action, entities);
       this.logger.info(`Execution result: ${commandId}`, { success: result.success });
@@ -403,12 +420,18 @@ class ActionRouter {
           ? this._buildResponse('success', intentResult.intent.id, {
               entities,
               result: responseResult,
-              intent: intentResult.intent
+              intent: intentResult.intent,
+              input: rawCommandText,
+              source
             })
           : this._buildResponse('error', 'executionFailed', {
               error: result.error,
               intent: intentResult.intent
-            }),
+        }),
+        error: result.error || null,
+        languageUnderstanding,
+        validation: result.validation || result.data?.validation || null,
+        verification: result.verification || result.data?.verification || null,
         data: responseData || result.data || null
       };
     } catch (err) {
@@ -476,7 +499,34 @@ class ActionRouter {
     };
   }
 
+  _buildLanguageUnderstanding(preparedInput, intentResult, missingRequired = [], status = 'passed') {
+    const intent = intentResult?.intent || null;
+    const missing = Array.isArray(missingRequired) ? missingRequired : [];
+    return {
+      status,
+      normalizedText: preparedInput?.normalizedText || '',
+      correctedText: preparedInput?.correctedText || '',
+      intentText: preparedInput?.intentText || '',
+      queryType: preparedInput?.query?.type || 'unknown',
+      actionVerb: preparedInput?.query?.actionVerb || null,
+      intent: intent?.id || null,
+      action: intent?.action || null,
+      confidence: Number(intentResult?.confidence || 0),
+      missingEntities: missing,
+      validation: {
+        status: missing.length > 0 ? 'failed' : 'passed',
+        reason: missing.length > 0
+          ? `Missing required entities: ${missing.join(', ')}`
+          : 'Intent and required entities are complete'
+      }
+    };
+  }
+
   _shouldUseNoisyRepair(preparedInput, rawText, source) {
+    if (/\b(?:setup|session|workspace|focus\s+mode|everything\s+i\s+need|apps?\s+i\s+use)\b/i.test(String(rawText || ''))) {
+      return false;
+    }
+
     if (/^\s*(?:what|who|when|where|why|how|which)\b/i.test(String(rawText || ''))) {
       return false;
     }
@@ -486,6 +536,10 @@ class ActionRouter {
     }
 
     if (/^\s*(?:open|show|search|look\s+up|google)\b.*\b(?:in|on)\s+(?:chrome|browser|edge|firefox)\s*$/i.test(String(rawText || ''))) {
+      return false;
+    }
+
+    if (this._resolveLocalInfoIntent(rawText, preparedInput)) {
       return false;
     }
 
@@ -682,6 +736,182 @@ class ActionRouter {
     return intent ? { intent, confidence: 1, entities: {} } : null;
   }
 
+  _resolveWorkspaceSetupIntent(rawText, preparedInput) {
+    const corrected = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
+    const raw = String(rawText || corrected || '').trim().toLowerCase();
+    const input = `${raw} ${corrected}`.replace(/\s+/g, ' ').trim();
+    if (!input) {
+      return null;
+    }
+
+    const modeIntent = this.intentRegistry.get('mode.start');
+    const appIntent = this.intentRegistry.get('app.open');
+    if (/\b(?:app|application)\s+i\s+use\s+most\s+for\s+coding\b/.test(raw) ||
+      /\b(?:app|application)\s+i\s+use\s+most\s+for\s+coding\b/.test(corrected)) {
+      return appIntent
+        ? { intent: appIntent, confidence: 0.98, entities: { appName: 'code' } }
+        : null;
+    }
+
+    const modeMap = [
+      { modeName: 'development', pattern: /\b(?:coding|development|developer|project)\b/ },
+      { modeName: 'work', pattern: /\b(?:work\s+setup|workspace|work\s+session)\b/ },
+      { modeName: 'study', pattern: /\b(?:study\s+session|study\s+setup)\b/ },
+      { modeName: 'focus', pattern: /\b(?:focus\s+mode|close\s+distractions|prepare\s+my\s+workspace)\b/ },
+      { modeName: 'communication', pattern: /\b(?:communication\s+apps?|chat\s+apps?|messaging\s+apps?)\b/ },
+      { modeName: 'daily', pattern: /\b(?:apps?\s+i\s+use\s+daily|daily\s+apps?)\b/ }
+    ];
+
+    if (!/\b(?:open|start|prepare|launch|activate|close)\b/.test(input) &&
+      !/\b(?:focus\s+mode|close\s+distractions)\b/.test(input)) {
+      return null;
+    }
+
+    const matched = modeMap.find(entry => entry.pattern.test(input));
+    return matched && modeIntent
+      ? { intent: modeIntent, confidence: 0.96, entities: { modeName: matched.modeName } }
+      : null;
+  }
+
+  _resolveSystemInsightIntent(rawText, preparedInput) {
+    const input = this._normalizeSystemCommandText(preparedInput?.correctedText || rawText);
+    const intent = this.intentRegistry.get('system.insight');
+    if (!intent || !input) {
+      return null;
+    }
+
+    if (/\b(?:which|what)\b.*\b(?:app|process)\b.*\b(?:most\s+memory|using\s+the\s+most\s+memory|memory)\b/.test(input)) {
+      return { intent, confidence: 1, entities: { insightType: 'topMemoryApp' } };
+    }
+
+    if (/\b(?:which|what)\b.*\b(?:process|app)\b.*\b(?:most\s+cpu|cpu)\b|\bconsuming\s+the\s+most\s+cpu\b/.test(input)) {
+      return { intent, confidence: 1, entities: { insightType: 'topCpuProcess' } };
+    }
+
+    if (/\b(?:slowing\s+down|fan\s+running|fan\s+so\s+fast|computer\s+slow|laptop\s+slow)\b/.test(input)) {
+      return { intent, confidence: 1, entities: { insightType: 'systemSlowdown' } };
+    }
+
+    if (/\b(?:taking\s+up\s+space|storage\s+usage|what\s+uses\s+space|largest\s+folders?)\b/.test(input)) {
+      return { intent, confidence: 1, entities: { insightType: 'storageUsage' } };
+    }
+
+    if (/\b(?:recently|newly|last)\s+installed\s+(?:apps?|applications?|programs?)\b/.test(input)) {
+      return { intent, confidence: 1, entities: { insightType: 'recentlyInstalledApps' } };
+    }
+
+    return null;
+  }
+
+  _resolveSmartFileIntent(rawText, preparedInput) {
+    const corrected = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
+    const raw = String(rawText || corrected || '').trim().toLowerCase();
+    const input = `${raw} ${corrected}`.replace(/\s+/g, ' ').trim();
+    if (!input) {
+      return null;
+    }
+
+    if (/[^\s]+\.[A-Za-z0-9]{1,10}\b/.test(input)) {
+      return null;
+    }
+
+    const hasFileCue = /\b(?:file|files|pdf|pdfs|document|documents|resume|resumes|screenshot|screenshots|image|images|photo|photos|picture|pictures|presentation|presentations|download|downloaded|downloads|interview|interviews|project|projects|shortcut|shortcuts)\b/.test(input);
+    const hasSmartCue = /\b(?:newest|latest|largest|recent|recently|edited|modified|opened|downloaded|created|today|yesterday|morning|last\s+week|6\s+months|duplicate|duplicates|contains|containing|mentioning|related\s+to|where\s+did|where\s+is|save|saved|worked\s+on)\b/.test(input);
+    if (!hasFileCue || !hasSmartCue) {
+      return null;
+    }
+
+    const intent = this.intentRegistry.get('file.smartFind');
+    if (!intent) {
+      return null;
+    }
+
+    const entities = this._buildSmartFileEntities(input);
+    return entities
+      ? { intent, confidence: 0.98, entities }
+      : null;
+  }
+
+  _buildSmartFileEntities(input) {
+    const entities = {
+      query: '',
+      location: this._extractSmartFileLocation(input),
+      fileType: this._extractSmartFileType(input),
+      sortBy: this._extractSmartFileSort(input),
+      timeFilter: this._extractSmartFileTime(input),
+      openResult: /\b(?:open|play|watch)\b/.test(input),
+      groupDuplicates: /\bduplicates?\b/.test(input)
+    };
+
+    entities.query = this._extractSmartFileQuery(input, entities);
+    if (!entities.query && /\bresumes?\b/.test(input)) {
+      entities.query = 'resume';
+    }
+    if (!entities.query && /\binterviews?\b/.test(input)) {
+      entities.query = 'interview';
+    }
+    if (!entities.query && /\bopenx\b/.test(input)) {
+      entities.query = 'openx';
+    }
+
+    return entities;
+  }
+
+  _extractSmartFileLocation(input) {
+    if (/\bdownloads?\b/.test(input)) return 'downloads';
+    if (/\bdesktop\b/.test(input)) return 'desktop';
+    if (/\bdocuments?\b/.test(input)) return 'documents';
+    if (/\bpictures?|photos?\b/.test(input)) return 'pictures';
+    if (/\bvideos?\b/.test(input)) return 'videos';
+    if (/\bmusic\b/.test(input)) return 'music';
+    return '';
+  }
+
+  _extractSmartFileType(input) {
+    if (/\bpdfs?\b/.test(input)) return 'pdf';
+    if (/\b(?:images?|photos?|pictures?|screenshots?)\b/.test(input)) return 'image';
+    if (/\b(?:videos?|movies?)\b/.test(input)) return 'video';
+    if (/\b(?:songs?|music|audio)\b/.test(input)) return 'audio';
+    if (/\b(?:presentations?|slides?)\b/.test(input)) return 'presentation';
+    if (/\b(?:zip|archive)\b/.test(input)) return 'archive';
+    if (/\b(?:documents?|resume|resumes)\b/.test(input)) return 'document';
+    return '';
+  }
+
+  _extractSmartFileSort(input) {
+    if (/\blargest\b|\bbigger\b|\bmore\s+than\s+\d+\s*(?:mb|gb)\b/.test(input)) return 'sizeDesc';
+    if (/\bcreated\b|\bdownloaded\b/.test(input)) return 'createdDesc';
+    if (/\bopened\b|\baccessed\b/.test(input)) return 'accessedAsc';
+    return 'modifiedDesc';
+  }
+
+  _extractSmartFileTime(input) {
+    if (/\btoday\b/.test(input)) return 'today';
+    if (/\byesterday\b/.test(input)) return 'yesterday';
+    if (/\bthis\s+morning\b|\bmorning\b/.test(input)) return 'thisMorning';
+    if (/\blast\s+week\b/.test(input)) return 'lastWeek';
+    if (/\b6\s+months\b|\bsix\s+months\b/.test(input)) return 'olderThan6MonthsAccess';
+    return '';
+  }
+
+  _extractSmartFileQuery(input, entities) {
+    if (/\bscreenshots?\b/.test(input)) return 'screenshot';
+    if (/\bresumes?\b/.test(input)) return 'resume';
+    if (/\binterviews?\b/.test(input)) return 'interview';
+    if (/\bproject\s+files?\b/.test(input)) return 'project';
+    if (/\bapi\s+keys?\b/.test(input)) return 'api key';
+    const afterFor = input.match(/\b(?:for|containing|mentioning|related\s+to)\s+([a-z0-9 ._-]+)$/i);
+    if (afterFor?.[1]) {
+      return afterFor[1]
+        .replace(/\b(?:on|in)\s+(?:my\s+)?(?:computer|pc|downloads?|documents?|desktop|folder|folders)$/i, '')
+        .trim();
+    }
+    if (entities.fileType || entities.timeFilter || entities.sortBy !== 'modifiedDesc' || entities.groupDuplicates) {
+      return '';
+    }
+    return '';
+  }
+
   _resolveExplicitFolderMoveIntent(rawText, preparedInput) {
     const correctedText = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
     if (!correctedText) {
@@ -733,7 +963,8 @@ class ActionRouter {
       { intentId: 'file.search', pattern: /^(?:locate|find|search)\b/ }
     ];
 
-    if (!/\b(?:file|files|folder|folders|location|path|pdf|pdfs|document|documents|downloaded|downloads?|duplicate|duplicates)\b|[^\s]+\.[A-Za-z0-9]{1,10}\b/i.test(`${input} ${rawText || ''}`)) {
+    const canBeImplicitLocate = /^(?:locate)\b/.test(input) && this._extractLocalFileSearchQuery(rawText || input, input);
+    if (!canBeImplicitLocate && !/\b(?:file|location|path)\b|[^\s]+\.[A-Za-z0-9]{1,10}\b/i.test(`${input} ${rawText || ''}`)) {
       return null;
     }
 
@@ -753,6 +984,9 @@ class ActionRouter {
       }
       if (correctedEntities.path && correctedEntities.path !== rawEntities.path) {
         entities.path = correctedEntities.path;
+      }
+      if (config.intentId === 'file.search') {
+        entities.query = this._extractLocalFileSearchQuery(rawText, input) || entities.query;
       }
       const missing = this._checkRequiredEntities(intent, entities);
       if (missing.length === 0) {
@@ -949,6 +1183,14 @@ class ActionRouter {
     if (!input) return null;
 
     const lower = input.toLowerCase();
+    const emailIntent = this.intentRegistry.get('email.compose');
+    if (emailIntent && /^(?:send\s+)?(?:email|mail)\b/i.test(lower)) {
+      const entities = this._extractEmailComposeEntities(rawText);
+      if (entities.contactName) {
+        return { intent: emailIntent, confidence: 1, entities };
+      }
+    }
+
     const messageIntent = this.intentRegistry.get('message.send');
     if (messageIntent && /^(?:say|send|message|text|ask|tell|msg|massage)\b/i.test(lower)) {
       const entities = this.entityExtractor.extract(messageIntent, rawText);
@@ -1092,19 +1334,259 @@ class ActionRouter {
   }
 
   _resolveBrowserTabIntent(rawText, preparedInput) {
-    const input = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
-    if (!/^(?:open\s+)?(?:a\s+)?new\s+tab(?:\s+(?:in|on)\s+(?:chrome|browser|edge|firefox))?$/.test(input)) {
+    const input = String(preparedInput?.correctedText || rawText || '')
+      .trim()
+      .toLowerCase()
+      .replace(/\bphotes\b/g, 'photos')
+      .replace(/\bchromem\b/g, 'chrome')
+      .replace(/\bchromme\b/g, 'chrome')
+      .replace(/\bchrom\b/g, 'chrome')
+      .replace(/\btaqbs?\b/g, 'tabs');
+    const rawInput = String(rawText || '')
+      .trim()
+      .toLowerCase()
+      .replace(/\bphotes\b/g, 'photos')
+      .replace(/\bchromem\b/g, 'chrome')
+      .replace(/\bchromme\b/g, 'chrome')
+      .replace(/\bchrom\b/g, 'chrome')
+      .replace(/\btaqbs?\b/g, 'tabs');
+    const tabInput = `${input} ${rawInput}`.replace(/\s+/g, ' ').trim();
+    const browserMatch = (tabInput.match(/\b(?:in|on)\s+(chrome|browser|edge|firefox)\b/));
+
+    if (
+      /^(?:what|which|show|list|tell)\b/.test(input) &&
+      /\btabs?\b/.test(tabInput) &&
+      /\b(?:open|opened|active|running|in|on|chrome|browser|edge|firefox)\b/.test(tabInput)
+    ) {
+      const intent = this.intentRegistry.get('browser.listTabs');
+      return intent
+        ? {
+            intent,
+            confidence: 1,
+            entities: {
+              browserName: browserMatch?.[1] || 'browser'
+            }
+          }
+        : null;
+    }
+
+    if (/^(?:open\s+)?(?:a\s+)?new\s+tab(?:\s+(?:in|on)\s+(?:chrome|browser|edge|firefox))?$/.test(input)) {
+      const intent = this.intentRegistry.get('browser.open');
+      return intent
+        ? { intent, confidence: 1, entities: { url: 'about:blank' } }
+        : null;
+    }
+
+    const targetedClose = input.match(/^(?:close|remove|shut)\s+(?:the\s+)?(.+?)\s+tabs?(?:\s+(?:in|on)\s+(chrome|browser|edge|firefox))?$/i);
+    if (targetedClose?.[1]) {
+      const tabQuery = this._normalizeBrowserTabQuery(targetedClose[1]);
+      if (/^(?:current|active|empty|blank|first|1|one|selected|this)$/.test(tabQuery)) {
+        const intent = this.intentRegistry.get('browser.closeTab');
+        return intent
+          ? {
+              intent,
+              confidence: 1,
+              entities: {
+                browserName: targetedClose[2] || browserMatch?.[1] || 'browser'
+              }
+            }
+          : null;
+      }
+
+      if (tabQuery) {
+        const intent = this.intentRegistry.get('browser.closeTab');
+        return intent
+          ? {
+              intent,
+              confidence: 1,
+              entities: {
+                browserName: targetedClose[2] || browserMatch?.[1] || 'browser',
+                tabQuery
+              }
+            }
+          : null;
+      }
+    }
+
+    if (!/^(?:close|remove|shut)\s+(?:(?:the\s+)?(?:current|active|empty|blank|first|1|one|selected|this)\s+)?tab(?:\s+(?:in|on)\s+(?:chrome|browser|edge|firefox))?$/.test(input)) {
       return null;
     }
 
-    const intent = this.intentRegistry.get('browser.open');
+    const intent = this.intentRegistry.get('browser.closeTab');
     return intent
-      ? { intent, confidence: 1, entities: { url: 'about:blank' } }
-      : null;
+      ? {
+          intent,
+          confidence: 1,
+          entities: {
+            browserName: browserMatch?.[1] || 'browser'
+          }
+        }
+        : null;
+  }
+
+  _normalizeBrowserTabQuery(value) {
+    const cleaned = String(value || '')
+      .toLowerCase()
+      .replace(/\bphotes\b/g, 'photos')
+      .replace(/\bgoogle\s+photo\b/g, 'google photos')
+      .replace(/^(?:the|a|an)\s+/i, '')
+      .replace(/\s+(?:tab|tabs|page|pages)$/i, '')
+      .trim();
+    if (!cleaned || /^(?:tab|tabs|page|pages)$/.test(cleaned)) {
+      return '';
+    }
+    if (/^(?:first|1|one|current|active|selected|this|empty|blank)$/.test(cleaned)) {
+      return cleaned;
+    }
+    return this._normalizeKnownWebTarget(cleaned) || cleaned;
+  }
+
+  _extractEmailComposeEntities(input) {
+    const source = String(input || '').trim();
+    const normalized = source
+      .replace(/^send\s+(?:an?\s+)?(?:email|mail)\s+/i, 'email ')
+      .replace(/^mail\s+/i, 'email ')
+      .trim();
+    const contactMatch = normalized.match(/^email\s+(?:to\s+)?(.+?)(?:\s+(?:about|regarding|with\s+subject|subject)\s+(.+?))?(?:\s+(?:saying|body|message|that|and\s+say)\s+(.+))?$/i);
+    if (!contactMatch?.[1]) {
+      return {};
+    }
+
+    const contactName = contactMatch[1]
+      .replace(/\s+(?:please|now)$/i, '')
+      .trim();
+    const subject = String(contactMatch[2] || '').trim();
+    const body = String(contactMatch[3] || '').trim();
+    return {
+      contactName,
+      subject,
+      body
+    };
+  }
+
+  _resolveSiteSearchIntent(rawText, preparedInput) {
+    const corrected = String(preparedInput?.correctedText || rawText || '').trim();
+    const raw = String(rawText || corrected || '').trim();
+    const candidates = [corrected, raw].filter(Boolean);
+    const intent = this.intentRegistry.get('browser.siteSearch');
+    if (!intent) {
+      return null;
+    }
+
+    const personalEmail = String(rawText || corrected || '')
+      .toLowerCase()
+      .replace(/\s+/g, ' ')
+      .trim()
+      .match(/^(?:search|find|show)\s+(?:my\s+)?emails?\s+(?:for|from|about)\s+(.+)$/i);
+    if (personalEmail?.[1]) {
+      return {
+        intent,
+        confidence: 1,
+        entities: {
+          site: 'gmail',
+          query: personalEmail[1].trim()
+        }
+      };
+    }
+
+    for (const candidate of candidates) {
+      const parsed = this._extractSiteSearch(candidate);
+      if (parsed) {
+        return {
+          intent,
+          confidence: 1,
+          entities: parsed
+        };
+      }
+    }
+
+    return null;
+  }
+
+  _extractSiteSearch(input) {
+    const normalized = String(input || '')
+      .toLowerCase()
+      .replace(/\bphotes\b/g, 'photos')
+      .replace(/\bfo\b/g, 'for')
+      .replace(/\bclass\s+mates\b/g, 'classmates')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const sitePattern = '(google photos?|photos|youtube|you tube|gmail|google mail|mail|google drive|drive|google maps?|maps|chrome settings?|browser settings|chatgpt|chat gpt)';
+    const patterns = [
+      new RegExp(`^(?:in|on|inside)\\s+${sitePattern}\\s+(?:search|find|look\\s+for|look\\s+up)\\s+(?:for\\s+)?(.+)$`, 'i'),
+      new RegExp(`^(?:search|find|look\\s+for|look\\s+up|google)\\s+(?:for\\s+)?(.+?)\\s+(?:in|on|inside)\\s+${sitePattern}$`, 'i'),
+      new RegExp(`^(?:search|find|look\\s+for|look\\s+up)\\s+${sitePattern}\\s+(?:for\\s+)?(.+)$`, 'i'),
+      new RegExp(`^(?:open|show|go\\s+to)\\s+${sitePattern}\\s+(?:and\\s+)?(?:search|find|look\\s+for)\\s+(?:for\\s+)?(.+)$`, 'i')
+    ];
+
+    for (const pattern of patterns) {
+      const match = normalized.match(pattern);
+      if (!match) {
+        continue;
+      }
+
+      const groups = match.slice(1).filter(Boolean);
+      const site = groups.find(value => this._normalizeSiteSearchTarget(value));
+      const query = groups.find(value => value !== site);
+      const cleanQuery = this._cleanSiteSearchQuery(query);
+      const normalizedSite = this._normalizeSiteSearchTarget(site);
+      if (normalizedSite && cleanQuery) {
+        return {
+          site: normalizedSite,
+          query: normalizedSite === 'google photos'
+            ? this._refinePhotoSiteSearchQuery(cleanQuery)
+            : cleanQuery
+        };
+      }
+    }
+
+    return null;
+  }
+
+  _normalizeSiteSearchTarget(value) {
+    const target = String(value || '').trim().toLowerCase();
+    const aliases = {
+      photos: 'google photos',
+      photo: 'google photos',
+      'google photo': 'google photos',
+      'google photos': 'google photos',
+      youtube: 'youtube',
+      'you tube': 'youtube',
+      gmail: 'gmail',
+      mail: 'gmail',
+      'google mail': 'gmail',
+      drive: 'google drive',
+      'google drive': 'google drive',
+      maps: 'google maps',
+      'google map': 'google maps',
+      'google maps': 'google maps',
+      'chrome setting': 'chrome settings',
+      'chrome settings': 'chrome settings',
+      'browser settings': 'chrome settings',
+      chatgpt: 'chatgpt',
+      'chat gpt': 'chatgpt'
+    };
+    return aliases[target] || null;
+  }
+
+  _cleanSiteSearchQuery(value) {
+    const cleaned = String(value || '')
+      .replace(/^(?:for|the|a|an)\s+/i, '')
+      .replace(/^(?:in|on)\s+(?:chrome|browser|edge|firefox)$/i, '')
+      .replace(/\s+(?:please|in\s+chrome|on\s+chrome|in\s+browser|on\s+browser)$/i, '')
+      .trim();
+    return /[a-z0-9]/i.test(cleaned) ? cleaned : '';
+  }
+
+  _refinePhotoSiteSearchQuery(query) {
+    const personalQuery = this._extractPersonalPhotoQuery(query);
+    return personalQuery && personalQuery !== 'photos'
+      ? personalQuery
+      : query;
   }
 
   _resolveSystemSettingsIntent(rawText, preparedInput) {
-    const input = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
+    const input = this._normalizeSystemCommandText(preparedInput?.correctedText || rawText);
     if (!/\b(?:wifi|wi\s*fi|bluetooth|hotspot|mobile\s+hotspot)\b/.test(input)) {
       return null;
     }
@@ -1115,13 +1597,16 @@ class ActionRouter {
         return null;
       }
 
-      if (/^(?:(?:turn|switch)\s+on|enable)\b|\bon\b/.test(input) && !/\b(?:what|status|about|is|are)\b/.test(input)) {
+      const asksStatus = /\b(?:what|status|about|is|are)\b/.test(input);
+      const turnsOn = /\b(?:(?:turn|switch|put)\s+on|enable|activate)\b|\b(?:turn|switch|put)\s+bluetooth\s+on\b/.test(input);
+      const turnsOff = /\b(?:(?:turn|switch|put)\s+(?:off|of)|disable|deactivate)\b|\b(?:turn|switch|put)\s+bluetooth\s+(?:off|of)\b/.test(input);
+      if (turnsOn && !asksStatus) {
         return { intent, confidence: 1, entities: { enabled: true } };
       }
-      if (/^(?:(?:turn|switch)\s+off|disable)\b|\boff\b/.test(input) && !/\b(?:what|status|about|is|are)\b/.test(input)) {
+      if (turnsOff && !asksStatus) {
         return { intent, confidence: 1, entities: { enabled: false } };
       }
-      if (/^(?:what|tell|show|check)\b|\b(?:status|about|is|are)\b/.test(input)) {
+      if (/^(?:what|tell|show|check|is|are)\b|\b(?:status|about|enabled|disabled|on|off)\b/.test(input)) {
         return { intent, confidence: 1, entities: {} };
       }
     }
@@ -1185,47 +1670,112 @@ class ActionRouter {
   }
 
   _resolveLocalInfoIntent(rawText, preparedInput) {
-    const input = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
+    const input = this._normalizeSystemCommandText(preparedInput?.correctedText || rawText);
     const systemTimeIntent = this.intentRegistry.get('system.time');
     const systemDateIntent = this.intentRegistry.get('system.date');
     const systemStatusIntent = this.intentRegistry.get('system.status');
     const systemCpuIntent = this.intentRegistry.get('system.cpu');
     const systemMemoryIntent = this.intentRegistry.get('system.memory');
     const systemProcessesIntent = this.intentRegistry.get('system.processes');
+    const systemBatteryIntent = this.intentRegistry.get('system.battery');
+    const systemDiskIntent = this.intentRegistry.get('system.disk');
 
-    if (/\b(?:time)\b/.test(input) && /^(?:what|when|tell|current|time)\b/.test(input)) {
+    if (/\b(?:time)\b/.test(input) && /^(?:what|when|tell|show|current|time)\b/.test(input)) {
       return systemTimeIntent ? { intent: systemTimeIntent, confidence: 1, entities: {} } : null;
     }
 
-    const externalDateCue = /\b(?:release|released|launch|premiere|event|schedule|match|movie|film|game|episode|iphone|price)\b/.test(input);
-    if (
-      !externalDateCue &&
-      /\b(?:date|day|today)\b/.test(input) &&
-      /^(?:what|which|tell|current|date|day)\b/.test(input)
-    ) {
+    if (/\b(?:date|day|today)\b/.test(input) && /^(?:what|which|tell|show|current|date|day)\b/.test(input)) {
       return systemDateIntent ? { intent: systemDateIntent, confidence: 1, entities: {} } : null;
     }
 
-    if (/\b(?:cpu|processor)\b/.test(input) && /\b(?:usage|status|use|using|load)\b/.test(input)) {
+    if (/\b(?:cpu|processor)\b/.test(input) && /\b(?:usage|status|use|using|load|percent|percentage|how\s+much|current)\b/.test(input)) {
       return systemCpuIntent ? { intent: systemCpuIntent, confidence: 1, entities: {} } : null;
     }
 
-    if (/\b(?:ram|memory)\b/.test(input) && /\b(?:usage|status|use|using|used|available|about)\b/.test(input)) {
+    if (/\b(?:ram|memory)\b/.test(input) && /\b(?:usage|status|use|using|used|available|free|left|about|how\s+much|current)\b/.test(input)) {
       return systemMemoryIntent ? { intent: systemMemoryIntent, confidence: 1, entities: {} } : null;
     }
 
-    if (
-      /\b(?:running|open|active)\b/.test(input) &&
-      /\b(?:apps?|applications?|processes|programs?|system)\b/.test(input)
-    ) {
-      return systemProcessesIntent ? { intent: systemProcessesIntent, confidence: 1, entities: {} } : null;
+    if (/\b(?:battery|charge|power)\b/.test(input) && /\b(?:status|level|percent|percentage|remaining|left|how\s+much|current|battery|charge)\b/.test(input)) {
+      return systemBatteryIntent ? { intent: systemBatteryIntent, confidence: 1, entities: {} } : null;
     }
 
-    if (/\b(?:system|computer|pc|laptop)\b/.test(input) && /\b(?:status|health|usage|running|about|info|information|doing|performance)\b/.test(input)) {
+    if (/\b(?:disk|storage|drive|space)\b/.test(input) && /\b(?:space|storage|disk|drive|free|left|available|usage|used|status|how\s+much)\b/.test(input)) {
+      return systemDiskIntent ? { intent: systemDiskIntent, confidence: 1, entities: {} } : null;
+    }
+
+    if (
+      /\b(?:running|open|opened|active|visible|in\s+use|being\s+used|used)\b/.test(input) &&
+      /\b(?:apps?|applications?|processes|programs?|system)\b/.test(input)
+    ) {
+      const target = /\b(?:apps?|applications?|programs?|windows?)\b/.test(input) && !/\bprocesses\b/.test(input)
+        ? 'apps'
+        : 'processes';
+      const queryApp = target === 'apps' ? this._extractRunningAppQuery(input) : '';
+      return systemProcessesIntent
+        ? {
+            intent: systemProcessesIntent,
+            confidence: 1,
+            entities: queryApp ? { target, queryApp } : { target }
+          }
+        : null;
+    }
+
+    const queryApp = this._extractRunningAppQuery(input);
+    if (queryApp && /\b(?:is|are|check|tell|whether|if|see)\b/.test(input) && /\b(?:running|open|opened|active|visible|in\s+use|being\s+used|used)\b/.test(input)) {
+      return systemProcessesIntent
+        ? { intent: systemProcessesIntent, confidence: 1, entities: { target: 'apps', queryApp } }
+        : null;
+    }
+
+    if (/\b(?:system|computer|pc|laptop|machine)\b/.test(input) && /\b(?:status|health|usage|running|about|info|information|performance|condition|doing)\b/.test(input)) {
       return systemStatusIntent ? { intent: systemStatusIntent, confidence: 1, entities: {} } : null;
     }
 
     return null;
+  }
+
+  _extractRunningAppQuery(input) {
+    const text = this._normalizeSystemCommandText(input);
+    const patterns = [
+      /\bif\s+(.+?)\s+(?:is|are)\s+(?:running|open|opened|active)\b/,
+      /\b(?:is|are)\s+(.+?)\s+(?:running|open|opened|active)\b/,
+      /\b(?:check|tell\s+me|see)\s+(?:if|whether)\s+(.+?)\s+(?:is|are)\s+(?:running|open|opened|active)\b/,
+      /\b(?:check|tell\s+me|see)\s+(.+?)\s+(?:running|open|opened|active)\b/,
+      /\b(.+?)\s+(?:is|are)\s+(?:running|open|opened|active)\b/
+    ];
+
+    for (const pattern of patterns) {
+      const match = text.match(pattern);
+      const candidate = match?.[1]
+        ?.replace(/\b(?:the|app|application|program|window|and|what|which|apps?|are|running|open|opened|active|tell|me|check|if|whether)\b/g, ' ')
+        .replace(/\b(?:is|are)\s*$/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+      if (candidate && /^[a-z0-9][a-z0-9 ._-]{1,40}$/i.test(candidate)) {
+        return candidate;
+      }
+    }
+
+    return '';
+  }
+
+  _normalizeSystemCommandText(value) {
+    return String(value || '')
+      .trim()
+      .toLowerCase()
+      .replace(/\bblue\s+tooth\b/g, 'bluetooth')
+      .replace(/\bblu\s+tooth\b/g, 'bluetooth')
+      .replace(/\bblutooth\b/g, 'bluetooth')
+      .replace(/\bmemry\b/g, 'memory')
+      .replace(/\bmemeory\b/g, 'memory')
+      .replace(/\bstroage\b/g, 'storage')
+      .replace(/\bproceses\b/g, 'processes')
+      .replace(/\bproccesses\b/g, 'processes')
+      .replace(/\bproccess\b/g, 'process')
+      .replace(/\bopend\b/g, 'opened')
+      .replace(/\busing\b/g, 'in use')
+      .replace(/\s+/g, ' ');
   }
 
   _resolveAssistantConversationIntent(rawText, preparedInput) {
@@ -1249,7 +1799,24 @@ class ActionRouter {
       variants.some(text => /^(?:hello|hi|hey|good\s+(?:morning|afternoon|evening))\b/.test(text))
     ) {
       const intent = this.intentRegistry.get('greeting');
-      return intent ? { intent, confidence: 1, entities: {} } : null;
+      if (!intent) {
+        return null;
+      }
+
+      const greetingType = /\bgood\s+morning\b/.test(combined)
+        ? 'morning'
+        : /\bgood\s+afternoon\b/.test(combined)
+          ? 'afternoon'
+          : /\bgood\s+evening\b/.test(combined)
+            ? 'evening'
+            : /^how\s+are\s+you\b/.test(combined)
+              ? 'wellbeing'
+              : /^hi\b/.test(combined)
+                ? 'hi'
+                : /^hey\b/.test(combined)
+                  ? 'hey'
+                  : 'hello';
+      return { intent, confidence: 1, entities: { greetingType } };
     }
 
     if (
@@ -1388,10 +1955,11 @@ class ActionRouter {
     if (!/^(?:locate|find|search|where\s+is|where\s+are|what\s+is\s+the\s+location\s+of|show\s+me\s+where)\b/.test(lower)) {
       return null;
     }
-    if (/^(?:search|search\s+for|look\s+up|google)\b/i.test(lower) && this._looksLikeWebSearchQuery(`${lower} ${rawText || ''}`)) {
+    const query = this._extractLocalFileSearchQuery(rawText || input, input);
+    if (!query) {
       return null;
     }
-    if (!/\b(?:file|files|folder|folders|directory|directories|location|path|pdf|pdfs|documents?|downloads?|duplicate|duplicates)\b|[^\s]+\.[A-Za-z0-9]{1,10}\b/i.test(`${input} ${rawText || ''}`)) {
+    if (!/^(?:locate)\b/i.test(input) && !/\b(?:file|folder|directory|location|path)\b|[^\s]+\.[A-Za-z0-9]{1,10}\b/i.test(`${input} ${rawText || ''}`)) {
       return null;
     }
 
@@ -1400,13 +1968,31 @@ class ActionRouter {
       return null;
     }
 
-    const query = input
-      .replace(/^(?:locate|find|search(?:\s+for)?|where\s+is|where\s+are|what\s+is\s+the\s+location\s+of|show\s+me\s+where)\s+/i, '')
+    return { intent, confidence: 1, entities: { query } };
+  }
+
+  _extractLocalFileSearchQuery(rawText, correctedText = rawText) {
+    const clean = value => String(value || '')
+      .trim()
+      .replace(/^(?:locate|find|search(?:\s+for)?|where\s+(?:is|are|i)|whare\s+i|what\s+is\s+the\s+location\s+of|show\s+me\s+where)\s+/i, '')
       .replace(/^(?:the|a|an)\s+/i, '')
-      .replace(/\s+(?:file|files|folder|folders|directory|directories|location|path)$/i, '')
+      .replace(/\s+(?:on|in)\s+(?:my\s+)?(?:computer|pc|laptop|system|files?|folders?)$/i, '')
+      .replace(/\s+(?:file|folder|directory|location|path)$/i, '')
       .replace(/\b([a-z0-9_-]+)\s+(pdf|txt|docx?|xlsx?|pptx?|csv|json|xml|html?|js|ts|py|java|md|png|jpe?g|gif|webp|mp[34]|mkv|wav|zip|rar)$/i, '$1.$2')
       .trim();
-    return query ? { intent, confidence: 1, entities: { query } } : null;
+
+    const source = String(rawText || '').trim();
+    const fallback = String(correctedText || '').trim();
+    const sourceQuery = clean(source);
+    const fallbackQuery = clean(fallback);
+    const query = sourceQuery && sourceQuery !== source
+      ? sourceQuery
+      : fallbackQuery && fallbackQuery !== fallback
+        ? fallbackQuery
+        : sourceQuery;
+    return query && !/^(?:file|folder|directory|location|path)$/i.test(query)
+      ? query.toLowerCase()
+      : '';
   }
 
   _resolvePersonalPhotoIntent(rawText, preparedInput) {
@@ -1432,44 +2018,60 @@ class ActionRouter {
       return null;
     }
 
-    const intent = this.intentRegistry.get('browser.openFirstResult');
-    return intent ? { intent, confidence: 0.95, entities: { query: 'google photos' } } : null;
-  }
-
-  _resolveBareKnowledgeSearchIntent(rawText, preparedInput) {
-    const corrected = String(preparedInput?.correctedText || rawText || '').trim();
-    const raw = String(rawText || corrected || '').trim();
-    const input = corrected.toLowerCase();
-    const rawLower = raw.toLowerCase();
-    if (!input) {
-      return null;
+    const photoLibrary = this.learningStore?.getPreference?.('photoLibrary')?.value || '';
+    const wantsGooglePhotos = /\bgoogle\s+photos?\b/.test(input) || photoLibrary === 'googlePhotos';
+    if (wantsGooglePhotos) {
+      const intent = this.intentRegistry.get('browser.siteSearch');
+      return intent
+        ? {
+            intent,
+            confidence: 0.95,
+            entities: {
+              site: 'google photos',
+              query: this._extractPersonalPhotoQuery(input)
+            }
+          }
+        : null;
     }
 
-    if (/^(?:open|close|launch|start|run|switch|focus|activate|set|turn|play|pause|resume|stop|create|delete|move|copy|rename|remind)\b/.test(input)) {
-      return null;
+    const wantsWindowsPhotos = /\b(?:microsoft\s+photos|windows\s+photos|photos\s+app)\b/.test(input) ||
+      photoLibrary === 'windowsPhotos';
+    if (wantsWindowsPhotos) {
+      const intent = this.intentRegistry.get('app.open');
+      return intent ? { intent, confidence: 0.92, entities: { appName: 'photos' } } : null;
     }
 
-    if (preparedInput?.query?.isLocalFileQuestion || /\b(?:file|folder|desktop|downloads|documents|pictures)\b/.test(input)) {
-      return null;
-    }
-
-    const knowledgeCue = /\b(?:world\s+cup|fifa|ipl|cricket|match(?:es)?|fixtures?|schedule|list|release\s+date|premiere|price|best\s+movies?|top\s+movies?|news|score|winner|champion|event)\b/.test(input) ||
-      /\b(?:world\s+cup|fifa|ipl|cricket|match(?:es)?|fixtures?|schedule|list|release\s+date|premiere|price|best\s+movies?|top\s+movies?|news|score|winner|champion|event)\b/.test(rawLower);
-    if (!knowledgeCue) {
-      return null;
-    }
-
-    const browserSearchIntent = this.intentRegistry.get('browser.search');
-    return browserSearchIntent
+    const intent = this.intentRegistry.get('file.search');
+    return intent
       ? {
-          intent: browserSearchIntent,
-          confidence: 0.9,
+          intent,
+          confidence: 0.95,
           entities: {
-            query: corrected || raw,
-            openInBrowser: false
+            query: this._extractPersonalPhotoQuery(input),
+            personalSearchType: 'photo'
           }
         }
       : null;
+  }
+
+  _extractPersonalPhotoQuery(input) {
+    const text = String(input || '')
+      .toLowerCase()
+      .replace(/\bclassmetes\b/g, 'classmates')
+      .replace(/\bclassm[eai]tes\b/g, 'classmates');
+    const priorityTerms = [
+      ['classmates', /\b(?:classmates?|class\s+mates?|college\s+friends?|school\s+friends?)\b/],
+      ['friends', /\bfriends?\b/],
+      ['family', /\bfamily\b/],
+      ['me', /\b(?:me|myself|mine)\b/],
+      ['recent', /\brecent\b/]
+    ];
+    const matched = priorityTerms
+      .filter(([, pattern]) => pattern.test(text))
+      .map(([term]) => term);
+    return matched.length > 0
+      ? Array.from(new Set(matched)).join(' ')
+      : 'photos';
   }
 
   _extractLocalListLocation(input) {
@@ -1505,9 +2107,11 @@ class ActionRouter {
     const corrected = String(preparedInput?.correctedText || rawText || '').trim();
     const raw = String(rawText || corrected || '').trim();
     const isQuestion = /^(?:what|who|when|where|why|how|which)\b/i.test(corrected || raw);
+    const rawSearchQuery = this._extractRawSearchQuery(raw);
     let query = isQuestion
       ? (corrected || raw)
-      : (this.entityExtractor._extractQuery(corrected.toLowerCase(), corrected) ||
+      : (rawSearchQuery ||
+        this.entityExtractor._extractQuery(corrected.toLowerCase(), corrected) ||
         this.entityExtractor._extractQuery(corrected.toLowerCase(), raw) ||
         raw ||
         corrected);
@@ -1526,6 +2130,24 @@ class ActionRouter {
       query,
       openInBrowser
     };
+  }
+
+  _extractRawSearchQuery(rawText) {
+    const text = String(rawText || '').trim();
+    if (!text) {
+      return '';
+    }
+
+    const match = text.match(/^(?:could\s+you\s+please\s+|can\s+you\s+please\s+|please\s+)?(?:search\s+for|search\s+the\s+web\s+for|search\s+web\s+for|search\s+web|search|google|look\s+up|find\s+on\s+web)\s+(.+)$/i);
+    if (!match?.[1]) {
+      return '';
+    }
+
+    return match[1]
+      .replace(/\s+(?:in|on)\s+new\s+tab(?:\s+(?:in|on)\s+(?:chrome|browser|edge|firefox))?\s*$/i, '')
+      .replace(/\s+new\s+tab(?:\s+(?:in|on)\s+(?:chrome|browser|edge|firefox))?\s*$/i, '')
+      .replace(/\s+(?:in|on)\s+(?:chrome|browser|edge|firefox)\s*$/i, '')
+      .trim();
   }
 
   _suggestAlternatives(preparedInput) {
