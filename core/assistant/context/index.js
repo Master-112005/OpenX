@@ -10,6 +10,9 @@ class ContextManager {
     this.sessionData = new Map();
     this.maxHistory = config?.chat?.maxHistory || MAX_HISTORY;
     this.lastInteraction = null;
+    this.userPreferences = new Map();
+    this.userFacts = new Map();
+    this.pendingTasks = [];
   }
 
   record(input, parsed, result) {
@@ -30,12 +33,92 @@ class ContextManager {
 
     this.history.push(entry);
     this.lastInteraction = Date.now();
+    this._extractUserPreferences(input, result);
+    this._trackPendingTask(input, result);
 
     if (this.history.length > this.maxHistory) {
       this.history.shift();
     }
 
     this._cleanup();
+  }
+
+  _extractUserPreferences(input, result) {
+    const text = String(input || '').toLowerCase();
+    if (result?.success) {
+      if (/\bprefer|preference|usually|always|normally|i like|i want|i need\b/i.test(text)) {
+        const appMatch = text.match(/\b(?:chrome|edge|firefox|notepad|vs code|visual studio)\b/i);
+        if (appMatch) {
+          this.setUserPreference('preferredBrowser', appMatch[1].toLowerCase());
+        }
+      }
+    }
+  }
+
+  _trackPendingTask(input, result) {
+    const intent = result?.intent || '';
+    const entities = result?.entities || {};
+
+    if (intent === 'reminder.set' && entities?.reminderText) {
+      this.pendingTasks.push({
+        type: 'reminder',
+        text: entities.reminderText,
+        timestamp: Date.now()
+      });
+    }
+
+    if (intent === 'timer.set' && entities?.duration) {
+      this.pendingTasks.push({
+        type: 'timer',
+        duration: entities.duration,
+        timestamp: Date.now()
+      });
+    }
+
+    this.pendingTasks = this.pendingTasks.filter(t => Date.now() - t.timestamp < 3600000);
+  }
+
+  setUserPreference(key, value) {
+    this.userPreferences.set(key, {
+      value,
+      timestamp: Date.now(),
+      count: (this.userPreferences.get(key)?.count || 0) + 1
+    });
+  }
+
+  getUserPreference(key) {
+    const pref = this.userPreferences.get(key);
+    if (!pref) return null;
+    if (Date.now() - pref.timestamp > 86400000) {
+      this.userPreferences.delete(key);
+      return null;
+    }
+    return pref.value;
+  }
+
+  setUserFact(key, value) {
+    this.userFacts.set(key, {
+      value,
+      timestamp: Date.now()
+    });
+  }
+
+  getUserFact(key) {
+    const fact = this.userFacts.get(key);
+    if (!fact) return null;
+    return fact.value;
+  }
+
+  getAllUserFacts() {
+    const facts = {};
+    for (const [key, fact] of this.userFacts.entries()) {
+      facts[key] = fact.value;
+    }
+    return facts;
+  }
+
+  getRecentTasks() {
+    return this.pendingTasks.filter(t => Date.now() - t.timestamp < 3600000);
   }
 
   getHistory(limit = 10) {

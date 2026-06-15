@@ -176,6 +176,29 @@ class ActiveLearningStore {
       };
     }
 
+    const passwordMatch = normalized.match(/^(?:what\s+is|what'?s|tell me|do\s+you\s+(?:know|remember))\s+my\s+((?:google|gmail|email|facebook|instagram|twitter|linkedin|github|amazon|netflix|spotify|discord|slack|banking|bank|account|general)?\s*)?(?:account\s+)?password\b/);
+    if (passwordMatch) {
+      let service = (passwordMatch[1] || 'general').trim();
+      if (!service) service = 'general';
+      service = /^(?:google|gmail|email)$/i.test(service) ? 'google' :
+        /^(?:facebook|instagram|twitter|linkedin|github|amazon|netflix|spotify|discord|slack|banking|bank|account)$/i.test(service) ? service.toLowerCase() : 'general';
+      const password = this.getUserFact(`${service}Password`);
+      if (password?.value) {
+        return {
+          type: 'user-fact',
+          known: true,
+          fact: `${service}Password`,
+          response: `Your ${service} account password is: ${password.value}`
+        };
+      }
+      return {
+        type: 'user-fact',
+        known: false,
+        fact: `${service}Password`,
+        response: `I do not have your ${service} account password stored. You can say, "remember my ${service} account password is [password]."`
+      };
+    }
+
     return null;
   }
 
@@ -396,6 +419,119 @@ class ActiveLearningStore {
           return {
             type: 'preference',
             response: `I learned that you prefer ${platform} for music.`
+          };
+        }
+      }
+}
+
+    const identityMatch = text.match(/^(?:remember\s+(?:that\s+)?)?i\s+am\s+(?:a\s+)?(.+)$/i);
+
+    const passwordRememberMatch = text.match(/^(?:remember|save|store)\s+(?:my\s+)?((?:apple|microsoft|google|gmail|email|facebook|instagram|twitter|linkedin|github|amazon|netflix|spotify|discord|slack|banking|bank|account)\s+)?(?:account\s+)?password\s+(?:is\s+)?(.+)$/i);
+    if (passwordRememberMatch && (passwordRememberMatch[1] || passwordRememberMatch[2])) {
+      const password = passwordRememberMatch[passwordRememberMatch[1] ? 2 : 3].replace(/[.!?]+$/g, '').trim();
+      let service = passwordRememberMatch[1]?.trim() || 'general';
+      if (service) {
+        service = service.replace(/\s+account$/i, '').trim();
+      }
+      if (password && password.length > 0 && password.length < 100) {
+        const serviceName = /^(?:apple|microsoft)$/i.test(service) ? service.toLowerCase() :
+          /^(?:google|gmail|email)$/i.test(service) ? 'google' :
+          /^(?:facebook|instagram|twitter|linkedin|github|amazon|netflix|spotify|discord|slack|banking|bank|account)$/i.test(service) ? service.toLowerCase() : 'general';
+        const fact = this.rememberUserFact(`${serviceName}Password`, password, {
+          source: 'user-stated-credential'
+        });
+        if (fact) {
+          return {
+            type: 'user-fact',
+            response: `Your ${serviceName} account password has been securely stored, sir.`
+          };
+        }
+      }
+    }
+
+    const passwordThisMatch = text.match(/^(?:remember|save|store)\s+this\s+(.+?)\s+as\s+(?:my\s+)?(?:(?:apple|microsoft|google|gmail|email|facebook|instagram|twitter|linkedin|github|amazon|netflix|spotify|discord|slack|banking|bank|account)\s+)?(?:account\s+)?password$/i);
+    if (passwordThisMatch && passwordThisMatch[1]) {
+      const password = passwordThisMatch[1].replace(/[.!?]+$/g, '').trim();
+      let service = passwordThisMatch[2]?.trim() || 'general';
+      if (service) {
+        service = service.replace(/\s+account$/i, '').trim();
+      }
+      if (password && password.length > 0 && password.length < 100) {
+        const serviceName = /^(?:apple|microsoft)$/i.test(service) ? service.toLowerCase() :
+          /^(?:google|gmail|email)$/i.test(service) ? 'google' :
+          /^(?:facebook|instagram|twitter|linkedin|github|amazon|netflix|spotify|discord|slack|banking|bank|account)$/i.test(service) ? service.toLowerCase() : 'general';
+        const fact = this.rememberUserFact(`${serviceName}Password`, password, {
+          source: 'user-stated-credential'
+        });
+        if (fact) {
+          return {
+            type: 'user-fact',
+            response: `Your ${serviceName} account password has been securely stored, sir.`
+          };
+        }
+      }
+    }
+
+    const passwordGeneralMatch = text.match(/^(?:remember|save|store)\s+this\s+(.+?)\s+as\s+(?:my\s+)?password$/i);
+    if (passwordGeneralMatch && passwordGeneralMatch[1]) {
+      const password = passwordGeneralMatch[1].replace(/[.!?]+$/g, '').trim();
+      if (password && password.length > 0 && password.length < 100) {
+        const fact = this.rememberUserFact('generalPassword', password, {
+          source: 'user-stated-credential'
+        });
+        if (fact) {
+          return {
+            type: 'user-fact',
+            response: `Your password has been securely stored, sir.`
+          };
+        }
+      }
+    }
+
+    if (identityMatch && identityMatch[1]) {
+      const profession = identityMatch[1].replace(/[.!?]+$/g, '').trim();
+      if (profession && profession.length > 1 && profession.length < 50 && !/^(?:a|an|the|student|going|doing|here|ready|available)\b/i.test(profession)) {
+        const fact = this.rememberUserFact('profession', profession, {
+          source: /^remember\b/i.test(text) ? 'explicit-memory' : 'user-stated-fact'
+        });
+if (fact) {
+          return {
+            type: 'user-fact',
+            response: `Noted, sir. I will remember that you are a ${fact.value}.`
+          };
+        }
+      }
+    }
+
+    const genericRememberMatch = text.match(/^(?:remember|note)\s+(?:this\s+)?(?:that\s+)?(?:my\s+)?(.+?)\s+(?:is|was|are|were)\s+(.+)$/i);
+    if (genericRememberMatch && genericRememberMatch[1] && genericRememberMatch[2]) {
+      const key = genericRememberMatch[1].replace(/[.!?]+$/g, '').trim().toLowerCase().replace(/\s+/g, '_');
+      const value = genericRememberMatch[2].replace(/[.!?]+$/g, '').trim();
+      if (key && value && key.length > 1 && value.length > 0 && value.length < 100 && key !== 'password' && !/^(?:i|my|the|a|an|this|that|it|they|them|his|her|their)\b/i.test(key)) {
+        const fact = this.rememberUserFact(key, value, {
+          source: /^remember\b/i.test(text) ? 'explicit-memory' : 'user-stated-fact'
+        });
+        if (fact) {
+          return {
+            type: 'user-fact',
+            response: `Noted, sir. I will remember that ${key.replace(/_/g, ' ')} is ${fact.value}.`
+          };
+        }
+      }
+    }
+
+    const myXIsYMatch = text.match(/^my\s+(.+?)\s+(?:is|was|are|were)\s+(.+)$/i);
+    if (myXIsYMatch && myXIsYMatch[1] && myXIsYMatch[2]) {
+      const key = myXIsYMatch[1].replace(/[.!?]+$/g, '').trim().toLowerCase().replace(/\s+/g, '_');
+      const value = myXIsYMatch[2].replace(/[.!?]+$/g, '').trim();
+      if (key && value && key.length > 1 && value.length > 0 && value.length < 100 && !/^(?:name|password|email|phone|mobile|card|number)\b/i.test(key)) {
+        const fact = this.rememberUserFact(key, value, {
+          source: 'user-stated-fact'
+        });
+        if (fact) {
+          return {
+            type: 'user-fact',
+            response: `Noted, sir. I will remember that your ${key.replace(/_/g, ' ')} is ${fact.value}.`
           };
         }
       }

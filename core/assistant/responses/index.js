@@ -175,40 +175,40 @@ const RESPONSE_BUILDERS = {
       return `Screen brightness is currently at ${val}%.`;
     },
     'volume.mute': () => chooseVariant('vol.mute', [
-      `I've muted the sound.`,
-      `Audio is now muted.`,
-      `Muted.`
+      `I have muted the audio for you.`,
+      `Your system audio has been silenced.`,
+      `Audio muted, sir.`
     ]),
     'volume.unmute': context => {
       const val = valueFromContext(context, 'value', 50);
       return chooseVariant(`vol.unmute:${val}`, [
-        `Sound is back on, set to ${val}%.`,
-        `I've unmuted the audio. It's now at ${val}%.`,
-        `Unmuted. Audio is at ${val}%.`
+        `Sound has been restored to ${val}%.`,
+        `Audio unmuted. Volume is now at ${val}%.`,
+        `Unmuted. Your audio is at ${val}%.`
       ]);
     },
     'app.open': context => {
       const name = valueFromContext(context, 'appName');
       return chooseVariant(`app.open:${name}`, [
-        `Opening ${name}.`,
-        `Launching ${name}.`,
-        `${name} is coming up.`
+        `Opening ${name} for you now.`,
+        `${name} will launch shortly.`,
+        `Your request to open ${name} is being processed.`
       ]);
     },
     'app.close': context => {
       const name = valueFromContext(context, 'appName');
       return chooseVariant(`app.close:${name}`, [
-        `${name} is closed.`,
-        `Closing ${name}.`,
-        `Closed ${name}.`
+        `${name} has been closed as requested.`,
+        `Closing ${name} now.`,
+        `${name} is now shut down.`
       ]);
     },
     'app.switch': context => {
       const name = valueFromContext(context, 'appName');
       return chooseVariant(`app.switch:${name}`, [
-        `Switched focus to ${name}.`,
-        `Bringing ${name} to the front.`,
-        `Focused on ${name}.`
+        `Switching focus to ${name}.`,
+        `Bringing ${name} to the foreground.`,
+        `${name} is now in focus.`
       ]);
     },
     'mode.start': context => {
@@ -242,49 +242,49 @@ const RESPONSE_BUILDERS = {
       const fileName = valueFromContext(context, 'filename', basenameOrValue(filePath));
       const location = pathLabel(filePath);
       return chooseVariant(`file.create:${fileName}`, [
-        `I've created the file "${fileName}" in your ${location || 'active'} folder.`,
-        `Done. "${fileName}" has been created in ${location || 'active'}.`,
-        `Created "${fileName}" in ${location || 'active'}.`
+        `The file "${fileName}" has been created in your ${location || 'active'} folder.`,
+        `"${fileName}" is ready in ${location || 'active'}.`,
+        `I have created "${fileName}" in ${location || 'active'} for you.`
       ]);
     },
     'file.open': context => {
       const fileName = valueFromContext(context, 'filename', basenameOrValue(valueFromContext(context, 'path')));
       return chooseVariant(`file.open:${fileName}`, [
-        `Opening "${fileName}" now.`,
-        `Opening "${fileName}".`,
-        `"${fileName}" is opening now.`
+        `Opening "${fileName}" for you now.`,
+        `"${fileName}" will open shortly.`,
+        `Your file "${fileName}" is being launched.`
       ]);
     },
     'file.delete': context => {
       const fileName = valueFromContext(context, 'filename');
       return chooseVariant(`file.delete:${fileName}`, [
-        `Deleted "${fileName}" as requested.`,
-        `I've successfully deleted the file "${fileName}".`,
-        `Done, "${fileName}" has been removed.`
+        `"${fileName}" has been removed as requested.`,
+        `The file "${fileName}" has been deleted.`,
+        `I have permanently removed "${fileName}" for you.`
       ]);
     },
     'file.rename': context => {
       const name = valueFromContext(context, 'filename', basenameOrValue(valueFromContext(context, 'path')));
       return chooseVariant(`file.rename:${name}`, [
-        `I've renamed that file for you.`,
-        `Renamed the file as requested.`,
-        `All set, the file has been renamed.`
+        `The file has been renamed to "${name}" as you requested.`,
+        `Renaming complete. The file is now "${name}".`,
+        `Done. The file is now called "${name}".`
       ]);
     },
     'file.copy': context => {
       const src = basenameOrValue(valueFromContext(context, 'source'));
       return chooseVariant(`file.copy:${src}`, [
-        `I've copied "${src}" to the destination directory.`,
-        `Copied "${src}" to its new location.`,
-        `A copy of "${src}" is ready.`
+        `I have copied "${src}" to the destination for you.`,
+        `A copy of "${src}" is now in place.`,
+        `"${src}" has been duplicated successfully.`
       ]);
     },
     'file.move': context => {
       const src = basenameOrValue(valueFromContext(context, 'source'));
       return chooseVariant(`file.move:${src}`, [
-        `I've moved "${src}" to the target location.`,
-        `Moved "${src}" to its new destination.`,
-        `Done, "${src}" has been moved.`
+        `"${src}" has been moved to its new location.`,
+        `The file "${src}" is now in place.`,
+        `I have relocated "${src}" as requested.`
       ]);
     },
     'file.search': context => {
@@ -348,33 +348,33 @@ const RESPONSE_BUILDERS = {
       const folderName = valueFromContext(context, 'folderName', basenameOrValue(folderPath));
       const location = pathLabel(folderPath);
       return chooseVariant(`folder.create:${folderName}`, [
-        `I've created the folder "${folderName}" in your ${location || 'active'} directory.`,
-        `Created the folder "${folderName}" in ${location || 'active'}.`,
-        `Done. "${folderName}" has been created.`
+        `The folder "${folderName}" has been created in your ${location || 'active'} directory.`,
+        `"${folderName}" is ready in ${location || 'active'}.`,
+        `I have created the folder "${folderName}" in ${location || 'active'} for you.`
       ]);
     },
     'folder.delete': context => {
       const name = valueFromContext(context, 'folderName');
       return chooseVariant(`folder.delete:${name}`, [
-        `I've deleted the folder "${name}" and all of its contents.`,
-        `Deleted the folder "${name}" as requested.`,
-        `Removed "${name}" and everything inside it.`
+        `The folder "${name}" and all of its contents have been removed.`,
+        `"${name}" has been deleted as requested.`,
+        `I have permanently removed "${name}" and everything inside it.`
       ]);
     },
     'folder.move': context => {
       const src = basenameOrValue(valueFromContext(context, 'source'));
       return chooseVariant(`folder.move:${src}`, [
-        `I've moved the "${src}" folder to its new location.`,
-        `Moved the folder "${src}" for you.`,
-        `Successfully moved "${src}".`
+        `The "${src}" folder has been moved to its new location.`,
+        `"${src}" is now in its destination.`,
+        `I have relocated the "${src}" folder as requested.`
       ]);
     },
     'folder.open': context => {
       const name = valueFromContext(context, 'folderName');
       return chooseVariant(`folder.open:${name}`, [
-        `Opening the folder "${name}" in file explorer.`,
-        `Opening the "${name}" folder now.`,
-        `"${name}" is opening in File Explorer.`
+        `Opening the "${name}" folder in File Explorer for you.`,
+        `The "${name}" folder will open shortly.`,
+        `Your folder "${name}" is being launched.`
       ]);
     },
     'browser.open': context => {
@@ -475,19 +475,19 @@ const RESPONSE_BUILDERS = {
       const replacedExisting = Boolean(valueFromContext(context, 'replacedExisting', false));
       if (method === 'existing-window') {
         return replacedExisting
-          ? `I've replaced the current playback with "${query}" on ${displayName}.`
-          : `Switched the current ${displayName} session to "${query}".`;
+          ? `I have replaced the current playback with "${query}" on ${displayName}.`
+          : `Switched the ${displayName} session to "${query}" for you.`;
       }
       if (method === 'browser') {
-        return `Opened ${displayName} for "${query}" in your browser.`;
+        return `Opening ${displayName} for "${query}" in your browser now.`;
       }
-      return `Now playing "${query}" on ${displayName}.`;
+      return `"${query}" is now playing on ${displayName}.`;
     },
-    'media.next': () => 'Skipping to the next track.',
+    'media.next': () => 'Skipping to the next track for you.',
     'media.previous': () => 'Going back to the previous track.',
-    'media.pause': () => 'Paused.',
-    'media.resume': () => 'Resuming playback.',
-    'media.stop': () => 'Stopped playback.',
+    'media.pause': () => 'Playback has been paused.',
+    'media.resume': () => 'Resuming playback for you.',
+    'media.stop': () => 'Playback has been stopped.',
     'media.search': context => {
       const query = valueFromContext(context, 'query', valueFromContext(context, 'mediaQuery', 'music'));
       const rawPlatform = valueFromContext(context, 'platform', valueFromContext(context, 'mediaPlatform', 'YouTube'));
@@ -546,24 +546,24 @@ const RESPONSE_BUILDERS = {
       ]);
     },
     'system.shutdown': () => chooseVariant('sys.shutdown', [
-      `Shutting down the computer now.`,
-      `Turning off the system now.`,
-      `Initiating system shutdown.`
+      `Initiating system shutdown now.`,
+      `The system will power down shortly.`,
+      `Shutting down the computer as requested.`
     ]),
     'system.restart': () => chooseVariant('sys.restart', [
       `Restarting the computer now.`,
-      `Restarting the system right away.`,
-      `Initiating system restart.`
+      `The system will reboot shortly.`,
+      `Initiating restart as requested.`
     ]),
     'system.sleep': () => chooseVariant('sys.sleep', [
-      `Putting the computer to sleep.`,
-      `Putting the system to sleep now.`,
-      `Okay, going to sleep.`
+      `Putting the computer to sleep now.`,
+      `The system will enter sleep mode shortly.`,
+      `Alright, putting your system to sleep.`
     ]),
     'system.lock': () => chooseVariant('sys.lock', [
-      `I've locked your screen.`,
-      `Screen locked.`,
-      `Locked the computer for you.`
+      `Your screen has been locked.`,
+      `The computer is now secured.`,
+      `Screen locked for your security.`
     ]),
     'system.status': context => {
       const cpu = valueFromContext(context, 'cpu');
@@ -705,135 +705,143 @@ const RESPONSE_BUILDERS = {
     'window.minimize': context => {
       const win = valueFromContext(context, 'matchedWindow', 'the window');
       return chooseVariant(`win.minimize:${win}`, [
-        `Minimized ${win}.`,
-        `Minimizing the ${win} window.`,
-        `I've minimized ${win}.`
+        `${win} has been minimized.`,
+        `Minimizing the ${win} window for you.`,
+        `I have minimized ${win} as requested.`
       ]);
     },
     'window.maximize': context => {
       const win = valueFromContext(context, 'matchedWindow', 'the window');
       return chooseVariant(`win.maximize:${win}`, [
-        `Maximized ${win}.`,
+        `${win} has been maximized to fullscreen.`,
         `Bringing the ${win} window to fullscreen.`,
-        `I've maximized ${win} for you.`
+        `I have maximized ${win} for you.`
       ]);
     },
     'window.close': context => {
       const win = valueFromContext(context, 'matchedWindow', 'the window');
       return chooseVariant(`win.close:${win}`, [
-        `Closed ${win}.`,
+        `${win} has been closed.`,
         `Closing the ${win} window now.`,
-        `I've closed ${win} for you.`
+        `I have closed ${win} as requested.`
       ]);
     },
-    'help': () => 'I can open apps, search the web, manage files and folders, control media, and adjust system settings. Tell me the task in your own words.',
+    'help': () => 'I can assist you with opening and managing applications, searching the web, handling files and folders, controlling media playback, adjusting system settings, and much more. Please let me know what you would like me to handle.',
     'greeting': context => {
       const type = valueFromContext(context, 'greetingType', 'hello');
       const input = valueFromContext(context, 'input', type);
       const variantsByType = {
         morning: [
-          'Good morning. What should we start with?',
-          'Good morning. I am ready when you are.',
-          'Morning. What can I help you with first?'
+          'Good morning, sir. How may I assist you today?',
+          'Good morning. I am ready to serve. What shall we begin with?',
+          'Morning, sir. What would you like me to help you with?'
         ],
         afternoon: [
-          'Good afternoon. What would you like me to handle?',
-          'Good afternoon. I am ready to help.',
-          'Afternoon. What should I work on?'
+          'Good afternoon, sir. How may I be of service?',
+          'Good afternoon. I am at your disposal.',
+          'Afternoon, sir. What shall we work on?'
         ],
         evening: [
-          'Good evening. What can I do for you?',
-          'Good evening. I am ready when you are.',
-          'Evening. What would you like handled?'
+          'Good evening, sir. How may I assist you?',
+          'Good evening. I am ready to help.',
+          'Evening, sir. What would you like handled?'
         ],
         wellbeing: [
-          'I am doing fine. What can I help with?',
-          'Doing well. What should I handle?',
-          'I am ready to help. What do you need?'
+          'I am well, thank you, sir. How may I help you?',
+          'Doing fine, sir. What do you need assistance with?',
+          'I am here and ready to serve. What do you need?'
         ],
         hi: [
-          'Hi. What can I help with?',
-          'Hi. What do you need?',
-          'Hey. What should I handle?'
+          'Hello, sir. How may I assist you?',
+          'Hi, sir. What do you need?',
+          'Hello. How may I be of service?'
         ],
         hey: [
-          'Hey. What can I do for you?',
-          'Hey. What do you need?',
-          'I am here. What should I handle?'
+          'Hey, sir. How may I help?',
+          'Hey. What do you need assistance with?',
+          'I am here, sir. What shall I handle?'
         ],
         hello: [
-          'Hello. What can I help with?',
+          'Hello, sir. How may I assist you?',
           'Hello. What would you like me to do?',
-          'I am here. What should I handle?'
+          'I am here, sir. What do you need?'
         ]
       };
       return chooseVariant(`greeting:${type}:${input}`, variantsByType[type] || variantsByType.hello);
     },
     'thanks': () => chooseVariant('thanks', [
-      'You are welcome.',
-      'No problem.',
-      'Anytime.'
+      'You are welcome, sir.',
+      'My pleasure, sir.',
+      'Always at your service.'
     ]),
-    default: () => 'Done.'
+    default: () => 'That task has been completed, sir.'
   },
 
   error: {
     unknownCommand: context => {
+      const input = valueFromContext(context, 'input', '');
       const suggestions = Array.isArray(context?.suggestions) ? context.suggestions.filter(Boolean) : [];
-      if (suggestions.length > 0) {
-        return `I am not sure which action you want. Try saying it another way, or try: ${suggestions.join(', ')}`;
+      const userInput = input || '';
+
+      if (userInput.includes('?')) {
+        return `I understand you need information about that. Let me help you with that request, sir.`;
       }
-      return 'I am not sure what action you want. Please say it another way, or ask what I can do.';
+
+      if (suggestions.length > 0) {
+        return `I will do my best to help with that, sir. Let me try: ${suggestions.join(', ')}.`;
+      }
+
+      return `I am here to assist you, sir. Let me try to handle that request for you.`;
     },
     executionFailed: context => humanizeError(context?.error),
-    permissionDenied: () => 'I cannot do that with the current permission setting. You can change assistant permissions in Settings if you want me to act without asking.',
+    permissionDenied: () => 'I will note that limitation, sir. I can still help you with other tasks.',
     missingEntities: context => {
       const names = valueFromContext(context, 'names', context?.entities?.names || 'details');
-      return `I need one more detail before I can do that: ${names}.`;
+      return `I will need one more detail to complete that for you, sir: ${names}. Could you please provide that?`;
     },
-    noCommand: () => 'I did not catch what you wanted me to do. Please try again.',
-    notFound: () => 'I could not find what you asked for.',
+    noCommand: () => 'I am ready to assist you, sir. What would you like me to do?',
+    notFound: () => 'I could not find what you asked for, sir. Let me know if you would like me to search for it or try a different approach.',
     timeout: () => {
       const isTest = typeof global.it === 'function' || process.env.NODE_ENV === 'test';
       if (isTest) {
         return 'The requested operation has timed out because it exceeded the allocated execution threshold';
       }
       return chooseVariant('err.timeout', [
-        `That took a bit too long to finish. The operation timed out.`,
-        `The request timed out because it exceeded the execution limit.`,
-        `I'm sorry, that action took too long and timed out.`
+        `That took a bit too long to complete, sir. The operation timed out but I am still ready to help.`,
+        `The request took longer than expected, sir. Please try again and I will do my best.`,
+        `That operation timed out, sir. I am still here and ready to assist with anything else.`
       ]);
     },
     default: context => humanizeError(context?.error)
   },
 
   confirmation: {
-    confirmDelete: context => `I require your authorization before deleting. This operation will permanently remove ${valueFromContext(context, 'count')} item${valueFromContext(context, 'count') === 1 ? '' : 's'}. Do you authorize this deletion?`,
-    confirmShutdown: () => 'Please confirm that you authorize the system to initiate a complete shutdown',
-    confirmRestart: () => 'Please confirm that you authorize the system to initiate a reboot',
+    confirmDelete: context => `Before I proceed, I require your confirmation. This operation will permanently remove ${valueFromContext(context, 'count')} item${valueFromContext(context, 'count') === 1 ? '' : 's'}. Do you authorize this deletion, sir?`,
+    confirmShutdown: () => 'Your authorization is required to initiate a complete system shutdown. Please confirm.',
+    confirmRestart: () => 'Your authorization is required to reboot the system. Please confirm.',
     confirmAction: context => {
       const details = valueFromContext(context, 'details', valueFromContext(context, 'action'));
-      return `Before I do that, please confirm: ${details}. Say yes to continue or no to cancel.`;
+      return `Before I proceed, please confirm: ${details}. Say yes to continue or no to cancel.`;
     },
-    awaitingDecision: () => 'Please say proceed or cancel.',
-    cancelled: () => 'Understood. I have cancelled that action.',
-    timedOut: () => 'The confirmation timed out, so I cancelled that request.',
-    default: () => 'I need your confirmation before I proceed with that operation.'
+    awaitingDecision: () => 'I am awaiting your decision, sir. Please say proceed or cancel.',
+    cancelled: () => 'Understood, sir. The action has been cancelled.',
+    timedOut: () => 'The confirmation has timed out, so I have cancelled that request.',
+    default: () => 'I require your confirmation before I proceed with that operation, sir.'
   },
 
   info: {
-    listening: () => 'Listening.',
-    processing: () => 'Working on it.',
-    idle: () => 'Ready when you are.',
+    listening: () => 'I am listening, sir.',
+    processing: () => 'Working on it, sir.',
+    idle: () => 'Ready and waiting for your command, sir.',
     wakeWord: () => {
       const isTest = typeof global.it === 'function' || process.env.NODE_ENV === 'test';
       if (isTest) {
         return 'Yes, sir. I am at your service';
       }
       return chooseVariant('info.wakeWord', [
-        `Yes. I am listening.`,
-        `Ready. What would you like me to do?`,
-        `I am listening. Please go ahead.`
+        `Yes, sir. How may I assist you?`,
+        `I am here and listening, sir.`,
+        `At your service, sir. What do you need?`
       ]);
     },
     default: () => ''

@@ -143,7 +143,13 @@ class Assistant extends EventEmitter {
       this._recordLearningOutcome(input, routedInput, result);
 
       let response = result.response || '';
-      response = this._appendLearningPrompt(response, input, routedInput, result);
+      const contextAwareError = this._generateContextAwareErrorResponse(result, input);
+      if (contextAwareError) {
+        response = contextAwareError;
+      }
+      if (!contextAwareError) {
+        response = this._appendLearningPrompt(response, input, routedInput, result);
+      }
       response = this.personality.applyToResponse(response);
 
       if (result.requiresConfirmation) {
@@ -428,6 +434,64 @@ class Assistant extends EventEmitter {
       response: this.personality.applyToResponse(response),
       source
     };
+  }
+
+  _getRecentAppAction(intent = null) {
+    const history = this.context.getHistory(10).slice().reverse();
+    for (const entry of history) {
+      if (entry?.success && entry?.intent?.startsWith('app.')) {
+        if (!intent || entry.intent === intent) {
+          return entry;
+        }
+      }
+    }
+    return null;
+  }
+
+  _generateContextAwareErrorResponse(result, input) {
+    if (result.success !== false) {
+      return null;
+    }
+
+    const intent = result.intent;
+    const entities = result.entities || {};
+    const error = result.error || '';
+    const loweredError = String(error).toLowerCase();
+    const appName = entities.appName || '';
+
+    if (intent === 'app.close' && appName) {
+      const recentOpen = this.context.findRecent(
+        entry => entry?.success && entry?.intent === 'app.open' && entry?.entities?.appName?.toLowerCase() === appName.toLowerCase(),
+        10
+      );
+      if (recentOpen) {
+        if (loweredError.includes('could not close')) {
+          return this.personality.applyToResponse(
+            `I opened ${appName} for you earlier, sir, but I am having trouble closing it. It may not be running, or Windows rejected the request. Would you like me to try again?`
+          );
+        }
+      }
+
+      if (loweredError.includes('could not close')) {
+        return this.personality.applyToResponse(
+          `I could not close ${appName}, sir. It may not be running, or Windows rejected the request. Would you like me to try opening it first?`
+        );
+      }
+    }
+
+    if (intent === 'app.open' && appName) {
+      const recentClose = this.context.findRecent(
+        entry => entry?.success && entry?.intent === 'app.close' && entry?.entities?.appName?.toLowerCase() === appName.toLowerCase(),
+        10
+      );
+      if (recentClose) {
+        return this.personality.applyToResponse(
+          `I closed ${appName} for you a moment ago, sir. I can open it again if you like.`
+        );
+      }
+    }
+
+    return null;
   }
 
   _buildRoutedInput(input) {
@@ -848,6 +912,10 @@ class Assistant extends EventEmitter {
 
     const choice = this._resolveClarificationChoice(normalized, pending.data?.choices || []);
     if (!choice) {
+      if (!this._looksLikeChoiceResponse(normalized, pending.data?.choices || [])) {
+        this.pendingClarification = null;
+        return null;
+      }
       return {
         success: false,
         needsClarification: true,
@@ -896,6 +964,29 @@ class Assistant extends EventEmitter {
       return (title && (title.includes(normalized) || normalized.includes(title))) ||
         (choicePath && (choicePath.includes(normalized) || normalized.includes(choicePath)));
     }) || null;
+  }
+
+  _looksLikeChoiceResponse(input, choices) {
+    const normalized = String(input || '').trim().toLowerCase();
+    if (!normalized) return false;
+    const list = Array.isArray(choices) ? choices : [];
+    if (list.length === 0) return false;
+
+    if (/^\d+$/.test(normalized)) return true;
+
+    if (normalized.length > 0 && normalized.length < 50) {
+      const match = list.find(choice => {
+        const title = Normalizer.normalizeText(choice.title || '').toLowerCase();
+        const choicePath = Normalizer.normalizeText(choice.path || '').toLowerCase();
+        return title.includes(normalized) || normalized.includes(title) ||
+          choicePath.includes(normalized) || normalized.includes(choicePath);
+      });
+      if (match) return true;
+    }
+
+    if (/^(?:first|second|third|fourth|fifth|1st|2nd|3rd|4th|5th)$/i.test(normalized)) return true;
+
+    return false;
   }
 
   _buildClarifiedEntities(baseEntities, choice) {

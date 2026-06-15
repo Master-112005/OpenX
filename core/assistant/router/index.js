@@ -66,7 +66,14 @@ class ActionRouter {
     }
 
     const intentResult = this._resolveIntent(rawCommandText, preparedInput, source);
-    if (!intentResult || intentResult.confidence < CONFIDENCE_THRESHOLD) {
+    const minAcceptableConfidence = 0.3;
+
+    if (!intentResult) {
+      const searchFallback = this._trySearchFallback(rawCommandText, preparedInput);
+      if (searchFallback) {
+        return searchFallback;
+      }
+
       return {
         commandId,
         success: false,
@@ -78,6 +85,17 @@ class ActionRouter {
         normalizedInput: preparedInput.correctedText || parseResult.commandText,
         languageUnderstanding: this._buildLanguageUnderstanding(preparedInput, intentResult, [], 'failed')
       };
+    }
+
+    if (intentResult.confidence < minAcceptableConfidence) {
+      const searchFallback = this._trySearchFallback(rawCommandText, preparedInput);
+      if (searchFallback) {
+        return searchFallback;
+      }
+    }
+
+    if (intentResult.confidence < CONFIDENCE_THRESHOLD) {
+      this.logger.warn(`Low confidence intent ${intentResult.intent?.id} at ${intentResult.confidence}, proceeding anyway`);
     }
 
     return this._completeIntent(commandId, intentResult, rawCommandText, source, preparedInput);
@@ -748,7 +766,14 @@ class ActionRouter {
     }
 
     // Check for resume
-    if (/\b(resume|resume\s*music|resume\s*song|resume\s*playback|play\s+again|continue|unpause|carry\s+on)\b/i.test(textToUse)) {
+    if (/\b(resume|resume\s*music|resume\s*song|resume\s*playback|play\s+again|unpause|carry\s+on)\b/i.test(textToUse) &&
+        !/\b(find|search|locate)\b/i.test(textToUse)) {
+      const intent = this.intentRegistry.get('media.resume');
+      if (intent) return { intent, confidence: 1 };
+    }
+
+    // Check for continue - but not when part of find/search commands
+    if (/\b(continue)\b/i.test(textToUse) && !/\b(find|search|locate)\b/i.test(textToUse)) {
       const intent = this.intentRegistry.get('media.resume');
       if (intent) return { intent, confidence: 1 };
     }
@@ -2398,6 +2423,47 @@ class ActionRouter {
     const ResponseGenerator = require('../responses/index');
     const generator = new ResponseGenerator(this.config);
     return generator.generate(type, template, context);
+  }
+
+  _trySearchFallback(rawCommandText, preparedInput) {
+    const text = String(rawCommandText || '').trim();
+    if (!text) return null;
+
+    const browserSearchIntent = this.intentRegistry.get('browser.search');
+    if (!browserSearchIntent) return null;
+
+    const searchQuery = text
+      .replace(/^(?:search|google|look up|find|what is|who is|where is|tell me|can you|please|tell me about|what about)\s+/i, '')
+      .replace(/^(?:for|in)\s+/i, '')
+      .trim();
+
+    if (searchQuery && searchQuery.length > 1) {
+      return {
+        commandId: IdGenerator.generate(),
+        success: true,
+        intent: 'browser.search',
+        confidence: 0.5,
+        entities: { query: searchQuery },
+        response: this._buildResponse('success', 'browser.search', {
+          entities: { query: searchQuery },
+          result: { data: { query: searchQuery } }
+        })
+      };
+    }
+
+    const helpIntent = this.intentRegistry.get('help');
+    if (helpIntent && /^(?:what do i do|how does this work|what can i say|help|commands|how to)\b/i.test(text)) {
+      return {
+        commandId: IdGenerator.generate(),
+        success: true,
+        intent: 'help',
+        confidence: 0.6,
+        entities: {},
+        response: this._buildResponse('success', 'help', { entities: {} })
+      };
+    }
+
+    return null;
   }
 }
 

@@ -33,31 +33,22 @@ function applyFormalAddress(text, config) {
   if (!source) return '';
   if (hasHonorific(source)) return source;
 
-  // Honorifics can be globally disabled or omitted via config
   if (config?.assistant?.addressing?.useHonorific === false) {
     return source;
   }
 
   const honorific = resolveHonorific(config);
-  const seed = hashSeed(source);
   const isTest = typeof global.it === 'function' || process.env.NODE_ENV === 'test';
-
-  // Apply honorific naturally ~35% of the time to avoid robotic repetition
-  if (!isTest && seed % 3 !== 0) {
-    return source;
-  }
 
   const punctuationMatch = source.match(/[.!?]$/);
   const punctuation = punctuationMatch ? punctuationMatch[0] : '.';
   const base = punctuationMatch ? source.slice(0, -1).trim() : source;
 
-  // Alternate placement between prefix and suffix
-  if (isTest || seed % 2 === 0) {
+  if (isTest) {
     return `${base}, ${honorific}${punctuation}`;
-  } else {
-    const capitalizedHonorific = honorific.charAt(0).toUpperCase() + honorific.slice(1);
-    return `${capitalizedHonorific}, ${base}${punctuation}`;
   }
+
+  return `${base}, ${honorific}${punctuation}`;
 }
 
 module.exports = {
