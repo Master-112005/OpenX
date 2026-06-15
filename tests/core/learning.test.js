@@ -105,6 +105,45 @@ describe('Active Learning Store', function() {
     assert.equal(answer.response, 'Your name is rakes.');
   });
 
+  it('should remember and answer account passwords across service phrasing', function() {
+    const { tempDir, store } = createStore();
+
+    const apple = store.learnFromText('remember this rakesh112005 as my apple account password');
+    const google = store.learnFromText('remember my gmail account password is hunter2');
+    const reloaded = new ActiveLearningStore({
+      app: { dataDir: tempDir },
+      activeLearning: { enabled: true }
+    });
+
+    const appleAnswer = reloaded.answerPersonalQuestion('what is my apple account password');
+    const googleAnswer = reloaded.answerPersonalQuestion('what is my google account password');
+
+    assert.equal(apple.type, 'user-fact');
+    assert.equal(google.type, 'user-fact');
+    assert.equal(appleAnswer.known, true);
+    assert.equal(appleAnswer.fact, 'applePassword');
+    assert.match(appleAnswer.response, /rakesh112005/);
+    assert.equal(googleAnswer.known, true);
+    assert.equal(googleAnswer.fact, 'googlePassword');
+    assert.match(googleAnswer.response, /hunter2/);
+  });
+
+  it('should remember and answer generic personal facts', function() {
+    const { tempDir, store } = createStore();
+
+    const learned = store.learnFromText('remember my favorite color is blue');
+    const reloaded = new ActiveLearningStore({
+      app: { dataDir: tempDir },
+      activeLearning: { enabled: true }
+    });
+    const answer = reloaded.answerPersonalQuestion('what is my favorite color');
+
+    assert.equal(learned.type, 'user-fact');
+    assert.equal(answer.known, true);
+    assert.equal(answer.fact, 'favorite_color');
+    assert.equal(answer.response, 'Your favorite color is blue.');
+  });
+
   it('should preserve validation and verification evidence on feedback records', function() {
     const { store } = createStore();
 

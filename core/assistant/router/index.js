@@ -69,6 +69,19 @@ class ActionRouter {
     const minAcceptableConfidence = 0.3;
 
     if (!intentResult) {
+      if (this._isIncompleteCommand(rawCommandText, preparedInput)) {
+        return {
+          commandId,
+          success: false,
+          error: 'Could not determine intent',
+          response: this._buildResponse('error', 'unknownCommand', {
+            input: rawCommandText,
+            suggestions: this._suggestAlternatives(preparedInput)
+          }),
+          normalizedInput: preparedInput.correctedText || parseResult.commandText,
+          languageUnderstanding: this._buildLanguageUnderstanding(preparedInput, intentResult, [], 'failed')
+        };
+      }
       const searchFallback = this._trySearchFallback(rawCommandText, preparedInput);
       if (searchFallback) {
         return searchFallback;
@@ -151,6 +164,9 @@ class ActionRouter {
     if (/^(?:hi|hello|hey|good\s+(?:morning|afternoon|evening)|how\s+are\s+you|what\s+can\s+you\s+do|what\s+is\s+your\s+name|whats\s+your\s+name)\b/i.test(corrected)) {
       return false;
     }
+    if (/^(?:what|who|when|where|why|how|which|is|are|do|does|can|could|should|would)\b/i.test(corrected)) {
+      return false;
+    }
 
     const standaloneCommands = new Set([
       'cancel',
@@ -179,6 +195,7 @@ class ActionRouter {
     }
 
     const actionAliases = new Set([
+      'ask',
       'attach',
       'call',
       'close',
@@ -206,6 +223,8 @@ class ActionRouter {
       'show',
       'start',
       'switch',
+      'tell',
+      'text',
       'turn'
     ]);
     const actionIndex = tokens.findIndex(token => actionAliases.has(token));
@@ -254,6 +273,7 @@ class ActionRouter {
 
     return [
       'attach',
+      'ask',
       'call',
       'close',
       'copy',
@@ -279,6 +299,8 @@ class ActionRouter {
       'show',
       'start',
       'switch',
+      'tell',
+      'text',
       'turn'
     ].includes(action);
   }
@@ -987,6 +1009,9 @@ class ActionRouter {
     if (!hasFileCue || !hasSmartCue) {
       return null;
     }
+    if (/\bfind\s+all\s+pdfs?\s+downloaded\b/.test(input) || /\bduplicates?\s+files?\b/.test(input)) {
+      return null;
+    }
 
     const intent = this.intentRegistry.get('file.smartFind');
     if (!intent) {
@@ -1305,7 +1330,7 @@ class ActionRouter {
 
   _resolveKnownWebOpenIntent(rawText, preparedInput) {
     const input = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
-    const match = input.match(/^(?:open|launch|start|go\s+to|show(?:\s+me)?)\s+(.+?)(?:\s+(?:in|on)\s+(?:chrome|browser|edge|firefox))?$/i);
+    const match = input.match(/^(?:open|launch|start|go\s+to|pull\s+up|show(?:\s+me)?)\s+(.+?)(?:\s+(?:website|site))?(?:\s+(?:in|on)\s+(?:chrome|browser|edge|firefox))?$/i);
     if (!match?.[1]) {
       return null;
     }
@@ -1362,7 +1387,7 @@ class ActionRouter {
     if (messageIntent && /^(?:say|send|message|text|ask|tell|msg|massage)\b/i.test(lower)) {
       const entities = this.entityExtractor.extract(messageIntent, rawText);
       if (entities.contactName && entities.messageText) {
-        return { intent: messageIntent, confidence: 1 };
+        return { intent: messageIntent, confidence: 1, entities };
       }
     }
 
@@ -1498,6 +1523,10 @@ class ActionRouter {
   _resolveBareKnowledgeSearchIntent(rawText, preparedInput) {
     const input = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
     if (!input || /^(?:what|who|when|where|why|how|which)\b/.test(input)) {
+      return null;
+    }
+    if (/^(?:i\s+was|we\s+were|just\s+)?(?:talking|chatting|speaking)\s+about\b/.test(input) ||
+      /\b(?:i\s+was|we\s+were)\s+(?:just\s+)?talking\s+about\b/.test(input)) {
       return null;
     }
 
@@ -1671,6 +1700,11 @@ class ActionRouter {
   _resolveSiteSearchIntent(rawText, preparedInput) {
     const corrected = String(preparedInput?.correctedText || rawText || '').trim();
     const raw = String(rawText || corrected || '').trim();
+    const explicitOpenOnly = /^(?:open|launch|start|go\s+to|pull\s+up|show(?:\s+me)?)\b/i.test(raw) &&
+      !/\b(?:search|find|look\s+for|look\s+up)\b/i.test(raw);
+    if (explicitOpenOnly) {
+      return null;
+    }
     const candidates = [corrected, raw].filter(Boolean);
     const intent = this.intentRegistry.get('browser.siteSearch');
     if (!intent) {
@@ -1944,6 +1978,7 @@ class ActionRouter {
     const text = this._normalizeSystemCommandText(input);
     const patterns = [
       /\bif\s+(.+?)\s+(?:is|are)\s+(?:running|open|opened|active)\b/,
+      /\b(?:is|are)\s+(.+?)\s+(?:is|are)\s+(?:running|open|opened|active)\b/,
       /\b(?:is|are)\s+(.+?)\s+(?:running|open|opened|active)\b/,
       /\b(?:check|tell\s+me|see)\s+(?:if|whether)\s+(.+?)\s+(?:is|are)\s+(?:running|open|opened|active)\b/,
       /\b(?:check|tell\s+me|see)\s+(.+?)\s+(?:running|open|opened|active)\b/,
@@ -1979,6 +2014,7 @@ class ActionRouter {
       .replace(/\bproccesses\b/g, 'processes')
       .replace(/\bproccess\b/g, 'process')
       .replace(/\bopend\b/g, 'opened')
+      .replace(/\bin\s+user\b/g, 'in use')
       .replace(/\busing\b/g, 'in use')
       .replace(/\s+/g, ' ');
   }
@@ -2158,6 +2194,9 @@ class ActionRouter {
     const input = String(preparedInput?.correctedText || rawText || '').trim();
     const lower = input.toLowerCase();
     if (!/^(?:locate|find|search|where\s+is|where\s+are|what\s+is\s+the\s+location\s+of|show\s+me\s+where)\b/.test(lower)) {
+      return null;
+    }
+    if (/^search(?:\s+for)?\b/i.test(lower) && this._looksLikeWebSearchQuery(lower)) {
       return null;
     }
     const query = this._extractLocalFileSearchQuery(rawText || input, input);
@@ -2432,12 +2471,22 @@ class ActionRouter {
     const browserSearchIntent = this.intentRegistry.get('browser.search');
     if (!browserSearchIntent) return null;
 
+    const normalized = String(preparedInput?.correctedText || text).trim().toLowerCase();
+    const explicitSearch = /^(?:search|google|look up|find on web|search the web|tell me about|what about)\b/i.test(normalized);
+    const knowledgeQuestion = /^(?:what|who|when|where|why|how|which)\b/i.test(normalized) &&
+      !/\b(?:running|open|opened|active|visible|in\s+use|being\s+used|used|system|computer|pc|laptop|file|folder|remind)\b/i.test(normalized);
+    const hasKnowledgeSignal = this._looksLikeWebSearchQuery(normalized) ||
+      /\b(?:ipl|cricket|fifa|world\s+cup|match(?:es)?|fixtures?|schedule|score|scores|winner|winners|champion|champions|event|release|released|premiere|price|latest|current|today'?s?|news|best|top|list|movie|movies|paper|journal|research|documentation|docs|tutorials?|examples?|guide)\b/.test(normalized);
+    if (!explicitSearch && !(knowledgeQuestion && hasKnowledgeSignal)) {
+      return null;
+    }
+
     const searchQuery = text
-      .replace(/^(?:search|google|look up|find|what is|who is|where is|tell me|can you|please|tell me about|what about)\s+/i, '')
+      .replace(/^(?:search\s+for|search\s+the\s+web\s+for|search\s+web\s+for|search\s+web|search|google|look\s+up|find\s+on\s+web|find|what\s+is|who\s+is|where\s+is|tell\s+me|can\s+you|please|tell\s+me\s+about|what\s+about)\s+/i, '')
       .replace(/^(?:for|in)\s+/i, '')
       .trim();
 
-    if (searchQuery && searchQuery.length > 1) {
+    if (searchQuery && searchQuery.length > 1 && !/^(?:for|in|on|about|me|it|that|this)$/i.test(searchQuery)) {
       return {
         commandId: IdGenerator.generate(),
         success: true,

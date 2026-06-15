@@ -1103,6 +1103,45 @@ describe('Assistant Confirmation Flow', function() {
     assert.deepEqual(routedInputs, []);
   });
 
+  it('should learn and answer password and generic personal context before routing', async function() {
+    const ActiveLearningStore = require('../../core/assistant/learning/index');
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-learning-'));
+    const learning = new ActiveLearningStore({
+      app: { dataDir: tempDir },
+      activeLearning: { enabled: true, askForFeedback: false }
+    });
+    const routedInputs = [];
+    const router = {
+      process: async input => {
+        routedInputs.push(input);
+        return {
+          commandId: 'cmd-search',
+          success: true,
+          intent: 'browser.search',
+          entities: { query: input },
+          response: 'Searched web.'
+        };
+      }
+    };
+    const assistant = new Assistant({}, {
+      router,
+      learning,
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    const rememberPassword = await assistant.processCommand('remember this rakesh112005 as my apple account password');
+    const passwordAnswer = await assistant.processCommand('what is my apple account password');
+    const rememberFact = await assistant.processCommand('remember my favorite color is blue');
+    const factAnswer = await assistant.processCommand('what is my favorite color');
+
+    assert.equal(rememberPassword.learned, true);
+    assert.match(passwordAnswer.response, /rakesh112005/);
+    assert.equal(rememberFact.learned, true);
+    assert.match(factAnswer.response, /favorite color is blue/i);
+    assert.deepEqual(routedInputs, []);
+  });
+
   it('should vary conversational greetings by user phrasing', async function() {
     const assistant = new Assistant({}, {
       automation: {

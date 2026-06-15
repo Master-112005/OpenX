@@ -6,6 +6,28 @@ const { Normalizer } = require('../../shared/index');
 const MAX_EVENTS = 200;
 const MAX_REWRITES = 100;
 const MAX_PROMPTS = 100;
+const ACCOUNT_SERVICES = [
+  'apple',
+  'microsoft',
+  'google',
+  'gmail',
+  'email',
+  'facebook',
+  'instagram',
+  'twitter',
+  'linkedin',
+  'github',
+  'amazon',
+  'netflix',
+  'spotify',
+  'discord',
+  'slack',
+  'banking',
+  'bank',
+  'account',
+  'general'
+];
+const ACCOUNT_SERVICE_PATTERN = ACCOUNT_SERVICES.join('|');
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -20,6 +42,30 @@ function cleanCommand(value) {
     .trim()
     .replace(/^["']|["']$/g, '')
     .replace(/\s+/g, ' ');
+}
+
+function normalizeMemoryKey(value) {
+  return cleanCommand(value)
+    .toLowerCase()
+    .replace(/[.!?]+$/g, '')
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+function normalizeAccountService(value) {
+  const service = normalizeCommand(value || 'general')
+    .replace(/\s+account$/i, '')
+    .trim();
+  if (!service || service === 'general') {
+    return 'general';
+  }
+  if (/^(?:google|gmail|email)$/.test(service)) {
+    return 'google';
+  }
+  if (ACCOUNT_SERVICES.includes(service)) {
+    return service;
+  }
+  return 'general';
 }
 
 class ActiveLearningStore {
@@ -176,12 +222,9 @@ class ActiveLearningStore {
       };
     }
 
-    const passwordMatch = normalized.match(/^(?:what\s+is|what'?s|tell me|do\s+you\s+(?:know|remember))\s+my\s+((?:google|gmail|email|facebook|instagram|twitter|linkedin|github|amazon|netflix|spotify|discord|slack|banking|bank|account|general)?\s*)?(?:account\s+)?password\b/);
+    const passwordMatch = normalized.match(new RegExp(`^(?:what\\s+is|what'?s|tell me|do\\s+you\\s+(?:know|remember))\\s+my\\s+((?:${ACCOUNT_SERVICE_PATTERN})?\\s*)?(?:account\\s+)?password\\b`));
     if (passwordMatch) {
-      let service = (passwordMatch[1] || 'general').trim();
-      if (!service) service = 'general';
-      service = /^(?:google|gmail|email)$/i.test(service) ? 'google' :
-        /^(?:facebook|instagram|twitter|linkedin|github|amazon|netflix|spotify|discord|slack|banking|bank|account)$/i.test(service) ? service.toLowerCase() : 'general';
+      const service = normalizeAccountService(passwordMatch[1]);
       const password = this.getUserFact(`${service}Password`);
       if (password?.value) {
         return {
@@ -197,6 +240,31 @@ class ActiveLearningStore {
         fact: `${service}Password`,
         response: `I do not have your ${service} account password stored. You can say, "remember my ${service} account password is [password]."`
       };
+    }
+
+    const factMatch = normalized.match(/^(?:(what\s+is|what'?s|tell me|do\s+you\s+(?:know|remember))\s+)?my\s+(.+)$/);
+    if (factMatch?.[2]) {
+      const questionPrefix = factMatch[1] || '';
+      const key = normalizeMemoryKey(factMatch[2]);
+      if (key && !/^(?:name|password|account_password)$/.test(key)) {
+        const fact = this.getUserFact(key);
+        if (fact?.value) {
+          return {
+            type: 'user-fact',
+            known: true,
+            fact: key,
+            response: `Your ${key.replace(/_/g, ' ')} is ${fact.value}.`
+          };
+        }
+        if (/\b(?:tell me|do\s+you\s+(?:know|remember))\b/.test(questionPrefix)) {
+          return {
+            type: 'user-fact',
+            known: false,
+            fact: key,
+            response: `I do not have your ${key.replace(/_/g, ' ')} stored yet. You can say, "remember my ${key.replace(/_/g, ' ')} is [value]."`
+          };
+        }
+      }
     }
 
     return null;
@@ -426,17 +494,11 @@ class ActiveLearningStore {
 
     const identityMatch = text.match(/^(?:remember\s+(?:that\s+)?)?i\s+am\s+(?:a\s+)?(.+)$/i);
 
-    const passwordRememberMatch = text.match(/^(?:remember|save|store)\s+(?:my\s+)?((?:apple|microsoft|google|gmail|email|facebook|instagram|twitter|linkedin|github|amazon|netflix|spotify|discord|slack|banking|bank|account)\s+)?(?:account\s+)?password\s+(?:is\s+)?(.+)$/i);
+    const passwordRememberMatch = text.match(new RegExp(`^(?:remember|save|store)\\s+(?:my\\s+)?((?:${ACCOUNT_SERVICE_PATTERN})\\s+)?(?:account\\s+)?password\\s+(?:is\\s+)?(.+)$`, 'i'));
     if (passwordRememberMatch && (passwordRememberMatch[1] || passwordRememberMatch[2])) {
-      const password = passwordRememberMatch[passwordRememberMatch[1] ? 2 : 3].replace(/[.!?]+$/g, '').trim();
-      let service = passwordRememberMatch[1]?.trim() || 'general';
-      if (service) {
-        service = service.replace(/\s+account$/i, '').trim();
-      }
+      const password = passwordRememberMatch[2].replace(/[.!?]+$/g, '').trim();
+      const serviceName = normalizeAccountService(passwordRememberMatch[1]);
       if (password && password.length > 0 && password.length < 100) {
-        const serviceName = /^(?:apple|microsoft)$/i.test(service) ? service.toLowerCase() :
-          /^(?:google|gmail|email)$/i.test(service) ? 'google' :
-          /^(?:facebook|instagram|twitter|linkedin|github|amazon|netflix|spotify|discord|slack|banking|bank|account)$/i.test(service) ? service.toLowerCase() : 'general';
         const fact = this.rememberUserFact(`${serviceName}Password`, password, {
           source: 'user-stated-credential'
         });
@@ -449,17 +511,11 @@ class ActiveLearningStore {
       }
     }
 
-    const passwordThisMatch = text.match(/^(?:remember|save|store)\s+this\s+(.+?)\s+as\s+(?:my\s+)?(?:(?:apple|microsoft|google|gmail|email|facebook|instagram|twitter|linkedin|github|amazon|netflix|spotify|discord|slack|banking|bank|account)\s+)?(?:account\s+)?password$/i);
+    const passwordThisMatch = text.match(new RegExp(`^(?:remember|save|store)\\s+this\\s+(.+?)\\s+as\\s+(?:my\\s+)?((?:${ACCOUNT_SERVICE_PATTERN})\\s+)?(?:account\\s+)?password$`, 'i'));
     if (passwordThisMatch && passwordThisMatch[1]) {
       const password = passwordThisMatch[1].replace(/[.!?]+$/g, '').trim();
-      let service = passwordThisMatch[2]?.trim() || 'general';
-      if (service) {
-        service = service.replace(/\s+account$/i, '').trim();
-      }
+      const serviceName = normalizeAccountService(passwordThisMatch[2]);
       if (password && password.length > 0 && password.length < 100) {
-        const serviceName = /^(?:apple|microsoft)$/i.test(service) ? service.toLowerCase() :
-          /^(?:google|gmail|email)$/i.test(service) ? 'google' :
-          /^(?:facebook|instagram|twitter|linkedin|github|amazon|netflix|spotify|discord|slack|banking|bank|account)$/i.test(service) ? service.toLowerCase() : 'general';
         const fact = this.rememberUserFact(`${serviceName}Password`, password, {
           source: 'user-stated-credential'
         });
@@ -505,7 +561,7 @@ if (fact) {
 
     const genericRememberMatch = text.match(/^(?:remember|note)\s+(?:this\s+)?(?:that\s+)?(?:my\s+)?(.+?)\s+(?:is|was|are|were)\s+(.+)$/i);
     if (genericRememberMatch && genericRememberMatch[1] && genericRememberMatch[2]) {
-      const key = genericRememberMatch[1].replace(/[.!?]+$/g, '').trim().toLowerCase().replace(/\s+/g, '_');
+      const key = normalizeMemoryKey(genericRememberMatch[1]);
       const value = genericRememberMatch[2].replace(/[.!?]+$/g, '').trim();
       if (key && value && key.length > 1 && value.length > 0 && value.length < 100 && key !== 'password' && !/^(?:i|my|the|a|an|this|that|it|they|them|his|her|their)\b/i.test(key)) {
         const fact = this.rememberUserFact(key, value, {
@@ -522,7 +578,7 @@ if (fact) {
 
     const myXIsYMatch = text.match(/^my\s+(.+?)\s+(?:is|was|are|were)\s+(.+)$/i);
     if (myXIsYMatch && myXIsYMatch[1] && myXIsYMatch[2]) {
-      const key = myXIsYMatch[1].replace(/[.!?]+$/g, '').trim().toLowerCase().replace(/\s+/g, '_');
+      const key = normalizeMemoryKey(myXIsYMatch[1]);
       const value = myXIsYMatch[2].replace(/[.!?]+$/g, '').trim();
       if (key && value && key.length > 1 && value.length > 0 && value.length < 100 && !/^(?:name|password|email|phone|mobile|card|number)\b/i.test(key)) {
         const fact = this.rememberUserFact(key, value, {

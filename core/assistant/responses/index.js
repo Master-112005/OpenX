@@ -832,7 +832,7 @@ const RESPONSE_BUILDERS = {
   info: {
     listening: () => 'I am listening, sir.',
     processing: () => 'Working on it, sir.',
-    idle: () => 'Ready and waiting for your command, sir.',
+    idle: () => 'Ready when you are, sir.',
     wakeWord: () => {
       const isTest = typeof global.it === 'function' || process.env.NODE_ENV === 'test';
       if (isTest) {
