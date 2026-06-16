@@ -394,7 +394,7 @@ class ActionRouter {
     }
 
     let clauses = text
-      .split(/\s*(?:;|\b(?:and then|then|after that|afterwards|and)\b)\s*/i)
+      .split(/\s*(?:;|,|\b(?:and then|then|after that|afterwards|and|also|plus|add|additionally|furthermore|plus)\b)\s*/i)
       .map(part => part.trim())
       .filter(Boolean)
       .slice(0, 6);
@@ -404,6 +404,9 @@ class ActionRouter {
     }
 
     if (clauses.length < 2) {
+      if (this._hasImplicitMultiCommand(text)) {
+        return this._splitImplicitMultiCommand(text);
+      }
       return null;
     }
 
@@ -411,10 +414,46 @@ class ActionRouter {
 
     const actionableClauses = clauses.filter(clause => this._clauseLooksActionable(clause, source));
     if (actionableClauses.length < 2) {
+      if (clauses.length >= 2) {
+        return clauses;
+      }
+      if (this._hasImplicitMultiCommand(text)) {
+        return this._splitImplicitMultiCommand(text);
+      }
       return null;
     }
 
     return clauses;
+  }
+
+  _hasImplicitMultiCommand(text) {
+    const normalized = String(text || '').toLowerCase();
+    const actionPairs = [
+      [/(?:open|launch|start|close|quit)\s+\w+/, /(?:search|google|find|look)\s+(?:for\s+)?\w+/],
+      [/(?:search|google|find|look)\s+(?:for\s+)?\w+/, /(?:open|launch|play)\s+\w+/],
+      [/(?:open|launch|start)\s+\w+/, /(?:search|google)\s+\w+/],
+      [/(?:search|find)\s+\w+/, /(?:and|then|also)\s+\w+/],
+      [/\w+\s+(?:and|then|also)\s+\w+/]
+    ];
+    for (const [pattern1, pattern2] of actionPairs) {
+      if (pattern1.test(normalized) && pattern2.test(normalized)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  _splitImplicitMultiCommand(text) {
+    const connectors = /\s+(?:and|then|also|plus|add|additionally|furthermore)\s+/gi;
+    const parts = text.split(connectors).map(p => p.trim()).filter(Boolean);
+    if (parts.length >= 2) {
+      return parts.slice(0, 6);
+    }
+    const simpleAnd = text.split(/\s+and\s+/i).map(p => p.trim()).filter(Boolean);
+    if (simpleAnd.length >= 2) {
+      return simpleAnd.slice(0, 6);
+    }
+    return null;
   }
 
   _looksLikeSingleMediaPlatformRequest(text) {

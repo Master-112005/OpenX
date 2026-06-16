@@ -102,7 +102,7 @@ describe('Active Learning Store', function() {
     assert.equal(unknown.known, false);
     assert.equal(learned.type, 'user-fact');
     assert.equal(answer.known, true);
-    assert.equal(answer.response, 'Your name is rakes.');
+    assert.equal(answer.response, 'Your name is rakes, sir.');
   });
 
   it('should remember and answer account passwords across service phrasing', function() {
@@ -141,7 +141,7 @@ describe('Active Learning Store', function() {
     assert.equal(learned.type, 'user-fact');
     assert.equal(answer.known, true);
     assert.equal(answer.fact, 'favorite_color');
-    assert.equal(answer.response, 'Your favorite color is blue.');
+    assert.equal(answer.response, 'Your favorite color is blue, sir.');
   });
 
   it('should preserve validation and verification evidence on feedback records', function() {

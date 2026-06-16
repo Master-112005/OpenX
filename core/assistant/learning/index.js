@@ -194,7 +194,7 @@ class ActiveLearningStore {
     return record;
   }
 
-  getUserFact(kind) {
+getUserFact(kind) {
     if (!this.enabled || !kind) {
       return null;
     }
@@ -202,6 +202,118 @@ class ActiveLearningStore {
     const normalizedKind = normalizeCommand(kind).replace(/\s+/g, '.');
     const record = this.data.userFacts[normalizedKind];
     return record ? { ...record, kind: normalizedKind } : null;
+  }
+
+  getAllUserFacts() {
+    if (!this.enabled) {
+      return {};
+    }
+    const facts = {};
+    for (const [key, record] of Object.entries(this.data.userFacts || {})) {
+      if (record?.value) {
+        facts[key] = record.value;
+      }
+    }
+    return facts;
+  }
+
+  getUserIdentitySummary() {
+    const facts = this.getAllUserFacts();
+    const summary = [];
+    if (facts.name) summary.push(`name: ${facts.name}`);
+    if (facts.profession) summary.push(`profession: ${facts.profession}`);
+    if (facts.favorite_color) summary.push(`favorite color: ${facts.favorite_color}`);
+    if (facts.favorite_food) summary.push(`favorite food: ${facts.favorite_food}`);
+    if (facts.phone) summary.push(`phone: ${facts.phone}`);
+    if (facts.email) summary.push(`email: ${facts.email}`);
+    if (facts.location) summary.push(`location: ${facts.location}`);
+    if (facts.applePassword) summary.push(`has apple password`);
+    if (facts.googlePassword) summary.push(`has google password`);
+    return summary.length > 0 ? summary.join(', ') : 'no personal facts stored';
+  }
+
+  learnFromMultiCommand(input, commands) {
+    if (!this.enabled || !Array.isArray(commands) || commands.length < 2) {
+      return null;
+    }
+
+    const text = cleanCommand(input);
+    const normalized = normalizeCommand(text);
+    if (!normalized) return null;
+
+    const existing = this.data.commandSequences?.[normalized];
+    if (existing) {
+      if (existing.sequence.join(',') === commands.join(',')) {
+        existing.uses = (existing.uses || 0) + 1;
+        existing.lastUsed = new Date().toISOString();
+        this._save();
+        return { type: 'sequence', action: 'reinforced', sequence: commands };
+      }
+    }
+
+    if (!this.data.commandSequences) {
+      this.data.commandSequences = {};
+    }
+
+    this.data.commandSequences[normalized] = {
+      input: text,
+      sequence: commands,
+      confidence: 1,
+      uses: 1,
+      createdAt: new Date().toISOString(),
+      lastUsed: new Date().toISOString()
+    };
+
+    const MAX_SEQUENCES = 50;
+    const keys = Object.keys(this.data.commandSequences);
+    if (keys.length > MAX_SEQUENCES) {
+      const sorted = keys.sort((a, b) => {
+        const aUses = this.data.commandSequences[a].uses || 0;
+        const bUses = this.data.commandSequences[b].uses || 0;
+        return aUses - bUses;
+      });
+      const toDelete = sorted.slice(0, keys.length - MAX_SEQUENCES);
+      toDelete.forEach(key => delete this.data.commandSequences[key]);
+    }
+
+    this._save();
+    return { type: 'sequence', action: 'learned', sequence: commands };
+  }
+
+  findCommandSequence(input) {
+    if (!this.enabled) return null;
+
+    const normalized = normalizeCommand(input);
+    if (!normalized) return null;
+
+    const record = this.data.commandSequences?.[normalized];
+    if (record && record.sequence && record.sequence.length >= 2) {
+      record.uses = (record.uses || 0) + 1;
+      record.lastUsed = new Date().toISOString();
+      this._save();
+      return record;
+    }
+
+    const tokens = normalized.split(/\s+/);
+    if (tokens.length >= 3) {
+      for (const [key, record] of Object.entries(this.data.commandSequences || {})) {
+        if (record.sequence && record.sequence.length >= 2) {
+          const keyTokens = key.split(/\s+/);
+          let matchCount = 0;
+          for (const token of tokens) {
+            if (keyTokens.includes(token)) matchCount++;
+          }
+          if (matchCount >= Math.floor(tokens.length * 0.7)) {
+            record.uses = (record.uses || 0) + 1;
+            record.lastUsed = new Date().toISOString();
+            this._save();
+            return record;
+          }
+        }
+      }
+    }
+
+    return null;
   }
 
   answerPersonalQuestion(input) {
@@ -217,8 +329,8 @@ class ActiveLearningStore {
         known: Boolean(name?.value),
         fact: 'name',
         response: name?.value
-          ? `Your name is ${name.value}.`
-          : 'I do not know your name yet. You can say, "remember my name is Rakesh."'
+          ? `Your name is ${name.value}, sir.`
+          : 'I do not know your name yet, sir. You can say, "remember my name is Rakesh."'
       };
     }
 
@@ -238,7 +350,49 @@ class ActiveLearningStore {
         type: 'user-fact',
         known: false,
         fact: `${service}Password`,
-        response: `I do not have your ${service} account password stored. You can say, "remember my ${service} account password is [password]."`
+        response: `I do not have your ${service} account password stored, sir. You can say, "remember my ${service} account password is [password]."`
+      };
+    }
+
+    const professionMatch = /^(?:what|who)\s+(?:is|are)\s+(?:i|me|my\s+)(?:profession|job|work|career)\b|^do\s+you\s+(?:know|remember)\s+(?:my\s+)?(?:profession|job|work|career)\b/.test(normalized);
+    if (professionMatch) {
+      const profession = this.getUserFact('profession');
+      if (profession?.value) {
+        return {
+          type: 'user-fact',
+          known: true,
+          fact: 'profession',
+          response: `Your profession is ${profession.value}, sir.`
+        };
+      }
+      return {
+        type: 'user-fact',
+        known: false,
+        fact: 'profession',
+        response: 'I do not know your profession yet, sir. You can say, "I am a student" or "my profession is developer."'
+      };
+    }
+
+    const whoAmIMatch = /^(?:who|what)\s+am\s+i\b|^do\s+you\s+know\s+me\b|^tell\s+me\s+about\s+myself\b/.test(normalized);
+    if (whoAmIMatch) {
+      const name = this.getUserFact('name');
+      const profession = this.getUserFact('profession');
+      const parts = [];
+      if (name?.value) parts.push(`Your name is ${name.value}`);
+      if (profession?.value) parts.push(`you are a ${profession.value}`);
+      if (parts.length > 0) {
+        return {
+          type: 'user-fact',
+          known: true,
+          fact: 'identity',
+          response: `${parts.join(', ')}, sir. Is there anything else you would like me to remember?`
+        };
+      }
+      return {
+        type: 'user-fact',
+        known: false,
+        fact: 'identity',
+        response: 'I do not know much about you yet, sir. You can tell me things like "my name is Rakesh" or "I am a student" and I will remember.'
       };
     }
 
@@ -246,14 +400,14 @@ class ActiveLearningStore {
     if (factMatch?.[2]) {
       const questionPrefix = factMatch[1] || '';
       const key = normalizeMemoryKey(factMatch[2]);
-      if (key && !/^(?:name|password|account_password)$/.test(key)) {
+      if (key && !/^(?:name|password|account_password|googlePassword|applePassword|microsoftPassword|facebookPassword|instagramPassword)$/.test(key)) {
         const fact = this.getUserFact(key);
         if (fact?.value) {
           return {
             type: 'user-fact',
             known: true,
             fact: key,
-            response: `Your ${key.replace(/_/g, ' ')} is ${fact.value}.`
+            response: `Your ${key.replace(/_/g, ' ')} is ${fact.value}, sir.`
           };
         }
         if (/\b(?:tell me|do\s+you\s+(?:know|remember))\b/.test(questionPrefix)) {
@@ -261,7 +415,7 @@ class ActiveLearningStore {
             type: 'user-fact',
             known: false,
             fact: key,
-            response: `I do not have your ${key.replace(/_/g, ' ')} stored yet. You can say, "remember my ${key.replace(/_/g, ' ')} is [value]."`
+            response: `I do not have your ${key.replace(/_/g, ' ')} stored yet, sir. You can say, "remember my ${key.replace(/_/g, ' ')} is [value]."`
           };
         }
       }
@@ -625,7 +779,8 @@ if (fact) {
       commandRewrites: Array.isArray(source.commandRewrites) ? source.commandRewrites.slice(0, MAX_REWRITES) : [],
       feedback: Array.isArray(source.feedback) ? source.feedback.slice(0, MAX_EVENTS) : [],
       mistakes: Array.isArray(source.mistakes) ? source.mistakes.slice(0, MAX_EVENTS) : [],
-      feedbackPrompts: Array.isArray(source.feedbackPrompts) ? source.feedbackPrompts.slice(0, MAX_PROMPTS) : []
+      feedbackPrompts: Array.isArray(source.feedbackPrompts) ? source.feedbackPrompts.slice(0, MAX_PROMPTS) : [],
+      commandSequences: isPlainObject(source.commandSequences) ? source.commandSequences : {}
     };
   }
 }
