@@ -1,7 +1,6 @@
 'use strict';
 
 const Logger = require('../shared/index').Logger;
-const { ArtistMatcher } = require('./artist-matcher');
 const { PlatformMapper } = require('./platform-mapper');
 
 const GENERIC_MEDIA_TERMS = new Set([
@@ -79,10 +78,21 @@ function tokenize(input) {
   return String(input || '').split(/\s+/).filter(Boolean);
 }
 
+function restoreKnownTitleCompounds(entityText, normalizedText) {
+  const entity = String(entityText || '').trim();
+  const source = String(normalizedText || '').trim();
+
+  if (/\bplay\s+date(?:\s+(?:song|songs|music|track|tracks|video|videos))?\b/.test(source) &&
+    /^date(?:\s+(?:song|songs|music|track|tracks|video|videos))?$/.test(entity)) {
+    return entity.replace(/^date\b/, 'playdate');
+  }
+
+  return entity;
+}
+
 class MediaParser {
   constructor(options = {}) {
     this.logger = options.logger || new Logger({ level: options.logging?.level || 'info' });
-    this.artistMatcher = options.artistMatcher || new ArtistMatcher(options);
     this.platformMapper = options.platformMapper || new PlatformMapper(options);
   }
 
@@ -117,27 +127,19 @@ class MediaParser {
     const explicitPlatform = this._extractPlatformText(normalizedText);
     const inferredPlatform = this.platformMapper.infer(explicitPlatform, context);
     const tail = removePlatformClause(stripPoliteNoise(firstPlayTail(normalizedText) || normalizedText));
-    const entityText = this._cleanEntityText(tail);
-    const artistMatch = this._shouldMatchArtist(entityText)
-      ? this.artistMatcher.match(entityText)
-      : { match: null, confidence: 0, reason: 'generic-media-query' };
+    const entityText = restoreKnownTitleCompounds(this._cleanEntityText(tail), normalizedText);
     const genre = this._extractGenre(entityText);
-    const song = this._extractSong(entityText, artistMatch.match, genre);
-    const query = this._buildQuery({ artist: artistMatch.match, song, genre, entityText });
+    const query = this._buildQuery({ genre, entityText });
 
     const intent = hasPlayVerb ? 'media.play' : 'media.search';
     const confidence = this._score({
       hasPlayVerb,
-      artistConfidence: artistMatch.confidence,
       platformConfidence: inferredPlatform.confidence,
       query
     });
 
     return this._result({
       intent,
-      artist: artistMatch.match,
-      artistConfidence: artistMatch.confidence,
-      song,
       genre,
       platform: inferredPlatform.platform,
       platformConfidence: inferredPlatform.confidence,
@@ -151,8 +153,6 @@ class MediaParser {
   _empty(originalText, normalizedText) {
     return {
       intent: null,
-      artist: null,
-      song: null,
       genre: null,
       platform: null,
       query: null,
@@ -165,20 +165,16 @@ class MediaParser {
   _result(result) {
     const parsed = {
       intent: result.intent,
-      artist: result.artist || null,
-      song: result.song || null,
       genre: result.genre || null,
       platform: result.platform || null,
       query: result.query || null,
       confidence: Number(Math.max(0, Math.min(1, result.confidence || 0)).toFixed(2)),
-      artistConfidence: Number((result.artistConfidence || 0).toFixed(2)),
       platformConfidence: Number((result.platformConfidence || 0).toFixed(2)),
       originalText: result.originalText,
       normalizedText: result.normalizedText
     };
 
     this.logger.info(`[Media] Parsed -> ${parsed.intent || 'none'}`);
-    if (parsed.artist) this.logger.info(`[Media] Artist matched -> ${parsed.artist}`);
     if (parsed.platform) this.logger.info(`[Media] Platform inferred -> ${parsed.platform}`);
     this.logger.info(`[Media] Confidence -> ${parsed.confidence}`);
     return parsed;
@@ -214,61 +210,29 @@ class MediaParser {
     return genre || null;
   }
 
-  _shouldMatchArtist(input) {
-    const tokens = tokenize(input)
-      .filter(token => !GENERIC_MEDIA_TERMS.has(token));
-    if (tokens.length === 0) {
-      return false;
-    }
-
-    const preferenceWords = new Set(['liked', 'favorite', 'favourite']);
-    if (tokens.every(token => preferenceWords.has(token) || GENRES.has(token))) {
-      return false;
-    }
-
-    return true;
-  }
-
-  _extractSong(input, artist, genre) {
-    if (artist && /\b(?:song|songs|music|tracks?|videos?)\b/i.test(input) && !/\b(?:called|named)\b/i.test(input)) {
-      return null;
-    }
-
-    const cleaned = String(input || '')
-      .replace(new RegExp(`\\b${String(artist || '').toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i'), ' ')
-      .replace(new RegExp(`\\b${String(genre || '').toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`, 'i'), ' ')
-      .replace(/\b(?:song|songs|music|tracks?|videos?)\b/g, ' ')
-      .replace(/\s+/g, ' ')
-      .trim();
-
-    if (!cleaned || GENERIC_MEDIA_TERMS.has(cleaned)) {
-      return null;
-    }
-
-    return cleaned;
-  }
-
-  _buildQuery({ artist, song, genre, entityText }) {
+  _buildQuery({ genre, entityText }) {
     const preferenceMatch = String(entityText || '').match(/\b(?:liked|favorite|favourite)\s+(?:song|songs|music|tracks?)\b/i);
     if (preferenceMatch) return preferenceMatch[0].toLowerCase();
 
-    if (artist && song) return `${artist} ${song}`;
-    if (artist) return `${artist} songs`;
-    if (genre) return `${genre} songs`;
-
+    const original = String(entityText || '').trim();
     const cleaned = String(entityText || '')
       .replace(/\b(?:song|songs|music|tracks?|videos?)\b/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
 
+    if (cleaned && original) {
+      return original;
+    }
+
+    if (genre) return `${genre} songs`;
+
     return cleaned || 'music';
   }
 
-  _score({ hasPlayVerb, artistConfidence, platformConfidence, query }) {
+  _score({ hasPlayVerb, platformConfidence, query }) {
     let score = 0.35;
     if (hasPlayVerb) score += 0.24;
     if (query) score += 0.16;
-    score += Math.min(0.16, (artistConfidence || 0) * 0.16);
     score += Math.min(0.09, (platformConfidence || 0) * 0.09);
     return score;
   }

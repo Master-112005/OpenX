@@ -495,10 +495,22 @@ const RESPONSE_BUILDERS = {
       const displayName = String(appName).charAt(0).toUpperCase() + String(appName).slice(1);
       const method = valueFromContext(context, 'launchMethod', 'browser');
       const replacedExisting = Boolean(valueFromContext(context, 'replacedExisting', false));
+      const verification = valueFromContext(context, 'playbackVerification', null);
+      const verified = Boolean(verification?.valid);
       if (method === 'existing-window') {
+        if (verified) {
+          return replacedExisting
+            ? `Verified ${displayName} was switched to "${query}".`
+            : `Verified ${displayName} is ready for "${query}".`;
+        }
         return replacedExisting
           ? `I have replaced the current playback with "${query}" on ${displayName}.`
           : `Switched the ${displayName} session to "${query}" for you.`;
+      }
+      if (verified) {
+        return replacedExisting
+          ? `Verified ${displayName} was opened for "${query}" after stopping the previous playback.`
+          : `Verified ${displayName} was opened for "${query}".`;
       }
       if (method === 'browser') {
         return `Opening ${displayName} for "${query}" in your browser now.`;
@@ -510,6 +522,55 @@ const RESPONSE_BUILDERS = {
     'media.pause': () => 'Playback has been paused.',
     'media.resume': () => 'Resuming playback for you.',
     'media.stop': () => 'Playback has been stopped.',
+    'media.mute': () => 'Media playback has been muted.',
+    'media.unmute': () => 'Media playback has been unmuted.',
+    'media.volumeUp': () => 'Turned the media volume up.',
+    'media.volumeDown': () => 'Turned the media volume down.',
+    'media.fullscreen': () => 'Switched the media player to fullscreen.',
+    'media.exitFullscreen': () => 'Exited fullscreen mode.',
+    'media.replay': () => 'Replaying the previous part.',
+    'media.repeat': context => {
+      const limitation = valueFromContext(context, 'limitation');
+      return limitation
+        ? `Repeat was requested. ${limitation}`
+        : 'Repeat has been toggled for the current media.';
+    },
+    'media.shuffle': context => {
+      const limitation = valueFromContext(context, 'limitation');
+      return limitation
+        ? `Shuffle was requested. ${limitation}`
+        : 'Shuffle has been toggled.';
+    },
+    'media.favorite': context => {
+      const limitation = valueFromContext(context, 'limitation');
+      return limitation
+        ? `Favorite was requested. ${limitation}`
+        : 'Added the current track to favorites.';
+    },
+    'media.like': context => {
+      const limitation = valueFromContext(context, 'limitation');
+      return limitation
+        ? `Like was requested. ${limitation}`
+        : 'Liked the current YouTube video.';
+    },
+    'media.subscribe': context => {
+      const limitation = valueFromContext(context, 'limitation');
+      return limitation
+        ? `I focused the YouTube video. ${limitation}`
+        : 'Opened the subscription control for this YouTube channel.';
+    },
+    'media.status': context => {
+      const query = valueFromContext(context, 'query');
+      const platform = valueFromContext(context, 'platform');
+      const matchedWindow = valueFromContext(context, 'matchedWindow');
+      if (query) {
+        return `The last media I started was "${query}"${platform ? ` on ${platform}` : ''}.`;
+      }
+      if (matchedWindow) {
+        return `I found an active media window: ${matchedWindow}.`;
+      }
+      return 'I do not have an active media session recorded yet.';
+    },
     'media.search': context => {
       const query = valueFromContext(context, 'query', valueFromContext(context, 'mediaQuery', 'music'));
       const rawPlatform = valueFromContext(context, 'platform', valueFromContext(context, 'mediaPlatform', 'YouTube'));
@@ -723,6 +784,10 @@ const RESPONSE_BUILDERS = {
     'assistant.userName': context => {
       const name = valueFromContext(context, 'name', '');
       return name ? `Your name is ${name}.` : 'I do not know your name yet.';
+    },
+    'assistant.capability': context => {
+      const capability = valueFromContext(context, 'capability', 'that');
+      return `I understood this as a ${capability} request, but this capability is not connected to an automation controller yet.`;
     },
     'window.minimize': context => {
       const win = valueFromContext(context, 'matchedWindow', 'the window');

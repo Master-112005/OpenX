@@ -31,6 +31,106 @@ describe('Action Router', function() {
     assert.ok(result.entities.appName);
   });
 
+  it('should route natural condition commands to executable controllers', async function() {
+    const config = {
+      permissions: {
+        levels: {
+          low: { requiresConfirmation: false, requiresAuth: false },
+          medium: { requiresConfirmation: false, requiresAuth: false }
+        }
+      }
+    };
+    const executed = [];
+    const stubEngine = {
+      execute(actionId, entities) {
+        executed.push({ actionId, entities });
+        return { success: true, data: { value: entities?.value || 50, actionId, ...(entities || {}) } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const cases = [
+      ['The screen is hurting my eyes', 'brightness.down', 'brightness.down', { value: 35 }],
+      ['I can\'t hear anything from the speakers', 'volume.up', 'volume.up'],
+      ['It\'s way too loud in here', 'volume.down', 'volume.down'],
+      ['Can you make the screen a little brighter?', 'brightness.up', 'brightness.up'],
+      ['Everything looks too small to read', 'app.open', 'app.open', { appName: 'ms-settings:easeofaccess-display' }],
+      ['Will my laptop survive another couple of hours?', 'system.battery', 'system.battery'],
+      ['Get my coding environment ready', 'mode.start', 'mode.start', { modeName: 'development' }],
+      ['I\'m in the mood to write something', 'app.open', 'app.open', { appName: 'notepad' }],
+      ['I want to calculate some numbers', 'app.open', 'app.open', { appName: 'calculator' }],
+      ['I need directions to a nearby restaurant', 'browser.search', 'browser.search'],
+      ['Can you help me recover what I just deleted?', 'app.open', 'app.open', { appName: 'shell:RecycleBinFolder' }],
+      ['Explain Docker in simple words.', 'browser.search', 'browser.search'],
+      ['Find common DevOps interview questions.', 'browser.search', 'browser.search'],
+      ['I think my internet is acting up.', 'browser.search', 'browser.search'],
+      ['Can you see if I\'m connected to WiFi?', 'app.open', 'app.open', { appName: 'ms-settings:network-wifi' }],
+      ['I feel like listening to podcasts.', 'media.play', 'media.play'],
+      ['Show me my pending tasks.', 'browser.search', 'browser.search']
+    ];
+
+    for (const [command, expectedIntent, expectedAction, expectedEntities] of cases) {
+      executed.length = 0;
+      const result = await router.process(command, 'chat');
+
+      assert.equal(result.success, true, command);
+      assert.equal(result.intent, expectedIntent, command);
+      assert.notEqual(result.intent, 'assistant.capability', command);
+      assert.equal(executed[0]?.actionId, expectedAction, command);
+      for (const [key, value] of Object.entries(expectedEntities || {})) {
+        assert.equal(executed[0].entities[key], value, command);
+      }
+    }
+  });
+
+  it('should not let technical knowledge topics fuzzy-match window actions', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const executed = [];
+    const stubEngine = {
+      execute(actionId, entities) {
+        executed.push({ actionId, entities });
+        return { success: true, data: { actionId, ...(entities || {}) } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const result = await router.process('Explain Docker in simple words.', 'chat');
+    const prepared = router.nlp.prepare('Explain Docker in simple words.');
+
+    assert.equal(result.intent, 'browser.search');
+    assert.equal(executed[0].actionId, 'browser.search');
+    assert.notEqual(result.intent, 'window.minimize');
+    assert.notEqual(prepared.semanticFrame.actionVerb, 'minimize');
+  });
+
+  it('should not claim generic capability fallback commands were executed', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId, entities) {
+        return {
+          success: true,
+          data: {
+            action: 'capability.recognized',
+            capability: entities.capability,
+            operation: entities.operation,
+            target: entities.target,
+            rawCommand: entities.rawCommand
+          }
+        };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const result = await router.process('Save my work before exiting', 'chat');
+
+    assert.equal(result.success, true);
+    assert.equal(result.intent, 'assistant.capability');
+    assert.match(result.response, /not connected to an automation controller yet/i);
+    assert.doesNotMatch(result.response, /completed/i);
+  });
+
   it('should route fill this from typo as a form fill request', async function() {
     const config = {
       permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } },
@@ -1494,7 +1594,7 @@ describe('Action Router', function() {
     const router = new ActionRouter(config, stubEngine);
     const result = await router.process('put on the playdate song on youtube', 'chat');
     assert.equal(result.intent, 'media.play');
-    assert.equal(result.entities.mediaQuery, 'playdate');
+    assert.equal(result.entities.mediaQuery, 'playdate song');
     assert.equal(result.entities.mediaPlatform, 'youtube');
   });
 
@@ -1515,7 +1615,24 @@ describe('Action Router', function() {
     assert.equal(result.entities.mediaPlatform, 'youtube');
   });
 
-  it('should route STT-corrupted artist playback through media understanding', async function() {
+  it('should preserve playdate title in natural media playback wording', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const result = await router.process('you have to the play date song', 'chat');
+
+    assert.equal(result.intent, 'media.play');
+    assert.equal(result.entities.mediaQuery, 'playdate song');
+    assert.equal(result.entities.mediaPlatform, 'youtube');
+  });
+
+  it('should preserve voice media playback names through media understanding', async function() {
     const config = {
       permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
     };
@@ -1528,9 +1645,9 @@ describe('Action Router', function() {
     const result = await router.process('play dulander songs', 'voice');
 
     assert.equal(result.intent, 'media.play');
-    assert.equal(result.entities.mediaQuery, 'Daler Mehndi songs');
+    assert.equal(result.entities.mediaQuery, 'dulander songs');
     assert.equal(result.entities.mediaPlatform, 'youtube');
-    assert.equal(result.entities.artist, 'Daler Mehndi');
+    assert.equal(Object.prototype.hasOwnProperty.call(result.entities, 'artist'), false);
   });
 
   it('should route open youtube and play genre requests through media understanding', async function() {

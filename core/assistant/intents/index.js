@@ -566,6 +566,19 @@ const INTENT_DEFINITIONS = [
     description: 'Answer whether the assistant knows the user name'
   },
   {
+    id: 'assistant.capability',
+    patterns: ['recognized assistant capability'],
+    permissionLevel: 'low',
+    action: 'assistant.capability',
+    entities: [
+      { name: 'capability', type: 'string', required: false },
+      { name: 'operation', type: 'string', required: false },
+      { name: 'target', type: 'string', required: false },
+      { name: 'rawCommand', type: 'string', required: false }
+    ],
+    description: 'Recognize a supported desktop-assistant capability that is handled safely or by a specialized controller'
+  },
+  {
     id: 'help',
     patterns: ['help', 'what can you do', 'commands', 'capabilities', 'what can i say'],
     permissionLevel: 'low',
@@ -670,6 +683,110 @@ const INTENT_DEFINITIONS = [
       { name: 'mediaPlatform', type: 'string', required: false }
     ],
     description: 'Search for music or media on a streaming platform'
+  },
+  {
+    id: 'media.mute',
+    patterns: ['mute media', 'mute video', 'mute youtube video', 'mute song'],
+    permissionLevel: 'low',
+    action: 'media.mute',
+    entities: [],
+    description: 'Mute media playback'
+  },
+  {
+    id: 'media.unmute',
+    patterns: ['unmute media', 'unmute video', 'unmute youtube video', 'unmute song'],
+    permissionLevel: 'low',
+    action: 'media.unmute',
+    entities: [],
+    description: 'Unmute media playback'
+  },
+  {
+    id: 'media.volumeUp',
+    patterns: ['increase media volume', 'increase youtube volume', 'turn media up', 'video too quiet'],
+    permissionLevel: 'low',
+    action: 'media.volumeUp',
+    entities: [],
+    description: 'Increase media player volume'
+  },
+  {
+    id: 'media.volumeDown',
+    patterns: ['decrease media volume', 'decrease youtube volume', 'turn media down', 'video too loud'],
+    permissionLevel: 'low',
+    action: 'media.volumeDown',
+    entities: [],
+    description: 'Decrease media player volume'
+  },
+  {
+    id: 'media.fullscreen',
+    patterns: ['fullscreen media', 'fullscreen youtube', 'make video fullscreen'],
+    permissionLevel: 'low',
+    action: 'media.fullscreen',
+    entities: [],
+    description: 'Switch media playback to fullscreen'
+  },
+  {
+    id: 'media.exitFullscreen',
+    patterns: ['exit fullscreen media', 'exit youtube fullscreen', 'leave fullscreen'],
+    permissionLevel: 'low',
+    action: 'media.exitFullscreen',
+    entities: [],
+    description: 'Exit fullscreen media playback'
+  },
+  {
+    id: 'media.replay',
+    patterns: ['replay media', 'replay video', 'replay that part'],
+    permissionLevel: 'low',
+    action: 'media.replay',
+    entities: [],
+    description: 'Replay the current media segment'
+  },
+  {
+    id: 'media.repeat',
+    patterns: ['repeat song', 'repeat current song', 'loop song'],
+    permissionLevel: 'low',
+    action: 'media.repeat',
+    entities: [],
+    description: 'Toggle repeat or loop for the current media'
+  },
+  {
+    id: 'media.shuffle',
+    patterns: ['shuffle songs', 'shuffle playlist', 'shuffle everything'],
+    permissionLevel: 'low',
+    action: 'media.shuffle',
+    entities: [],
+    description: 'Shuffle media playback'
+  },
+  {
+    id: 'media.favorite',
+    patterns: ['favorite song', 'add song to favorites', 'like this song'],
+    permissionLevel: 'low',
+    action: 'media.favorite',
+    entities: [],
+    description: 'Mark the current media as liked or favorite'
+  },
+  {
+    id: 'media.like',
+    patterns: ['like video', 'like this youtube video'],
+    permissionLevel: 'low',
+    action: 'media.like',
+    entities: [],
+    description: 'Like the current YouTube video'
+  },
+  {
+    id: 'media.subscribe',
+    patterns: ['subscribe channel', 'subscribe to this channel'],
+    permissionLevel: 'low',
+    action: 'media.subscribe',
+    entities: [],
+    description: 'Open the current YouTube channel subscription control'
+  },
+  {
+    id: 'media.status',
+    patterns: ['current song', 'currently playing', 'what song is playing'],
+    permissionLevel: 'low',
+    action: 'media.status',
+    entities: [],
+    description: 'Report the last known media playback session'
   }
 ];
 

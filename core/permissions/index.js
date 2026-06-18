@@ -19,7 +19,7 @@ class PermissionValidator {
         critical: { requiresConfirmation: true, requiresAuth: true }
       }
     };
-    this.userLevel = 'medium';
+    this.userLevel = config?.permissions?.userLevel || 'medium';
     this.failedAttempts = 0;
     this.maxFailedAttempts = config?.permissions?.maxFailedAttempts || 3;
     this.isAuthenticated = true;

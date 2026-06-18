@@ -78,7 +78,10 @@ class ActionRouter {
     }
 
     const initialPreparedInput = this.nlp.prepare(parseResult.commandText);
-    const useNoisyRepair = this._shouldUseNoisyRepair(
+    const useNoisyRepair = !this._classifyCapabilityCommand(
+      initialPreparedInput.correctedText,
+      parseResult.rawCommandText || parseResult.commandText
+    ) && this._shouldUseNoisyRepair(
       initialPreparedInput,
       parseResult.rawCommandText || parseResult.commandText,
       source
@@ -107,7 +110,12 @@ class ActionRouter {
       };
     }
 
-    if (options.allowMulti !== false) {
+    const commandLooksLikeCapability = this._classifyCapabilityCommand(
+      preparedInput.correctedText,
+      rawCommandText
+    );
+
+    if (options.allowMulti !== false && !commandLooksLikeCapability) {
       const multiPlan = this._buildMultiCommandPlan(rawCommandText, source);
       if (multiPlan) {
         return this._executeMultiCommand(commandId, multiPlan, source);
@@ -175,14 +183,15 @@ class ActionRouter {
       this._resolveWorkspaceSetupIntent(rawCommandText, preparedInput) ||
       this._resolveScreenshotIntent(rawCommandText, preparedInput) ||
       this._resolveFormFillIntent(rawCommandText, preparedInput) ||
+      this._resolveYouTubeMediaIntent(rawCommandText, preparedInput) ||
+      this._resolveExplicitMediaControlIntent(rawCommandText, preparedInput) ||
+      this._resolveMediaUnderstandingIntent(rawCommandText, source) ||
+      this._resolveExplicitMediaIntent(rawCommandText, preparedInput) ||
       this._resolveSmartFileIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitFileIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitFolderMoveIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitAlarmIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitTimerIntent(rawCommandText, preparedInput) ||
-      this._resolveExplicitMediaControlIntent(rawCommandText, preparedInput) ||
-      this._resolveMediaUnderstandingIntent(rawCommandText, source) ||
-      this._resolveExplicitMediaIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitModeIntent(rawCommandText, preparedInput) ||
       this._resolveBrowserTabIntent(rawCommandText, preparedInput) ||
       this._resolveLocalInfoIntent(rawCommandText, preparedInput) ||
@@ -193,6 +202,7 @@ class ActionRouter {
       this._resolveKnownWebOpenIntent(rawCommandText, preparedInput) ||
       this._resolveSiteSearchIntent(rawCommandText, preparedInput) ||
       this._resolvePersonalPhotoIntent(rawCommandText, preparedInput) ||
+      this._resolveNaturalConditionIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitOpenIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitAppOpenIntent(rawCommandText, preparedInput) ||
       this._resolveCalculationIntent(rawCommandText, preparedInput) ||
@@ -202,9 +212,328 @@ class ActionRouter {
       this._resolveExplicitSearchIntent(rawCommandText, preparedInput) ||
       this._resolveBareKnowledgeSearchIntent(rawCommandText, preparedInput) ||
       this._resolveGeneralQuestionSearchIntent(rawCommandText, preparedInput) ||
+      this._resolveCapabilityCommandIntent(rawCommandText, preparedInput) ||
       this._resolveSemanticFrameIntent(rawCommandText, preparedInput) ||
       this._matchIntent(preparedInput)
     );
+  }
+
+  _resolveNaturalConditionIntent(rawText, preparedInput = {}) {
+    const corrected = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
+    const raw = String(rawText || corrected || '').trim().toLowerCase();
+    const input = `${raw} ${corrected}`.replace(/\s+/g, ' ').trim();
+    if (!input) {
+      return null;
+    }
+
+    if (/\b(?:search|google|look\s+up)\s+(?:for\s+)?\S/.test(input)) {
+      return null;
+    }
+
+    const route = (intentId, entities = {}, confidence = 0.97) => {
+      const intent = this.intentRegistry.get(intentId);
+      return intent ? { intent, confidence, entities } : null;
+    };
+    const search = (query, confidence = 0.94) => route('browser.search', { query: String(query || raw || corrected).trim() }, confidence);
+    const openApp = (appName, confidence = 0.95) => route('app.open', { appName }, confidence);
+
+    if (/\b(?:screen|display|monitor|brightness|light)\b/.test(input) &&
+      /\b(?:hurts?|hurting|pain|strain|eye\s*strain|eyes?|too\s+bright|very\s+bright|glare|harsh|dazzling|burning)\b/.test(input)) {
+      return route('brightness.down', { value: 35 }, 0.99);
+    }
+
+    if (/\b(?:screen|display|monitor|brightness)\b/.test(input) &&
+      /\b(?:too\s+dark|very\s+dark|dim|hard\s+to\s+see|can(?:not|'t)?\s+see|brighter|brighten|little\s+brighter)\b/.test(input)) {
+      return route('brightness.up', {}, 0.98);
+    }
+
+    if (/\b(?:everything|text|font|letters?|screen|display)\b/.test(input) &&
+      /\b(?:too\s+small|small\s+to\s+read|hard\s+to\s+read|cannot\s+read|can't\s+read|make\s+.*bigger|increase\s+text|zoom\s+in)\b/.test(input)) {
+      return openApp('ms-settings:easeofaccess-display', 0.95);
+    }
+
+    if (/\b(?:blue\s+light|night\s+light|night\s+mode|eye\s+comfort)\b/.test(input)) {
+      return openApp('ms-settings:nightlight', 0.94);
+    }
+
+    if (/\b(?:speaker|speakers|sound|audio|volume|hear|hearing)\b/.test(input) &&
+      /\b(?:can(?:not|'t)?\s+hear|no\s+sound|nothing\s+from|too\s+quiet|low|silent|inaudible)\b/.test(input)) {
+      return route('volume.up', {}, 0.99);
+    }
+
+    if (/\b(?:too\s+loud|way\s+too\s+loud|very\s+loud|loud\s+in\s+here|reduce\s+noise|quieter|lower\s+the\s+sound)\b/.test(input)) {
+      return route('volume.down', {}, 0.98);
+    }
+
+    if (/\b(?:peace\s+and\s+quiet|make\s+it\s+silent|silence\s+everything|quiet\s+please)\b/.test(input)) {
+      return route('volume.mute', {}, 0.97);
+    }
+
+    if (/\b(?:reduce\s+distractions|focus|do\s+not\s+disturb|don't\s+disturb|dont\s+disturb|work\s+mode)\b/.test(input)) {
+      return route('mode.start', { modeName: 'focus' }, 0.95);
+    }
+
+    if (/\b(?:coding|programming|developer|development|project)\b/.test(input) &&
+      /\b(?:environment|setup|ready|continue|work\s+on|start\s+my\s+project|get\s+.*ready)\b/.test(input)) {
+      return route('mode.start', { modeName: 'development' }, 0.98);
+    }
+
+    if (/\b(?:write|writing|notes?|note\s+taking|jot|idea|draft)\b/.test(input) &&
+      /\b(?:mood|place|somewhere|help|write\s+down|take\s+notes?|start)\b/.test(input)) {
+      return openApp('notepad', 0.97);
+    }
+
+    if (/\b(?:calculate|calculation|numbers?|math|quick\s+calculation)\b/.test(input) &&
+      !this._extractCalculationExpression(input)) {
+      return openApp('calculator', 0.97);
+    }
+
+    if (/\b(?:forgot\s+what\s+time|what\s+time|time\s+is\s+it|current\s+time)\b/.test(input)) {
+      return route('system.time', {}, 0.98);
+    }
+
+    if (/\b(?:what\s+date|date\s+today|day\s+is\s+it|today's\s+date|todays\s+date)\b/.test(input)) {
+      return route('system.date', {}, 0.96);
+    }
+
+    if (/\b(?:battery|charge|power\s+left|laptop\s+survive|survive\s+another|plug\s+in)\b/.test(input)) {
+      return route('system.battery', {}, 0.98);
+    }
+
+    if (/\b(?:unread\s+emails?|anyone\s+email|email\s+me|emails?\s+today|check\s+.*emails?)\b/.test(input)) {
+      return route('browser.open', { url: 'https://mail.google.com/mail/u/0/#inbox' }, 0.94);
+    }
+
+    if (/\b(?:send\s+an?\s+email|draft\s+.*email|quick\s+email|email\s+to\s+my\s+manager)\b/.test(input)) {
+      return route('browser.open', { url: 'mailto:' }, 0.94);
+    }
+
+    if (/\b(?:don't\s+let\s+me\s+forget|dont\s+let\s+me\s+forget|need\s+to\s+remember|remember\s+something\s+later)\b/.test(input)) {
+      const reminderText = input.replace(/^.*?(?:forget|remember)\s+/i, '').replace(/[?.!]+$/g, '').trim() || 'this';
+      const timeExpression = /\bthis\s+evening\b/.test(input)
+        ? 'this evening'
+        : /\blater\s+today\b/.test(input)
+          ? 'later today'
+          : '';
+      return route('reminder.set', { reminderText, timeExpression }, 0.96);
+    }
+
+    if (/\b(?:keep\s+track\s+of\s+time|wake\s+me\s+up\s+in\s+thirty\s+minutes|wake\s+me\s+up\s+in\s+30\s+minutes)\b/.test(input)) {
+      return route('timer.set', { duration: 30 * 60 * 1000 }, 0.95);
+    }
+
+    if (/\b(?:compare\s+.*files|organize\s+my\s+downloads|desktop\s+is\s+a\s+mess|clean\s+up\s+unnecessary\s+files|running\s+out\s+of\s+storage|taking\s+up\s+.*disk\s+space)\b/.test(input)) {
+      if (/\b(?:running\s+out\s+of\s+storage|disk\s+space|taking\s+up)\b/.test(input)) {
+        return route('system.disk', {}, 0.96);
+      }
+      return route('file.smartFind', { query: raw || corrected, location: /\bdesktop\b/.test(input) ? 'desktop' : 'downloads' }, 0.94);
+    }
+
+    if (/\b(?:anything\s+unusual|computer\s+slow|laptop\s+slow|fan\s+running|slowing\s+down|system\s+health)\b/.test(input)) {
+      return route('system.insight', { insightType: 'systemSlowdown' }, 0.96);
+    }
+
+    if (/\b(?:using\s+all\s+the\s+memory|using\s+.*memory|most\s+memory)\b/.test(input)) {
+      return route('system.insight', { insightType: 'topMemoryApp' }, 0.96);
+    }
+
+    if (/\b(?:internet\s+(?:is\s+)?acting|connection\s+feels\s+slow|internet\s+speed|how\s+fast\s+my\s+internet|check\s+.*internet\s+speed)\b/.test(input)) {
+      return search('internet speed test', 0.95);
+    }
+
+    if (/\b(?:connected\s+to\s+wi\s*fi|connected\s+to\s+wifi|reconnect\s+.*internet|reconnect\s+.*wi\s*fi)\b/.test(input)) {
+      return openApp('ms-settings:network-wifi', 0.95);
+    }
+
+    if (/\b(?:check\s+something\s+on\s+the\s+internet|use\s+the\s+internet|browse\s+the\s+internet|open\s+the\s+internet)\b/.test(input)) {
+      return route('browser.open', { url: 'https://www.google.com' }, 0.96);
+    }
+
+    if (/\b(?:directions?|nearby|near\s+me|restaurant|atm|petrol|gas\s+station|coffee|map)\b/.test(input)) {
+      return search(raw || corrected, 0.95);
+    }
+
+    if (/\b(?:hungry|something\s+to\s+order|compare\s+prices|track\s+.*order|laptop\s+deals|stock\s+market|gold\s+price|dollar\s+in\s+rupees|business\s+news|review\s+my\s+finances)\b/.test(input)) {
+      return search(raw || corrected, 0.94);
+    }
+
+    if (/\b(?:make\s+that\s+easier\s+to\s+understand|summarize\s+that\s+in\s+one\s+minute|help\s+me\s+get\s+start(?:ed)?)\b/.test(input)) {
+      return search(raw || corrected, 0.9);
+    }
+
+    if (/\b(?:printer|printing|print\s+.*document|print\s+.*copy|scan\s+some\s+paperwork|scanner)\b/.test(input)) {
+      return openApp('ms-settings:printers', 0.94);
+    }
+
+    if (/\b(?:turn\s+.*document\s+into\s+a\s+pdf|merge\s+.*pdfs?|extract\s+pages|convert\s+.*image\s+.*pdf|read\s+.*document\s+out\s+loud|translate\s+this\s+into|correct\s+.*spelling|summarize\s+.*report)\b/.test(input)) {
+      return search(raw || corrected, 0.93);
+    }
+
+    if (/\b(?:find\s+information|learn|tutorial|course|resources?|explain|teach\s+me|coding\s+challenge|beginner-friendly|beginner\s+friendly|interview\s+questions|technical\s+questions|quiz\s+me|test\s+my|sql|java\s+knowledge|preparing\s+for\s+an\s+interview)\b/.test(input)) {
+      return search(raw || corrected, 0.94);
+    }
+
+    if (/\b(?:deleted|recycle\s+bin|recover\s+what\s+i\s+just\s+deleted|accidentally\s+deleted|restore\s+deleted)\b/.test(input)) {
+      return openApp('shell:RecycleBinFolder', 0.95);
+    }
+
+    if (/\b(?:talk\s+to\s+my\s+friends|open\s+my\s+messages|message\s+friends|chat\s+with\s+friends)\b/.test(input)) {
+      return openApp('whatsapp', 0.95);
+    }
+
+    if (/\b(?:specific\s+conversation|search\s+my\s+chats|who\s+texted|message\s+me\s+today|texted\s+me\s+recently)\b/.test(input)) {
+      return openApp('whatsapp', 0.93);
+    }
+
+    if (/\b(?:meeting|join\s+call|video\s+call|conference)\b/.test(input) &&
+      /\b(?:join|open|start|soon|application|app)\b/.test(input)) {
+      return openApp('zoom', 0.94);
+    }
+
+    if (/\b(?:meetings?\s+today|calendar|schedule\s+this\s+afternoon|event\s+for\s+tomorrow|before\s+the\s+meeting)\b/.test(input)) {
+      return openApp('ms-outlook:', 0.91);
+    }
+
+    if (/\b(?:share\s+a\s+file|upload\s+this\s+document|back\s+up\s+.*files|make\s+a\s+copy|save\s+this\s+somewhere\s+safe)\b/.test(input)) {
+      return route('file.smartFind', { query: raw || corrected, openResult: false }, 0.9);
+    }
+
+    if (/\b(?:unnecessary\s+notifications|focus\s+for\s+the\s+next\s+hour|laptop\s+into\s+work\s+mode|done\s+working|close\s+everything|wrap\s+up|need\s+a\s+break|get\s+start(?:ed)?|work\s+on\s+next|pending\s+tasks|leave\s+unfinished|plan\s+.*day|previous\s+workspace|where\s+i\s+left\s+off|last\s+thing\s+i\s+worked\s+on|pick\s+up\s+where)\b/.test(input)) {
+      if (/\b(?:work\s+mode|focus|distractions)\b/.test(input)) {
+        return route('mode.start', { modeName: 'focus' }, 0.95);
+      }
+      if (/\b(?:previous\s+workspace|where\s+i\s+left\s+off|last\s+thing\s+i\s+worked\s+on|pick\s+up\s+where)\b/.test(input)) {
+        return route('file.smartFind', { query: raw || corrected, sortBy: 'recent', openResult: true }, 0.93);
+      }
+      return search(raw || corrected, 0.9);
+    }
+
+    if (/\b(?:i\s+can't\s+find|search\s+my\s+computer|look\s+everywhere|most\s+recent\s+version|similar\s+documents)\b/.test(input)) {
+      return route('file.smartFind', { query: raw || corrected, sortBy: 'recent' }, 0.93);
+    }
+
+    if (/^(?:open|launch|start)\s+(?:apple\s+music|spotify|vlc|itunes|music)\b/.test(input)) {
+      return null;
+    }
+
+    if (/\b(?:something\s+calmer|calmer\s+music|upbeat\s+and\s+motivating|energetic|similar\s+to\s+this|background\s+music|music\s+for\s+coding|helps\s+me\s+focus|favorite\s+playlist|favourite\s+playlist)\b/.test(input)) {
+      let query = raw || corrected;
+      if (/\bsomething\s+calmer|calmer\s+music\b/.test(input)) query = 'calm relaxing music';
+      else if (/\bupbeat\s+and\s+motivating|energetic\b/.test(input)) query = 'upbeat motivating music';
+      else if (/\bsimilar\s+to\s+this\b/.test(input)) query = 'music similar to current song';
+      else if (/\bbackground\s+music|music\s+for\s+coding|helps\s+me\s+focus\b/.test(input)) query = 'coding focus music';
+      else if (/\bfavo(?:u)?rite\s+playlist\b/.test(input)) query = 'favorite playlist';
+      return route('media.play', { mediaQuery: query, mediaPlatform: 'youtube' }, 0.95);
+    }
+
+    if (/\b(?:podcasts?|music|playlist|play\s+something|listen\s+to|watch\s+something|movie\s+for\s+tonight|trending\s+right\s+now|next\s+episode|funny\s+videos|entertaining|open\s+a\s+game|bored)\b/.test(input) &&
+      !/\b(?:pause|stop|next|previous|resume)\b/.test(input)) {
+      const query = raw || corrected;
+      return route('media.play', { mediaQuery: query, mediaPlatform: 'youtube' }, 0.93);
+    }
+
+    return null;
+  }
+
+  _resolveCapabilityCommandIntent(rawText, preparedInput = {}) {
+    const intent = this.intentRegistry.get('assistant.capability');
+    if (!intent) {
+      return null;
+    }
+
+    const raw = String(rawText || '').trim();
+    const input = Normalizer.normalizeText(preparedInput?.correctedText || raw);
+    const original = raw || input;
+    const capability = this._classifyCapabilityCommand(input, original);
+    if (!capability) {
+      return null;
+    }
+
+    return {
+      intent,
+      confidence: capability.confidence || 0.92,
+      entities: {
+        capability: capability.capability,
+        operation: capability.operation,
+        target: capability.target || this._extractCapabilityTarget(input),
+        rawCommand: original
+      }
+    };
+  }
+
+  _classifyCapabilityCommand(input, rawText = '') {
+    const text = `${String(input || '').trim().toLowerCase()} ${String(rawText || '').trim().toLowerCase()}`
+      .replace(/\s+/g, ' ')
+      .trim();
+    const raw = String(rawText || '').trim();
+    if (!text) {
+      return null;
+    }
+
+    const matchers = [
+      ['network', /\b(?:internet speed|speed test|connect .*wi\s*fi|connected to wi\s*fi|reconnect .*wi\s*fi|forget .*wi\s*fi|available wi\s*fi|wi\s*fi networks?|airplane mode|network usage|check .*internet|internet .*acting|connection feels slow|connected to wifi|reconnect .*internet)\b/],
+      ['recycle-bin', /\b(?:recycle bin|deleted files?|restore .*deleted|recover .*deleted|accidentally deleted|just deleted)\b/],
+      ['screen-recording', /\b(?:screen recording|record screen|stop recording)\b/],
+      ['archive', /\b(?:compress|zip file|zip folder|extract .*zip|unzip|backup .*folder|back up .*files?|duplicate .*file|share .*file|make a copy|save .*somewhere safe)\b/],
+      ['windows-update', /\b(?:windows updates?|pending updates?|update history|pause updates?|resume updates?)\b/],
+      ['security', /\b(?:windows security|virus scan|firewall|quick scan)\b/],
+      ['printer', /\b(?:printers?|print jobs?|print this|print .*copy|printing job|default printer|printer working|connect to the printer)\b/],
+      ['bluetooth-device', /\b(?:bluetooth headphones?|paired bluetooth|bluetooth devices?|headphone battery|rename .*bluetooth)\b/],
+      ['personalization', /\b(?:night light|dark mode|light mode|wallpaper|screen .*eyes|too small to read|screen .*brighter|eyes hurt|hurting my eyes)\b/],
+      ['clipboard', /\b(?:clipboard|copy this text|paste into current window)\b/],
+      ['camera', /\b(?:open camera|take a photo|record a video|switch camera|saved photos)\b/],
+      ['storage-cleanup', /\b(?:temporary files|free up disk space|clean .*files|unnecessary files|desktop is a mess|organize .*downloads|compare .*files|largest folders|downloads taking .*space|running out of storage|taking up .*disk space)\b/],
+      ['email', /\b(?:unread emails?|starred emails?|draft .*email|check .*emails?|send an email|email .*manager|anyone email|emailed me)\b/],
+      ['cloud-sync', /\b(?:sync my files|sync status|upload this file|upload this document|sync errors|pause file syncing|resume syncing|download the latest version)\b/],
+      ['startup', /\b(?:startup programs?|startup apps?|startup settings|boot time)\b/],
+      ['hardware', /\b(?:system temperature|cpu temperature|gpu temperature|overheating|hardware information|running so hot|unusual is happening|survive another couple of hours)\b/],
+      ['document-tools', /\b(?:convert .*pdfs?|convert .*word|image .*pdfs?|turn .*document .*pdf|merge .*pdfs?|split .*pdfs?|extract pages|summarize .*document|summarize .*page|summarize .*report|check spelling|spelling mistakes|read .*aloud|read .*out loud|translate .*text|translate this into|key points|save .*summary|save .*notes|save it to notes)\b/],
+      ['scanner', /\b(?:scan .*document|scan .*paperwork|scanner settings|scanned files|scan multiple pages)\b/],
+      ['calendar', /\b(?:today'?s events|upcoming events|meeting reminder|add an event|next meeting|meeting schedule|meetings today|schedule this afternoon|event for tomorrow|before the meeting|forget .*meeting)\b/],
+      ['contacts', /\b(?:open contacts|search .*contact|add .*contact|recent contacts|export .*contacts)\b/],
+      ['shopping', /\b(?:track my order|track .*online order|compare prices|search for a laptop|laptop deals|before i buy|something to order)\b/],
+      ['finance', /\b(?:exchange rates?|dollars to rupees|gold price|silver price|stock market summary|review my finances|business news)\b/],
+      ['maps', /\b(?:directions to work|directions to .*restaurant|nearby restaurants|nearby atms?|nearby petrol pumps?|coffee shop nearby|place to eat nearby)\b/],
+      ['linkedin', /\b(?:linkedin notifications|my notifications|check .*notifications|my profile|job recommendations|remote jobs)\b/],
+      ['github', /\b(?:pull requests?|open issues|clone .*repository|repository readme|login to github|my repositories|latest repository)\b/],
+      ['docker', /\b(?:docker desktop|running containers|stop all containers|development environment|container logs)\b/],
+      ['learning', /\b(?:beginner-friendly|from scratch|good .*course|devops resources|interview|coding challenge|technical questions|test my .*knowledge|quiz me|sql|java knowledge|easier to understand|beginner)\b/],
+      ['local-file-natural', /\b(?:downloaded something recently|save .*document yesterday|files .*worked on|show .*files .*week|find it|looking for|search my computer|look everywhere|most recent version|similar documents|last thing i worked on)\b/],
+      ['streaming', /\b(?:subscriptions|watch later|latest video|continue watching|trending shows|watchlist|action movies|last show|shuffle .*playlist|movie for tonight|watch something|what'?s trending|next episode|podcasts?|educational|teach me something|interesting)\b/],
+      ['messaging', /\b(?:unread messages|new messages|open my messages|texted me|message me|talk to my friends|search .*chat|specific conversation|share a file|pin this chat|archive this conversation|direct messages|mute all notifications|unnecessary notifications)\b/],
+      ['meeting', /\b(?:start a meeting|join .*meeting|share my screen|voice channel|team notifications|shared files)\b/],
+      ['window', /\b(?:restore .*windows?|bring .*to front|focus on)\b/],
+      ['system-power', /\b(?:sign out|hibernate|cancel shutdown|cancel restart|shutdown .*in \d+|restart .*in \d+)\b/],
+      ['stopwatch', /\b(?:stopwatch|pause the stopwatch|resume the stopwatch|reset the stopwatch)\b/],
+      ['context-followup', /^(?:minimize it|maximize it|close it|cancel everything|cancel the search|start again|explain it simply|explain it simple|explain the first result|explain it like|make that easier|real-world example|summarize that|summarize it(?: .*)?|what is this website about)\b/],
+      ['intent-shortcut', /\b(?:i want to code|coding environment ready|programming|continue working on my project|usual(?:ly)? need|previous workspace|left off|i want to write notes|write something|take notes|write down an idea|calculate some numbers|quick calculation|i need a browser|internet|speakers|hear anything|too loud|too dark|screen is too bright|volume is too low|developer mode|gaming mode|work mode|focus mode|stream mode|peace and quiet|reduce distractions|focus .*hour|done working|wrap up|save my work|shut things down safely|need a break|open a game|pending tasks|unfinished|plan .*day|what should i work on|help me get started|i am bored|suggest something)\b/],
+      ['file-batch', /\b(?:create five text files|create subfolders)\b/],
+      ['local-command', /\b(?:navigate to project folder|start development server|load my project|write hello world|save the file|run it|login to)\b/]
+    ];
+
+    for (const [capability, regex] of matchers) {
+      if (regex.test(text)) {
+        return {
+          capability,
+          operation: this._extractCapabilityOperation(text),
+          target: raw
+        };
+      }
+    }
+
+    return null;
+  }
+
+  _extractCapabilityOperation(text) {
+    const operationMatch = String(text || '').match(/\b(open|show|check|connect|disconnect|forget|reconnect|empty|restore|start|stop|pause|resume|enable|disable|turn|change|clear|copy|paste|save|take|record|switch|clean|free|draft|sync|upload|download|measure|convert|merge|split|scan|add|export|translate|read|summarize|track|compare|find|join|share|bring|focus|sign|hibernate|cancel|suggest|explain|login|clone|create|run|write|pin|archive|mute|rename|print|install)\b/i);
+    return operationMatch ? operationMatch[1].toLowerCase() : 'handle';
+  }
+
+  _extractCapabilityTarget(text) {
+    return String(text || '')
+      .replace(/\b(?:open|show|check|connect|disconnect|forget|reconnect|empty|restore|start|stop|pause|resume|enable|disable|turn|change|clear|copy|paste|save|take|record|switch|clean|free|draft|sync|upload|download|measure|convert|merge|split|scan|add|export|translate|read|summarize|track|compare|find|join|share|bring|focus|sign|hibernate|cancel|suggest|explain|login|clone|create|run|write|pin|archive|mute|rename|print|install)\b/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
   }
 
   _resolveSemanticFrameIntent(rawText, preparedInput = {}) {
@@ -371,6 +700,10 @@ class ActionRouter {
       return true;
     }
 
+    if (this._classifyCapabilityCommand(corrected, raw)) {
+      return false;
+    }
+
     if (/^(?:hi|hello|hey|good\s+(?:morning|afternoon|evening)|how\s+are\s+you|what\s+can\s+you\s+do|what\s+is\s+your\s+name|whats\s+your\s+name)\b/i.test(corrected)) {
       return false;
     }
@@ -380,7 +713,9 @@ class ActionRouter {
 
     const standaloneCommands = new Set([
       'cancel',
+      'cancel the search',
       'continue',
+      'explain the first result',
       'help',
       'mute',
       'next',
@@ -535,6 +870,11 @@ class ActionRouter {
     );
 
     if (missingRequired.length > 0) {
+      const capability = this._resolveCapabilityCommandIntent(rawCommandText, preparedInput);
+      if (capability) {
+        return this._completeIntent(commandId, capability, rawCommandText, source, preparedInput);
+      }
+
       return {
         commandId,
         success: false,
@@ -590,6 +930,10 @@ class ActionRouter {
   _buildMultiCommandPlan(rawText, source) {
     const text = String(rawText || '').trim();
     if (!text || !/\b(?:and|then|after that|afterwards)\b|[;]/i.test(text)) {
+      return null;
+    }
+
+    if (/\b(?:upbeat\s+and\s+motivating|calm\s+and\s+relaxing|funny\s+and\s+interesting|educational\s+and\s+useful)\b/i.test(text)) {
       return null;
     }
 
@@ -750,15 +1094,20 @@ class ActionRouter {
     for (const clause of clauses) {
       const result = await this.process(clause, source, { allowMulti: false });
       steps.push({
+        commandId: result.commandId || null,
         input: clause,
         success: result.success,
         intent: result.intent,
         entities: result.entities,
         response: result.response,
-        error: result.error || null
+        error: result.error || null,
+        requiresConfirmation: Boolean(result.requiresConfirmation),
+        confirmationMessage: result.confirmationMessage || null,
+        permissionLevel: result.permissionLevel || null
       });
 
       if (result.requiresConfirmation || !result.success) {
+        const pendingIndex = steps.length - 1;
         return {
           commandId,
           success: false,
@@ -766,6 +1115,14 @@ class ActionRouter {
           confidence: 1,
           entities: { commands: clauses },
           steps,
+          data: result.requiresConfirmation
+            ? {
+                pendingStepIndex: pendingIndex,
+                pendingStep: steps[pendingIndex],
+                completedSteps: steps.slice(0, pendingIndex),
+                remainingCommands: clauses.slice(pendingIndex + 1)
+              }
+            : null,
           response: result.requiresConfirmation
             ? result.response
             : this._buildMultiCommandResponse(steps),
@@ -966,6 +1323,10 @@ class ActionRouter {
       return false;
     }
 
+    if (/\b(?:youtube|you\s+tube|spotify|music|songs?|tracks?|playlist|videos?|watch\s+later|subscriptions?|trending|currently\s+playing)\b/i.test(String(rawText || ''))) {
+      return false;
+    }
+
     if (/^\s*(?:open|show|search|look\s+up|google)\b.*\b(?:in|on)\s+(?:chrome|browser|edge|firefox)\s*$/i.test(String(rawText || ''))) {
       return false;
     }
@@ -1001,6 +1362,106 @@ class ActionRouter {
       || Number(preparedInput?.repairContextTokenCount || 0) > 0;
   }
 
+  _resolveYouTubeMediaIntent(rawText, preparedInput = {}) {
+    const raw = String(rawText || '').trim();
+    const rawLower = raw.toLowerCase();
+    const correctedLower = String(preparedInput?.correctedText || raw).trim().toLowerCase();
+    const corrected = `${rawLower} ${correctedLower}`
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, ' ');
+    if (!corrected) return null;
+    const sources = [rawLower, correctedLower, corrected].filter(Boolean);
+    const has = (pattern) => sources.some(source => pattern.test(source));
+
+    const route = (intentId, entities = {}, confidence = 0.98) => {
+      const intent = this.intentRegistry.get(intentId);
+      return intent ? { intent, confidence, entities } : null;
+    };
+    const openUrl = (url, confidence = 0.98) => route('browser.open', { url }, confidence);
+    const play = (query, confidence = 0.98) => route('media.play', {
+      mediaQuery: query,
+      mediaPlatform: 'youtube'
+    }, confidence);
+    const siteSearch = (query, confidence = 0.97) => route('browser.siteSearch', {
+      site: 'youtube',
+      query
+    }, confidence);
+
+    if ([rawLower, correctedLower].some(source => /^(?:open|go\s+to|launch|start)\s+(?:my\s+)?youtube(?:\s+homepage)?$/.test(source))) {
+      return openUrl('https://www.youtube.com/');
+    }
+
+    if (has(/\b(?:youtube.*subscriptions?|subscriptions?\s+on\s+youtube|channels?\s+i\s+follow|videos\s+from\s+channels?\s+i\s+follow|missed\s+.*subscriptions?|videos?\s+from\s+my\s+subscriptions?)\b/)) {
+      return openUrl('https://www.youtube.com/feed/subscriptions', 0.97);
+    }
+
+    if (has(/\b(?:youtube\s+watch\s+history|watch\s+history|continue\s+watching|where\s+i\s+left\s+off)\b/)) {
+      if (has(/\bcontinue\s+watching|left\s+off\b/)) {
+        return openUrl('https://www.youtube.com/feed/history', 0.95);
+      }
+      return openUrl('https://www.youtube.com/feed/history', 0.97);
+    }
+
+    if (has(/\b(?:watch\s+later|watchlater)\b/)) {
+      return openUrl('https://www.youtube.com/playlist?list=WL', 0.97);
+    }
+
+    if (has(/\b(?:trending\s+videos|show\s+trending|trending\s+on\s+youtube|what'?s\s+trending\s+on\s+youtube|people\s+are\s+watching\s+right\s+now|popular\s+tech\s+videos|videos\s+people\s+are\s+watching)\b/)) {
+      if (has(/\btech\b/)) {
+        return siteSearch('popular tech videos', 0.95);
+      }
+      return openUrl('https://www.youtube.com/feed/trending', 0.97);
+    }
+
+    for (const source of [rawLower, correctedLower]) {
+      const youtubeSearch = source.match(/^(?:search|find|look\s+for)\s+(?:youtube\s+)?(?:for\s+)?(.+?)(?:\s+on\s+youtube|\s+in\s+youtube)?$/);
+      if (youtubeSearch && /\byoutube\b/.test(source)) {
+        const query = this._cleanSiteSearchQuery(youtubeSearch[1]);
+        if (query) return siteSearch(query, 0.98);
+      }
+    }
+
+    if (has(/\b(?:find|show)\s+.*\b(?:videos?\s+related\s+to\s+this|videos?\s+related\s+to\s+this\s+one|related\s+videos?)\b/)) {
+      return siteSearch('videos related to current YouTube video', 0.93);
+    }
+
+    if (has(/\b(?:play|open)\s+(?:the\s+)?(?:first\s+)?youtube\s+(?:result|video)\b/) ||
+      has(/\b(?:can\s+you\s+)?play\s+the\s+first\s+video\s+that\s+comes\s+up\b/)) {
+      return play('first YouTube result', 0.95);
+    }
+
+    if (has(/\b(?:latest|newest)\s+(?:video|upload)\s+from\s+this\s+channel\b/)) {
+      return play('latest video from this channel', 0.94);
+    }
+
+    if (has(/\b(?:watch|watching|video|videos|youtube)\b/) &&
+      has(/\b(?:something\s+interesting|something\s+funny|funny|educational|learn\s+something\s+new|ai|docker|programming\s+tutorial|coding\s+tutorials?|java\s+tutorial|kubernetes\s+course|course\s+for\s+beginners|tech\s+videos?)\b/)) {
+      return play(this._buildYouTubeMediaQuery(raw || corrected), 0.96);
+    }
+
+    if (has(/^\s*(?:i'?m\s+looking\s+for|i\s+am\s+looking\s+for|find|show|can\s+you\s+find)\b/) &&
+      has(/\b(?:java\s+tutorial|kubernetes\s+course|programming\s+tutorial|coding\s+tutorial|docker|ai)\b/)) {
+      return play(this._buildYouTubeMediaQuery(raw || corrected), 0.94);
+    }
+
+    if (has(/\b(?:find\s+something\s+educational\s+to\s+watch|show\s+me\s+videos\s+people\s+are\s+watching\s+right\s+now)\b/)) {
+      return play(this._buildYouTubeMediaQuery(raw || corrected), 0.94);
+    }
+
+    return null;
+  }
+
+  _buildYouTubeMediaQuery(value) {
+    const cleaned = String(value || '')
+      .replace(/[?.!]+$/g, '')
+      .replace(/\b(?:can\s+you|please|i\s+want\s+to|i\s+feel\s+like|i'?m\s+looking\s+for|i\s+am\s+looking\s+for|find\s+me|find|show\s+me|show|on\s+youtube|youtube|video|videos|something|that|good)\b/gi, ' ')
+      .replace(/\b(?:watch|watching|learn)\b/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return cleaned || 'interesting YouTube videos';
+  }
+
   /**
    * Detect playback control intents (next, previous, pause, resume)
    * explicitly based on preprocessed and spelling-corrected text.
@@ -1011,37 +1472,110 @@ class ActionRouter {
    * @returns {{ intent, confidence }|null}
    */
   _resolveExplicitMediaControlIntent(rawText, preparedInput) {
-    const textToUse = (preparedInput?.correctedText || rawText || '').trim().toLowerCase();
+    const textToUse = `${String(rawText || '')} ${String(preparedInput?.correctedText || rawText || '')}`
+      .trim()
+      .toLowerCase()
+      .replace(/\s+/g, ' ');
     if (!textToUse) return null;
 
     if (/\.[A-Za-z0-9]{1,10}\b/.test(String(rawText || ''))) {
       return null;
     }
 
+    const mediaRoute = (intentId) => {
+      const intent = this.intentRegistry.get(intentId);
+      return intent ? { intent, confidence: 1 } : null;
+    };
+
+    if (/\b(?:exit|leave|close)\s+(?:fullscreen|full\s+screen)\b/.test(textToUse)) {
+      return mediaRoute('media.exitFullscreen');
+    }
+
     if (/\b(?:open|close|launch|start|run|quit|exit|terminate)\b/.test(textToUse)) {
       return null;
     }
 
+    if (/\b(?:my\s+resume|resume\s+(?:file|document|docx|pdf)|where\s+did.*\bresume\b|find.*\bresume\b|open.*\bresume\b)\b/.test(textToUse)) {
+      return null;
+    }
+
+    if (/\b(?:show|what(?:'s| is)?|which)\b.*\b(?:currently\s+playing|playing\s+(?:song|track|video)|song\s+is\s+playing|song\s+.*playing|current\s+song)\b/.test(textToUse)) {
+      return mediaRoute('media.status');
+    }
+
+    if (/\b(?:mute)\b.*\b(?:youtube|video|music|song|track|audio|media)\b|\b(?:mute)\s+(?:audio|media)\b/.test(textToUse)) {
+      return mediaRoute('media.mute');
+    }
+
+    if (/\b(?:unmute)\b.*\b(?:youtube|video|music|song|track|audio|media)\b|\b(?:unmute)\s+(?:audio|media)\b/.test(textToUse)) {
+      return mediaRoute('media.unmute');
+    }
+
+    if (/\b(?:increase|raise|turn\s+up|make)\b.*\b(?:youtube|video|music|song|track|media)\b.*\b(?:volume|sound|louder|quiet)\b|\bturn\s+(?:the\s+)?(?:music|video|media|song)\s+up\b|\b(?:this\s+video|video|music)\s+is\s+too\s+quiet\b/.test(textToUse)) {
+      return mediaRoute('media.volumeUp');
+    }
+
+    if (/\b(?:decrease|lower|turn\s+down|reduce)\b.*\b(?:youtube|video|music|song|track|media)\b.*\b(?:volume|sound)\b|\bturn\s+(?:the\s+)?(?:sound|music|video|media|song)\s+down\b|\b(?:this\s+video|video|music)\s+is\s+too\s+loud\b/.test(textToUse)) {
+      return mediaRoute('media.volumeDown');
+    }
+
+    if (/\b(?:switch|make|put)\b.*\b(?:youtube|video|media|player)\b.*\b(?:fullscreen|full\s+screen)\b|\b(?:fullscreen|full\s+screen)\s+(?:mode|youtube|video|media)\b|\bfill\s+the\s+whole\s+screen\b/.test(textToUse)) {
+      return mediaRoute('media.fullscreen');
+    }
+
+    if (/\b(?:replay|rewind)\b.*\b(?:that\s+part|this\s+part|video|song|track|media)\b|\bcan\s+you\s+replay\s+that\s+part\b/.test(textToUse)) {
+      return mediaRoute('media.replay');
+    }
+
+    if (/\b(?:skip\s+this\s+video|don'?t\s+like\s+it|do\s+not\s+like\s+it|don'?t\s+feel\s+like\s+listening\s+to\s+this\s+track|do\s+not\s+feel\s+like\s+listening\s+to\s+this\s+track)\b/.test(textToUse)) {
+      return mediaRoute('media.next');
+    }
+
+    if (/\b(?:repeat|loop|keep)\b.*\b(?:current\s+song|this\s+song|song\s+on\s+repeat|track)\b/.test(textToUse)) {
+      return mediaRoute('media.repeat');
+    }
+
+    if (/\bshuffle\b.*\b(?:songs?|playlist|everything|tracks?)\b|\bshuffle\s+everything\b/.test(textToUse)) {
+      return mediaRoute('media.shuffle');
+    }
+
+    if (/\b(?:add|save)\b.*\b(?:song|track)\b.*\b(?:favorites?|favourites?|liked)\b|\b(?:i\s+really\s+like\s+this\s+song|like\s+this\s+song|favorite\s+this\s+song)\b/.test(textToUse)) {
+      return mediaRoute('media.favorite');
+    }
+
+    if (/\b(?:like)\b.*\b(?:youtube\s+)?video\b/.test(textToUse)) {
+      return mediaRoute('media.like');
+    }
+
+    if (/\bsubscribe\b.*\b(?:channel|this)\b/.test(textToUse)) {
+      return mediaRoute('media.subscribe');
+    }
+
+    if (/\b(?:stop)\b.*\b(?:when\s+this\s+song\s+ends|after\s+this\s+song)\b/.test(textToUse)) {
+      return mediaRoute('media.stop');
+    }
+
     // Check for next/skip
-    if (/\b(next\s*song|next\s*track|skip\s*song|skip\s*track|play\s+next|skip)\b/i.test(textToUse)) {
+    if (/\b(next\s*song|next\s*track|next\s+video|skip\s*this\s+video|skip\s*song|skip\s*track|play\s+next|skip)\b/i.test(textToUse) ||
+      /\bi\s+(?:don'?t|do\s+not)\s+feel\s+like\s+listening\s+to\s+this\s+track\b/.test(textToUse)) {
       const intent = this.intentRegistry.get('media.next');
       if (intent) return { intent, confidence: 1 };
     }
 
     // Check for previous/back
-    if (/\b(previous\s*song|previous\s*track|go\s*back|play\s+previous|prev\s+song|previous)\b/i.test(textToUse)) {
+    if (/\b(previous\s*song|previous\s*track|previous\s+video|go\s*back|go\s+back\s+to\s+the\s+previous\s+song|take\s+me\s+back\s+to\s+the\s+previous\s+video|play\s+previous|prev\s+song|previous)\b/i.test(textToUse)) {
       const intent = this.intentRegistry.get('media.previous');
       if (intent) return { intent, confidence: 1 };
     }
 
     // Check for pause
-    if (/\b(pause|pause\s*music|pause\s*song|pause\s*playback)\b/i.test(textToUse)) {
+    if (/\b(pause|pause\s*(?:the\s*)?(?:youtube\s*)?video|pause\s*music|pause\s*song|pause\s*playback|pause\s+the\s+music\s+for\s+a\s+moment)\b/i.test(textToUse)) {
       const intent = this.intentRegistry.get('media.pause');
       if (intent) return { intent, confidence: 1 };
     }
 
     // Check for resume
-    if (/\b(resume|resume\s*music|resume\s*song|resume\s*playback|play\s+again|unpause|carry\s+on)\b/i.test(textToUse) &&
+    if (/\b(resume|resume\s*(?:the\s*)?(?:youtube\s*)?video|resume\s*music|resume\s*song|resume\s*playback|resume\s+whatever\s+was\s+playing|continue\s+playing\s+music\s+from\s+where\s+i\s+stopped|play\s+again|unpause|carry\s+on)\b/i.test(textToUse) &&
         !/\b(find|search|locate)\b/i.test(textToUse)) {
       const intent = this.intentRegistry.get('media.resume');
       if (intent) return { intent, confidence: 1 };
@@ -1089,13 +1623,40 @@ class ActionRouter {
     if (!mediaIntent) return null;
 
     const entities = this.entityExtractor.extract(mediaIntent, input);
+    if (!entities.mediaQuery) {
+      entities.mediaQuery = this._defaultMediaQuery(correctedText);
+    }
+    if (!entities.mediaPlatform && /\byoutube\b/.test(correctedText)) {
+      entities.mediaPlatform = 'youtube';
+    }
+    if (!entities.mediaPlatform) {
+      entities.mediaPlatform = /\bspotify\b/.test(correctedText) ? 'spotify' : 'youtube';
+    }
     if (!entities.mediaQuery) return null;
 
-    return { intent: mediaIntent, confidence: 0.99 };
+    return { intent: mediaIntent, confidence: 0.99, entities };
+  }
+
+  _defaultMediaQuery(text) {
+    const input = String(text || '').toLowerCase();
+    if (/\b(?:playlist|favorite|favourite|liked)\b/.test(input)) return 'liked songs playlist';
+    if (/\brelaxing|calmer|calm\b/.test(input)) return 'relaxing music';
+    if (/\bworkout|energetic|upbeat|motivating\b/.test(input)) return 'workout music';
+    if (/\bcoding|focus|background\b/.test(input)) return 'coding focus music';
+    if (/\bjazz\b/.test(input)) return 'jazz music';
+    if (/\bpop\b/.test(input)) return 'pop music';
+    if (/\brock\b/.test(input)) return 'rock music';
+    if (/\bvideo\b/.test(input)) return 'interesting video';
+    if (/\bmusic|song|track|playlist\b/.test(input)) return 'music';
+    return null;
   }
 
   _resolveMediaUnderstandingIntent(rawText, source) {
     if (/\.[A-Za-z0-9]{1,10}\b/.test(String(rawText || ''))) {
+      return null;
+    }
+
+    if (/\b(?:my\s+resume|resume\s+(?:file|document|docx|pdf)|where\s+did.*\bresume\b|find.*\bresume\b|open.*\bresume\b)\b/i.test(String(rawText || ''))) {
       return null;
     }
 
@@ -1126,8 +1687,6 @@ class ActionRouter {
         mediaPlatform: routed.payload.mediaPlatform,
         query: routed.payload.query,
         platform: routed.payload.platform,
-        artist: routed.payload.artist,
-        song: routed.payload.song,
         genre: routed.payload.genre,
         source: routed.payload.source
       }
@@ -1150,7 +1709,7 @@ class ActionRouter {
             entities: { windowName: 'all windows', allWindows: true }
           };
         }
-        const target = preparedInput?.semanticFrame?.targetText || '';
+        const target = this._cleanWindowTarget(preparedInput?.semanticFrame?.targetText || correctedText);
         return {
           intent,
           confidence: 1,
@@ -1162,7 +1721,7 @@ class ActionRouter {
     if (/\b(?:maximize|fullscreen)\b/.test(correctedText)) {
       const intent = this.intentRegistry.get('window.maximize');
       if (intent) {
-        const target = preparedInput?.semanticFrame?.targetText || '';
+        const target = this._cleanWindowTarget(preparedInput?.semanticFrame?.targetText || correctedText);
         return {
           intent,
           confidence: 1,
@@ -1172,6 +1731,14 @@ class ActionRouter {
     }
 
     return null;
+  }
+
+  _cleanWindowTarget(value) {
+    return String(value || '')
+      .replace(/\b(?:minimize|maximize|fullscreen|full\s+screen|please|kindly|now)\b/gi, ' ')
+      .replace(/^(?:the|a|an)\s+/i, '')
+      .replace(/\s+/g, ' ')
+      .trim();
   }
 
   _resolveScreenshotIntent(rawText, preparedInput) {
@@ -1200,6 +1767,10 @@ class ActionRouter {
     const raw = String(rawText || corrected || '').trim().toLowerCase();
     const input = `${raw} ${corrected}`.replace(/\s+/g, ' ').trim();
     if (!input) {
+      return null;
+    }
+
+    if (/\b(?:music|song|track|playlist|video|youtube|watch|listening)\b/.test(input)) {
       return null;
     }
 
@@ -1585,13 +2156,17 @@ class ActionRouter {
 
       const extractedFromRaw = this.entityExtractor.extract(intent, rawText);
       const extractedFromCorrected = this.entityExtractor.extract(intent, correctedText);
-      const appName = extractedFromRaw.appName || extractedFromCorrected.appName;
+      const explicitSwitchMatch = String(rawText || correctedText).match(/^(?:switch\s+to|go\s+to|focus\s+(?:on)?|activate)\s+(.+)$/i);
+      const appName = extractedFromRaw.appName || extractedFromCorrected.appName ||
+        (config.intentId === 'app.switch' && explicitSwitchMatch?.[1]
+          ? explicitSwitchMatch[1].trim()
+          : null);
 
       if (!appName) {
         continue;
       }
 
-      return { intent, confidence: 0.99 };
+      return { intent, confidence: 0.99, entities: { appName } };
     }
 
     return null;

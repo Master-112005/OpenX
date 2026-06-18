@@ -118,6 +118,19 @@ class AutomationEngine {
       'media.resume': () => this.media.resume(),
       'media.stop': () => this.media.stop(),
       'media.search': (entities) => this.media.search(entities.mediaQuery, entities.mediaPlatform),
+      'media.mute': () => this.media.mute(),
+      'media.unmute': () => this.media.unmute(),
+      'media.volumeUp': () => this.media.volumeUp(),
+      'media.volumeDown': () => this.media.volumeDown(),
+      'media.fullscreen': () => this.media.fullscreen(),
+      'media.exitFullscreen': () => this.media.exitFullscreen(),
+      'media.replay': () => this.media.replay(),
+      'media.repeat': () => this.media.repeat(),
+      'media.shuffle': () => this.media.shuffle(),
+      'media.favorite': () => this.media.favorite(),
+      'media.like': () => this.media.like(),
+      'media.subscribe': () => this.media.subscribe(),
+      'media.status': () => this.media.status(),
       'message.compose': (entities) => this.communications.composeMessage(
         entities.contactName,
         entities.messageText,
@@ -159,6 +172,16 @@ class AutomationEngine {
       'system.bluetooth': (entities) => this.system.bluetooth(entities.enabled),
       'assistant.identity': () => ({ success: true, data: { name: 'JARVIS' } }),
       'assistant.userName': () => ({ success: true, data: { known: false } }),
+      'assistant.capability': (entities) => ({
+        success: true,
+        data: {
+          action: 'capability.recognized',
+          capability: entities.capability || 'general',
+          operation: entities.operation || null,
+          target: entities.target || null,
+          rawCommand: entities.rawCommand || ''
+        }
+      }),
       'window.minimize': (entities) => this.windows.minimizeWindow(entities.windowName),
       'window.maximize': (entities) => this.windows.maximizeWindow(entities.windowName),
       'window.close': (entities) => this.windows.closeWindow(entities.windowName),

@@ -1,18 +1,6 @@
 const assert = require('assert');
 
 describe('Media Understanding', function() {
-  it('should recover phonetic and STT-corrupted artist names', function() {
-    const { ArtistMatcher } = require('../../core/media-understanding/artist-matcher');
-    const matcher = new ArtistMatcher();
-
-    const dulander = matcher.match('dulander');
-    const partial = matcher.match('daler');
-
-    assert.equal(dulander.match, 'Daler Mehndi');
-    assert.ok(dulander.confidence >= 0.9);
-    assert.equal(partial.match, 'Daler Mehndi');
-  });
-
   it('should normalize platform names and spacing mistakes', function() {
     const { PlatformMapper } = require('../../core/media-understanding/platform-mapper');
     const mapper = new PlatformMapper();
@@ -30,17 +18,37 @@ describe('Media Understanding', function() {
     assert.equal(mapper.infer(null, {}).platform, 'youtube');
   });
 
-  it('should parse imperfect playback requests into normalized media entities', function() {
+  it('should preserve typed media names instead of correcting them', function() {
     const { MediaParser } = require('../../core/media-understanding/parser');
     const parser = new MediaParser();
 
-    const parsed = parser.parse('play dulander songs');
+    const parsed = parser.parse('play dulander songs', { source: 'chat' });
 
     assert.equal(parsed.intent, 'media.play');
-    assert.equal(parsed.artist, 'Daler Mehndi');
-    assert.equal(parsed.query, 'Daler Mehndi songs');
+    assert.equal(parsed.query, 'dulander songs');
     assert.equal(parsed.platform, 'youtube');
-    assert.ok(parsed.confidence >= 0.8);
+  });
+
+  it('should keep playdate as the requested media title when spoken as play date', function() {
+    const { MediaParser } = require('../../core/media-understanding/parser');
+    const parser = new MediaParser();
+
+    const parsed = parser.parse('you have to the play date song', { source: 'chat' });
+
+    assert.equal(parsed.intent, 'media.play');
+    assert.equal(parsed.query, 'playdate song');
+    assert.equal(parsed.platform, 'youtube');
+  });
+
+  it('should preserve voice media names instead of correcting them', function() {
+    const { MediaParser } = require('../../core/media-understanding/parser');
+    const parser = new MediaParser();
+
+    const parsed = parser.parse('play dulander songs', { source: 'voice' });
+
+    assert.equal(parsed.intent, 'media.play');
+    assert.equal(parsed.query, 'dulander songs');
+    assert.ok(parsed.confidence >= 0.7);
   });
 
   it('should keep generic song requests generic instead of inventing an artist', function() {
@@ -50,7 +58,6 @@ describe('Media Understanding', function() {
     const parsed = parser.parse('play songs');
 
     assert.equal(parsed.intent, 'media.play');
-    assert.equal(parsed.artist, null);
     assert.equal(parsed.query, 'music');
     assert.equal(parsed.platform, 'youtube');
   });

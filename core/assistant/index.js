@@ -153,12 +153,26 @@ class Assistant extends EventEmitter {
       response = this.personality.applyToResponse(response);
 
       if (result.requiresConfirmation) {
+        const pendingStep = result.intent === 'multi.command'
+          ? result.data?.pendingStep
+          : null;
         this.pendingConfirmation = {
-          commandId: result.commandId,
-          intentId: result.intent,
-          entities: { ...(result.entities || {}) },
+          commandId: pendingStep?.commandId || result.commandId,
+          intentId: pendingStep?.intent || result.intent,
+          entities: { ...(pendingStep?.entities || result.entities || {}) },
           originalInput: input,
-          source
+          source,
+          multiCommand: pendingStep ? {
+            parentCommandId: result.commandId,
+            originalInput: input,
+            completedSteps: Array.isArray(result.data?.completedSteps)
+              ? result.data.completedSteps
+              : [],
+            confirmedInput: pendingStep.input,
+            remainingCommands: Array.isArray(result.data?.remainingCommands)
+              ? result.data.remainingCommands
+              : []
+          } : null
         };
       } else if (result.needsClarification) {
         this.pendingClarification = {
@@ -239,10 +253,16 @@ class Assistant extends EventEmitter {
   }
 
   async confirmAction(commandId, intentId, entities) {
+    const pending = this.pendingConfirmation && this.pendingConfirmation.commandId === commandId
+      ? this.pendingConfirmation
+      : null;
     if (this.pendingConfirmation && this.pendingConfirmation.commandId === commandId) {
       this.pendingConfirmation = null;
     }
     const result = await this.router.confirmAndExecute(commandId, intentId, entities);
+    if (result.success && pending?.multiCommand) {
+      return this._continuePendingMultiCommand(pending, result, pending.source || 'chat');
+    }
     return {
       ...result,
       response: this.personality.applyToResponse(result.response || '')
@@ -291,6 +311,37 @@ class Assistant extends EventEmitter {
     const normalized = Normalizer.normalizeText(String(input || '').trim());
     if (!normalized) {
       return null;
+    }
+
+    if (/^(?:what\s+did\s+i\s+just\s+say|what\s+was\s+my\s+last\s+(?:message|question)|what\s+did\s+i\s+say\s+(?:before|earlier|last))\b/.test(normalized)) {
+      const previous = this.context.getPreviousUserUtterance();
+      return this._directContextResult(source, previous
+        ? `You just said: ${previous}.`
+        : 'I do not have a previous message in this session yet.');
+    }
+
+    if (/^(?:what\s+(?:were|are)\s+we\s+(?:talking|discussing)\s+about|what\s+was\s+i\s+talking\s+about|summarize\s+(?:our|this)\s+(?:chat|conversation)|recap\s+(?:our|this)\s+(?:chat|conversation))\b/.test(normalized)) {
+      const digest = this.context.buildConversationDigest({ limit: 8 });
+      return this._directContextResult(source, digest.summaryText || 'I do not have enough chat history to summarize yet.');
+    }
+
+    if (/^(?:what\s+did\s+we\s+talk\s+about\s+last\s+time|what\s+did\s+you\s+remember\s+from\s+(?:the\s+)?last\s+(?:chat|conversation))\b/.test(normalized)) {
+      const remembered = this.learning?.getUserFact?.('last_conversation_summary');
+      return this._directContextResult(source, remembered?.value
+        ? remembered.value
+        : 'I do not have a saved previous conversation summary yet.');
+    }
+
+    const saidAboutMatch = normalized.match(/^what\s+did\s+i\s+(?:say|ask|tell\s+you)\s+about\s+(.+)$/);
+    if (saidAboutMatch?.[1]) {
+      const topic = saidAboutMatch[1].trim();
+      const relevant = this.context.getRelevantHistory(topic, 4)
+        .filter(entry => entry.input && !/^what\s+did\s+i\s+/i.test(entry.input));
+      if (relevant.length > 0) {
+        const lines = relevant.map(entry => entry.input).join('; ');
+        return this._directContextResult(source, `You mentioned ${topic} in: ${lines}.`);
+      }
+      return this._directContextResult(source, `I do not remember you mentioning ${topic} in this session.`);
     }
 
     if (/^(?:what\s+were\s+)?(?:the\s+)?last\s+three\s+commands\s+i\s+gave\b/.test(normalized)) {
@@ -633,6 +684,11 @@ class Assistant extends EventEmitter {
       }
     }
 
+    const chatMemory = this._rememberCurrentChatRequest(raw, source);
+    if (chatMemory) {
+      return chatMemory;
+    }
+
     const explicitLearning = this.learning.learnFromText(raw);
     if (explicitLearning) {
       return {
@@ -683,7 +739,11 @@ class Assistant extends EventEmitter {
       return false;
     }
 
-    return /^(?:app|file|folder|browser|media|message|call|mode|window)\./.test(result.intent) ||
+    if (/^media\./.test(result.intent)) {
+      return false;
+    }
+
+    return /^(?:app|file|folder|browser|message|call|mode|window)\./.test(result.intent) ||
       ['system.bluetooth', 'system.screenshot'].includes(result.intent);
   }
 
@@ -721,6 +781,13 @@ class Assistant extends EventEmitter {
       return;
     }
     if (result.success) {
+      const interest = this._extractInterestSignal(input, routedInput, result);
+      if (interest) {
+        this.learning.rememberPreference?.(`interest.${interest.key}`, interest.value, {
+          source: 'successful-command',
+          intent: result.intent || null
+        });
+      }
       return;
     }
     this.learning.recordFeedback({
@@ -734,6 +801,35 @@ class Assistant extends EventEmitter {
       validation: result.validation || result.data?.validation || null,
       verification: result.verification || result.data?.verification || null
     });
+  }
+
+  _extractInterestSignal(input, routedInput, result) {
+    const intent = result?.intent || '';
+    if (!/^(?:browser\.search|browser\.siteSearch|browser\.openFirstResult|media\.play|media\.search)$/.test(intent)) {
+      return null;
+    }
+
+    const raw = String(
+      result.entities?.query ||
+      result.entities?.mediaQuery ||
+      result.data?.query ||
+      routedInput ||
+      input ||
+      ''
+    ).trim();
+    const topic = this._cleanKnowledgeTopic(raw)
+      .replace(/\b(?:latest|good|best|interesting|relaxing|funny|videos?|music|podcast|course|tutorial)\b/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!topic || topic.length < 3) {
+      return null;
+    }
+    const key = topic
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '_')
+      .replace(/^_+|_+$/g, '')
+      .slice(0, 40);
+    return key ? { key, value: topic } : null;
   }
 
   _classifyFeedback(input) {
@@ -834,6 +930,9 @@ class Assistant extends EventEmitter {
         pending.intentId,
         pending.entities
       );
+      if (pending.multiCommand) {
+        return this._continuePendingMultiCommand(pending, result, source);
+      }
       const response = this.personality.applyToResponse(result.response || '');
       this.context.record(pending.originalInput || input, result.entities || {}, result);
       return {
@@ -861,6 +960,132 @@ class Assistant extends EventEmitter {
       return `I am waiting for your decision. Please say proceed or cancel. Say yes to close ${appName}, or no to cancel.`;
     }
     return this.responses.generate('confirmation', 'awaitingDecision');
+  }
+
+  async _continuePendingMultiCommand(pending, confirmedResult, source) {
+    const multi = pending?.multiCommand || {};
+    const steps = Array.isArray(multi.completedSteps)
+      ? multi.completedSteps.slice()
+      : [];
+
+    steps.push({
+      commandId: confirmedResult.commandId || pending.commandId || null,
+      input: multi.confirmedInput || pending.originalInput || '',
+      success: Boolean(confirmedResult.success),
+      intent: confirmedResult.intent || pending.intentId || null,
+      entities: confirmedResult.entities || pending.entities || {},
+      response: confirmedResult.response || '',
+      error: confirmedResult.error || null,
+      requiresConfirmation: Boolean(confirmedResult.requiresConfirmation),
+      confirmationMessage: confirmedResult.confirmationMessage || null,
+      permissionLevel: confirmedResult.permissionLevel || null
+    });
+
+    if (!confirmedResult.success || confirmedResult.requiresConfirmation) {
+      const result = {
+        commandId: multi.parentCommandId || confirmedResult.commandId || null,
+        success: false,
+        intent: 'multi.command',
+        confidence: 1,
+        entities: { commands: [multi.confirmedInput, ...(multi.remainingCommands || [])].filter(Boolean) },
+        steps,
+        response: this._buildMultiCommandResponse(steps),
+        source
+      };
+      this.context.record(pending.originalInput || multi.confirmedInput || '', result.entities, result);
+      return {
+        ...result,
+        response: this.personality.applyToResponse(result.response)
+      };
+    }
+
+    const remaining = Array.isArray(multi.remainingCommands) ? multi.remainingCommands : [];
+    for (let index = 0; index < remaining.length; index += 1) {
+      const clause = remaining[index];
+      const result = await this.router.process(clause, source, { allowMulti: false });
+      const step = {
+        commandId: result.commandId || null,
+        input: clause,
+        success: Boolean(result.success),
+        intent: result.intent || null,
+        entities: result.entities || {},
+        response: result.response || '',
+        error: result.error || null,
+        requiresConfirmation: Boolean(result.requiresConfirmation),
+        confirmationMessage: result.confirmationMessage || null,
+        permissionLevel: result.permissionLevel || null
+      };
+      steps.push(step);
+
+      if (result.requiresConfirmation) {
+        this.pendingConfirmation = {
+          commandId: step.commandId,
+          intentId: step.intent,
+          entities: { ...(step.entities || {}) },
+          originalInput: pending.originalInput,
+          source,
+          multiCommand: {
+            parentCommandId: multi.parentCommandId,
+            originalInput: pending.originalInput,
+            completedSteps: steps.slice(0, -1),
+            confirmedInput: clause,
+            remainingCommands: remaining.slice(index + 1)
+          }
+        };
+        return {
+          ...result,
+          intent: 'multi.command',
+          steps,
+          response: this.personality.applyToResponse(result.response || ''),
+          source
+        };
+      }
+
+      if (!result.success) {
+        const failed = {
+          commandId: multi.parentCommandId || result.commandId || null,
+          success: false,
+          intent: 'multi.command',
+          confidence: 1,
+          entities: { commands: [multi.confirmedInput, ...remaining].filter(Boolean) },
+          steps,
+          response: this._buildMultiCommandResponse(steps),
+          source
+        };
+        this.context.record(pending.originalInput || clause, failed.entities, failed);
+        return {
+          ...failed,
+          response: this.personality.applyToResponse(failed.response)
+        };
+      }
+    }
+
+    const completed = {
+      commandId: multi.parentCommandId || confirmedResult.commandId || null,
+      success: true,
+      intent: 'multi.command',
+      confidence: 1,
+      entities: { commands: [multi.confirmedInput, ...remaining].filter(Boolean) },
+      steps,
+      response: this._buildMultiCommandResponse(steps),
+      source
+    };
+    this.context.record(pending.originalInput || multi.confirmedInput || '', completed.entities, completed);
+    return {
+      ...completed,
+      response: this.personality.applyToResponse(completed.response)
+    };
+  }
+
+  _buildMultiCommandResponse(steps) {
+    if (this.router && typeof this.router._buildMultiCommandResponse === 'function') {
+      return this.router._buildMultiCommandResponse(steps);
+    }
+    const completed = steps.filter(step => step.success).length;
+    const failed = steps.find(step => !step.success);
+    return failed
+      ? `${completed} command${completed === 1 ? '' : 's'} completed. ${failed.response || failed.error || 'One command failed.'}`
+      : `Completed ${completed} command${completed === 1 ? '' : 's'}.`;
   }
 
   async _handlePendingClarification(input, source) {
@@ -1033,6 +1258,22 @@ class Assistant extends EventEmitter {
       }
     }
 
+    const earlyLastFileEntry = this.context.getLastFileReference();
+    const earlyLastFile = this.context.getFileReference(earlyLastFileEntry);
+    if (/^(?:where\s+is\s+(?:it|that)\s+(?:located|saved)|where\s+did\s+i\s+save\s+(?:it|that))$/i.test(normalized)) {
+      return earlyLastFile?.path || earlyLastFile?.name
+        ? `what is the location of ${earlyLastFile.path || earlyLastFile.name}`
+        : '';
+    }
+
+    if (/^open\s+(?:its|it|that|the)\s+folder$/i.test(normalized)) {
+      if (earlyLastFile?.path) {
+        const path = require('path');
+        return `open ${path.dirname(earlyLastFile.path)}`;
+      }
+      return '';
+    }
+
     const lastReference = this._getLastReferenceTarget();
     const lastFileEntry = this.context.getLastFileReference();
     const lastFile = this.context.getFileReference(lastFileEntry);
@@ -1071,6 +1312,11 @@ class Assistant extends EventEmitter {
       return '';
     }
 
+    const knowledgeFollowUp = this._resolveKnowledgeFollowUp(normalized);
+    if (knowledgeFollowUp) {
+      return knowledgeFollowUp;
+    }
+
     const listFollowUp = /^(?:list|show|tell|display|open)?\s*(?:them|those|these|it|that)(?:\s+again)?$/.test(normalized) ||
       /^(?:list|show|tell|display)\s+(?:them|those|these|it|that)\b/.test(normalized) ||
       /^(?:what|which)\s+(?:are|is)\s+(?:them|those|these|they|it|that)\b/.test(normalized);
@@ -1099,6 +1345,85 @@ class Assistant extends EventEmitter {
     }
 
     return `list ${type ? `${type} ` : ''}files in ${path}`;
+  }
+
+  _resolveKnowledgeFollowUp(normalized) {
+    const topic = this._baseKnowledgeTopic(this._getLastKnowledgeTopic());
+    if (!topic) {
+      return '';
+    }
+
+    if (/^(?:can\s+you\s+)?(?:make\s+that|make\s+it|explain\s+it|explain\s+that)\s+(?:easier|simpler|simple|easy)(?:\s+to\s+understand)?$/.test(normalized) ||
+      /^explain\s+it\s+like\s+i'?m\s+(?:a\s+)?beginner$/.test(normalized) ||
+      /^explain\s+it\s+simply$/.test(normalized)) {
+      return `search for ${topic} simple beginner explanation`;
+    }
+
+    if (/^(?:give\s+me\s+)?(?:a\s+)?real[-\s]?world\s+example$/.test(normalized) ||
+      /^give\s+me\s+an?\s+example$/.test(normalized)) {
+      return `search for ${topic} real world example`;
+    }
+
+    if (/^summarize\s+(?:that|it)(?:\s+in\s+one\s+minute)?$/.test(normalized) ||
+      /^give\s+me\s+(?:a\s+)?summary$/.test(normalized)) {
+      return `search for ${topic} one minute summary`;
+    }
+
+    if (/^(?:tell\s+me\s+more|more\s+details|go\s+deeper|continue\s+explaining)(?:\s+(?:about\s+)?(?:it|that|this))?$/.test(normalized)) {
+      return `search for ${topic} detailed explanation`;
+    }
+
+    if (/^how\s+(?:does|do)\s+(?:it|that|this)\s+work\??$/.test(normalized)) {
+      return `search for how ${topic} works`;
+    }
+
+    if (/^what\s+(?:is|are)\s+(?:its|their)\s+(?:uses?|benefits?|advantages?|examples?)\??$/.test(normalized)) {
+      const aspect = normalized.match(/\b(uses?|benefits?|advantages?|examples?)\b/)?.[1] || 'uses';
+      return `search for ${topic} ${aspect}`;
+    }
+
+    if (/^(?:why|where|when|who|what|how)\b.*\b(?:it|that|this)\b/.test(normalized)) {
+      const rewritten = normalized
+        .replace(/\b(?:it|that|this)\b/g, topic)
+        .replace(/\s+/g, ' ')
+        .trim();
+      return `search for ${rewritten}`;
+    }
+
+    return '';
+  }
+
+  _getLastKnowledgeTopic() {
+    const entry = this.context.getHistory(12)
+      .slice()
+      .reverse()
+      .find(item => item?.success &&
+        ['browser.search', 'browser.siteSearch', 'browser.openFirstResult'].includes(item.intent) &&
+        (item.entities?.query || item.data?.query || item.input));
+    const raw = String(entry?.entities?.query || entry?.data?.query || entry?.input || '').trim();
+    const topic = this._cleanKnowledgeTopic(raw);
+    if (topic) {
+      return topic;
+    }
+    return this.context.getLastTopic()?.label || '';
+  }
+
+  _cleanKnowledgeTopic(value) {
+    return Normalizer.normalizeText(String(value || '').trim())
+      .replace(/^(?:search\s+for|search|google|look\s+up|find\s+information\s+about|find\s+information|can\s+you\s+find\s+information\s+about|explain|teach\s+me)\s+/i, '')
+      .replace(/\b(?:in\s+simple\s+words?|simple\s+beginner\s+explanation|real[-\s]?world\s+example|one\s+minute\s+summary|simply|like\s+i'?m\s+(?:a\s+)?beginner|from\s+scratch|for\s+me)\b/gi, ' ')
+      .replace(/[?.!]+$/g, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }
+
+  _baseKnowledgeTopic(value) {
+    return Normalizer.normalizeText(String(value || '').trim())
+      .replace(/^how\s+(.+?)\s+works?$/i, '$1')
+      .replace(/^what\s+is\s+(.+)$/i, '$1')
+      .replace(/\b(?:uses?|benefits?|advantages?|examples?|detailed\s+explanation|one\s+minute\s+summary|simple\s+beginner\s+explanation)\b/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
   }
 
   _resolveRepeatRequest(normalized) {
@@ -1243,6 +1568,41 @@ class Assistant extends EventEmitter {
     }
 
     return '';
+  }
+
+  _rememberCurrentChatRequest(input, source) {
+    const normalized = Normalizer.normalizeText(String(input || '').trim());
+    if (!/^(?:remember|save|store|keep)\s+(?:this\s+)?(?:chat|conversation|discussion)\b/.test(normalized)) {
+      return null;
+    }
+
+    const digest = this.context.buildConversationDigest({ limit: 12 });
+    if (!digest.summaryText) {
+      return {
+        success: false,
+        learned: false,
+        intent: 'assistant.memory',
+        entities: { fact: 'last_conversation_summary' },
+        data: { type: 'conversation-summary', known: false },
+        source,
+        response: this.personality.applyToResponse('I do not have enough chat history to remember yet.')
+      };
+    }
+
+    const fact = this.learning.rememberUserFact('last_conversation_summary', digest.summaryText, {
+      source: 'explicit-chat-memory',
+      confidence: 0.9
+    });
+
+    return {
+      success: Boolean(fact),
+      learned: Boolean(fact),
+      intent: 'assistant.memory',
+      entities: { fact: 'last_conversation_summary' },
+      data: { type: 'conversation-summary', summary: digest.summaryText },
+      source,
+      response: this.personality.applyToResponse('I will remember this chat summary.')
+    };
   }
 }
 

@@ -234,6 +234,54 @@ describe('Response Generator', function() {
     assert.ok(result.includes('Failed command: open chatgpt'));
   });
 
+  it('should confirm verified media playback without asking for feedback', function() {
+    const gen = new ResponseGenerator();
+    const result = gen.generate('success', 'media.play', {
+      result: {
+        data: {
+          query: 'playdate song',
+          platform: 'youtube',
+          appName: 'YouTube',
+          launchMethod: 'existing-window',
+          replacedExisting: true,
+          playbackVerification: {
+            valid: true,
+            requestedQuery: 'playdate song',
+            requestedPlatform: 'youtube'
+          }
+        }
+      }
+    });
+
+    assert.equal(result, 'Verified YouTube was switched to "playdate song", sir.');
+  });
+
+  it('should confirm verified managed media launches', function() {
+    const gen = new ResponseGenerator();
+    const result = gen.generate('success', 'media.play', {
+      result: {
+        data: {
+          query: 'playdate song',
+          platform: 'youtube',
+          appName: 'YouTube',
+          launchMethod: 'chrome-pwa',
+          replacedExisting: true,
+          playbackVerification: {
+            valid: true,
+            requestedQuery: 'playdate song',
+            requestedPlatform: 'youtube',
+            launchMethod: 'chrome-pwa'
+          }
+        }
+      }
+    });
+
+    assert.equal(
+      result,
+      'Verified YouTube was opened for "playdate song" after stopping the previous playback, sir.'
+    );
+  });
+
   it('should use formal addressing by default', function() {
     const gen = new ResponseGenerator();
     const result = gen.generate('info', 'idle');

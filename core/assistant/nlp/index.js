@@ -388,7 +388,19 @@ class NlpProcessor {
       'price',
       'iphone',
       'movie',
-      'movies'
+      'movies',
+      'docker',
+      'kubernetes',
+      'devops',
+      'java',
+      'sql',
+      'podcast',
+      'technology',
+      'interview',
+      'finance',
+      'stock',
+      'gold',
+      'rupees'
     ]);
     const groups = [
       { verb: 'open', words: ['open', 'launch', 'start', 'run', 'show', 'play'] },
@@ -413,7 +425,7 @@ class NlpProcessor {
       { verb: 'remember', words: ['remember', 'note', 'memorize', 'recall', 'store', 'save', 'keep'] },
       { verb: 'forget', words: ['forget', 'ignore', 'clear', 'delete', 'remove'] },
       { verb: 'maximize', words: ['maximize', 'fullscreen', 'expand', 'enlarge', 'bigger', 'grow'] },
-      { verb: 'minimize', words: ['minimize', 'shrink', 'smaller', 'collapse', 'hide', 'dock'] }
+      { verb: 'minimize', words: ['minimize', 'shrink', 'smaller', 'collapse', 'hide'] }
     ];
 
     for (let index = 0; index < tokens.length; index += 1) {
@@ -434,10 +446,10 @@ class NlpProcessor {
         }
 
         const match = Normalizer.findClosestOption(token, group.words, {
-          minSimilarity: token.length >= 5 ? 0.58 : 0.68,
-          maxDistance: token.length >= 5 ? 2 : 1
+          minSimilarity: token.length >= 5 ? 0.74 : 0.78,
+          maxDistance: 1
         });
-        if (match) {
+        if (match && Math.abs(String(match.normalizedMatch || '').length - token.length) <= 1) {
           return { verb: group.verb, index };
         }
       }

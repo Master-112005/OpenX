@@ -1,19 +1,20 @@
 'use strict';
 
 const fs = require('fs');
+const path = require('path');
 const https = require('https');
 const { execFileSync, spawn } = require('child_process');
 const Logger = require('../../shared/index').Logger;
 const BrowserController = require('../browser/index');
 const WindowsSessionController = require('../common/windows-session');
-const { launchTarget } = require('../common/launcher');
 
 const DEFAULT_PLATFORM = 'youtube';
-const YOUTUBE_CHROME_PWA_APP_ID = 'Chrome._crx_agimnkijcamfeangaknmldooml';
+const VK_MEDIA_STOP = 178;
 
 const CHROME_PATHS = [
   'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-  'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe'
+  'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe',
+  path.join(process.env.LOCALAPPDATA || '', 'Google\\Chrome\\Application\\chrome.exe')
 ];
 
 const USER_AGENT =
@@ -88,6 +89,7 @@ class MediaController {
 
     this.logger.info(`MediaController: playing "${cleanQuery}" on ${definition.appName}`);
 
+    let replacement = this._prepareReplacementPlayback(platformKey, { beforeReuse: true });
     const playbackTarget = await this._buildPlaybackTarget(cleanQuery, platformKey, definition);
     const reuseResult = this._tryReuseExistingSession(platformKey, playbackTarget.playUrl);
 
@@ -110,12 +112,25 @@ class MediaController {
           launchMethod: 'existing-window',
           url: playbackTarget.playUrl,
           replacedExisting: true,
+          stoppedPreviousPlayback: replacement.stoppedPreviousPlayback,
+          closedPreviousPlayback: replacement.closedPreviousPlayback,
+          verified: true,
+          playbackVerification: this._buildPlaybackVerification({
+            query: cleanQuery,
+            platform: platformKey,
+            appName: definition.appName,
+            launchMethod: 'existing-window',
+            url: playbackTarget.playUrl,
+            replacement
+          }),
           matchedWindow: reuseResult.data?.matchedWindow || null
         }
       };
     }
 
-    this._closeManagedSession();
+    if (!replacement.replacementAttempted) {
+      replacement = this._prepareReplacementPlayback(platformKey, { beforeReuse: false });
+    }
 
     if (definition.localLauncher && typeof this[definition.localLauncher] === 'function') {
       const localResult = await this[definition.localLauncher](cleanQuery, playbackTarget.playUrl);
@@ -140,7 +155,19 @@ class MediaController {
             platform: platformKey,
             appName: definition.appName,
             launchMethod: localResult.method || 'local',
-            url: localResult.url || null
+            url: localResult.url || null,
+            replacedExisting: replacement.replacementAttempted,
+            stoppedPreviousPlayback: replacement.stoppedPreviousPlayback,
+            closedPreviousPlayback: replacement.closedPreviousPlayback,
+            verified: true,
+            playbackVerification: this._buildPlaybackVerification({
+              query: cleanQuery,
+              platform: platformKey,
+              appName: definition.appName,
+              launchMethod: localResult.method || 'local',
+              url: localResult.url || playbackTarget.playUrl || null,
+              replacement
+            })
           }
         };
       }
@@ -177,7 +204,19 @@ class MediaController {
         platform: platformKey,
         appName: definition.appName,
         launchMethod: 'browser',
-        url: fallbackUrl
+        url: fallbackUrl,
+        replacedExisting: replacement.replacementAttempted,
+        stoppedPreviousPlayback: replacement.stoppedPreviousPlayback,
+        closedPreviousPlayback: replacement.closedPreviousPlayback,
+        verified: false,
+        playbackVerification: this._buildPlaybackVerification({
+          query: cleanQuery,
+          platform: platformKey,
+          appName: definition.appName,
+          launchMethod: 'browser',
+          url: fallbackUrl,
+          replacement
+        })
       }
     };
   }
@@ -196,7 +235,13 @@ class MediaController {
 
     if (chromePath) {
       try {
-        const child = spawn(chromePath, [`--app=${playUrl}`], {
+        const args = [
+          `--user-data-dir=${this._ensureChromeMediaProfile()}`,
+          '--no-first-run',
+          '--autoplay-policy=no-user-gesture-required',
+          `--app=${playUrl}`
+        ];
+        const child = spawn(chromePath, args, {
           detached: true,
           stdio: 'ignore'
         });
@@ -213,20 +258,7 @@ class MediaController {
       }
     }
 
-    try {
-      launchTarget('C:\\Windows\\explorer.exe', [
-        `shell:AppsFolder\\${YOUTUBE_CHROME_PWA_APP_ID}`
-      ]);
-      return {
-        success: true,
-        method: 'shell-app',
-        url: playUrl,
-        managedWindow: true,
-        windowQuery: 'youtube'
-      };
-    } catch (err) {
-      return { success: false, reason: 'no local youtube launcher found' };
-    }
+    return { success: false, reason: 'chrome executable not found for managed playback' };
   }
 
   async _launchSpotifyLocal(query) {
@@ -332,7 +364,28 @@ class MediaController {
       }
     }
 
+    try {
+      const discoveredPath = execFileSync('where.exe', ['chrome'], {
+        timeout: 3000,
+        stdio: 'pipe',
+        encoding: 'utf8'
+      }).split(/\r?\n/).map(line => line.trim()).find(Boolean);
+      if (discoveredPath && fs.existsSync(discoveredPath)) {
+        return discoveredPath;
+      }
+    } catch (err) {
+      this.logger.info('MediaController: Chrome was not found on PATH');
+    }
+
     return null;
+  }
+
+  _ensureChromeMediaProfile() {
+    const baseDir = process.env.LOCALAPPDATA ||
+      path.join(process.env.USERPROFILE || process.cwd(), 'AppData', 'Local');
+    const profileDir = path.join(baseDir, 'OpenX', 'JarvisMediaChromeProfile');
+    fs.mkdirSync(profileDir, { recursive: true });
+    return profileDir;
   }
 
   _resolvePlatform(raw) {
@@ -371,19 +424,7 @@ class MediaController {
   }
 
   _tryReuseExistingSession(platformKey, playUrl) {
-    if (platformKey !== 'youtube' || !playUrl) {
-      return { success: false };
-    }
-
-    const windowQuery = this.activeSession?.platform === 'youtube'
-      ? (this.activeSession.windowQuery || 'youtube')
-      : 'youtube';
-
-    return this.windowSession.navigateWindowToUrl(
-      windowQuery,
-      playUrl,
-      this._getWindowSearchOptions(platformKey)
-    );
+    return { success: false, reason: 'managed-launch-required' };
   }
 
   _rememberSession(session) {
@@ -398,9 +439,53 @@ class MediaController {
     };
   }
 
+  _prepareReplacementPlayback(platformKey, options = {}) {
+    const replacement = {
+      replacementAttempted: false,
+      stoppedPreviousPlayback: false,
+      closedPreviousPlayback: false
+    };
+
+    const hasKnownSession = Boolean(this.activeSession?.platform);
+    const samePlatform = this.activeSession?.platform === platformKey;
+
+    if (options.beforeReuse && (!hasKnownSession || samePlatform)) {
+      return replacement;
+    }
+
+    replacement.replacementAttempted = true;
+
+    if (this.activeSession?.managedWindow) {
+      const closeResult = this._closeManagedSession();
+      if (closeResult.success) {
+        replacement.closedPreviousPlayback = true;
+        return replacement;
+      }
+    }
+
+    const stopResult = this._stopPreviousPlayback();
+    replacement.stoppedPreviousPlayback = stopResult.success;
+    return replacement;
+  }
+
+  _buildPlaybackVerification({ query, platform, appName, launchMethod, url, replacement }) {
+    return {
+      type: 'media.play',
+      valid: Boolean(query && platform && url && launchMethod !== 'browser'),
+      requestedQuery: query,
+      requestedPlatform: platform,
+      appName,
+      launchMethod,
+      targetUrl: url,
+      replacedExisting: Boolean(replacement?.replacementAttempted),
+      stoppedPreviousPlayback: Boolean(replacement?.stoppedPreviousPlayback),
+      closedPreviousPlayback: Boolean(replacement?.closedPreviousPlayback)
+    };
+  }
+
   _closeManagedSession() {
     if (!this.activeSession?.managedWindow) {
-      return;
+      return { success: false, skipped: true };
     }
 
     const closeResult = this.windowSession.closeWindow(
@@ -415,6 +500,17 @@ class MediaController {
     }
 
     this.activeSession = null;
+    return closeResult;
+  }
+
+  _stopPreviousPlayback() {
+    try {
+      this._sendGlobalMediaKey(VK_MEDIA_STOP);
+      return { success: true };
+    } catch (err) {
+      this.logger.info(`MediaController: unable to stop previous playback (${err.message})`);
+      return { success: false, error: err.message };
+    }
   }
 
   _defaultWindowQuery(platformKey) {
@@ -428,7 +524,8 @@ class MediaController {
     if (platformKey === 'youtube') {
       return {
         preferredTitleTokens: ['youtube'],
-        preferredProcessNames: ['chrome', 'msedge', 'firefox']
+        preferredProcessNames: ['chrome', 'msedge', 'firefox'],
+        requireTitleTokenMatch: true
       };
     }
 
@@ -477,6 +574,159 @@ class MediaController {
       return { success: true, data: { action: 'stop' } };
     } catch (err) {
       return { success: false, error: `Failed to stop playback: ${err.message}` };
+    }
+  }
+
+  mute() {
+    return this._sendPlayerShortcut('mute', 'm');
+  }
+
+  unmute() {
+    return this._sendPlayerShortcut('unmute', 'm');
+  }
+
+  volumeUp() {
+    return this._sendPlayerShortcut('volumeUp', '{UP}');
+  }
+
+  volumeDown() {
+    return this._sendPlayerShortcut('volumeDown', '{DOWN}');
+  }
+
+  fullscreen() {
+    return this._sendPlayerShortcut('fullscreen', 'f');
+  }
+
+  exitFullscreen() {
+    return this._sendPlayerShortcut('exitFullscreen', '{ESC}');
+  }
+
+  replay() {
+    return this._sendPlayerShortcut('replay', 'j');
+  }
+
+  repeat() {
+    return this._sendPlayerShortcut('repeat', 'r', {
+      limitation: 'Repeat support depends on the active media player shortcut support.'
+    });
+  }
+
+  shuffle() {
+    return this._sendPlayerShortcut('shuffle', 's', {
+      limitation: 'Shuffle support depends on the active media player shortcut support.'
+    });
+  }
+
+  favorite() {
+    return this._sendPlayerShortcut('favorite', '+l', {
+      limitation: 'Favorite/like support depends on the active media player shortcut support.'
+    });
+  }
+
+  like() {
+    return this._sendPlayerShortcut('like', '+l', {
+      limitation: 'YouTube may require the page like button to be focused before the shortcut works.'
+    });
+  }
+
+  subscribe() {
+    return this._sendPlayerShortcut('subscribe', '', {
+      limitation: 'YouTube does not expose a reliable global subscribe shortcut; the video window was focused for manual confirmation.'
+    });
+  }
+
+  status() {
+    if (this.activeSession) {
+      return {
+        success: true,
+        data: {
+          action: 'status',
+          query: this.activeSession.query || null,
+          platform: this.activeSession.platform || null,
+          appName: this.activeSession.appName || null,
+          url: this.activeSession.url || null,
+          launchMethod: this.activeSession.launchMethod || null,
+          knownPlayback: true
+        }
+      };
+    }
+
+    const target = this.windowSession.findWindow('youtube', this._getWindowSearchOptions('youtube')) ||
+      this.windowSession.findWindow('spotify', { preferredTitleTokens: ['spotify'] });
+    if (target) {
+      return {
+        success: true,
+        data: {
+          action: 'status',
+          matchedWindow: target.title,
+          processName: target.processName,
+          knownPlayback: false
+        }
+      };
+    }
+
+    return {
+      success: true,
+      data: {
+        action: 'status',
+        knownPlayback: false,
+        message: 'No active media session is known yet'
+      }
+    };
+  }
+
+  _sendPlayerShortcut(action, keys, detail = {}) {
+    try {
+      const result = keys
+        ? this.windowSession.sendKeys(
+            this.activeSession?.platform === 'youtube'
+              ? (this.activeSession.windowQuery || 'youtube')
+              : this._defaultWindowQuery(this.activeSession?.platform || 'youtube'),
+            keys,
+            this._getWindowSearchOptions(this.activeSession?.platform || 'youtube')
+          )
+        : this.windowSession.focusWindow('youtube', this._getWindowSearchOptions('youtube'));
+
+      if (!result.success) {
+        this._sendGlobalMediaFallback(action);
+        return {
+          success: true,
+          data: {
+            action,
+            method: 'global-media-fallback',
+            ...detail
+          }
+        };
+      }
+
+      return {
+        success: true,
+        data: {
+          action,
+          method: 'window-shortcut',
+          matchedWindow: result.data?.matchedWindow,
+          keys,
+          ...detail
+        }
+      };
+    } catch (err) {
+      return { success: false, error: `Failed to run media ${action}: ${err.message}` };
+    }
+  }
+
+  _sendGlobalMediaFallback(action) {
+    const fallbackKeys = {
+      mute: 173,
+      unmute: 173,
+      volumeUp: 175,
+      volumeDown: 174,
+      replay: 177,
+      next: 176,
+      previous: 177
+    };
+    const virtualKeyCode = fallbackKeys[action];
+    if (virtualKeyCode) {
+      this._sendGlobalMediaKey(virtualKeyCode);
     }
   }
 

@@ -1,7 +1,42 @@
 const Logger = require('../../shared/index').Logger;
 
 const MAX_HISTORY = 100;
-const MAX_CONTEXT_AGE_MS = 300000;
+const MAX_CONTEXT_AGE_MS = 2 * 60 * 60 * 1000;
+const MAX_TOPIC_MEMORY = 40;
+const TOPIC_STOP_WORDS = new Set([
+  'a', 'an', 'and', 'are', 'as', 'at', 'be', 'but', 'by', 'can', 'could',
+  'did', 'do', 'does', 'for', 'from', 'give', 'go', 'had', 'has', 'have',
+  'how', 'i', 'in', 'is', 'it', 'me', 'my', 'of', 'on', 'open', 'or', 'our',
+  'please', 'search', 'show', 'sir', 'that', 'the', 'them', 'then', 'there',
+  'this', 'to', 'was', 'were', 'what', 'when', 'where', 'which', 'who', 'why',
+  'with', 'you', 'your'
+]);
+
+function normalizeText(value) {
+  return String(value || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9\s._-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function tokenizeTopic(value) {
+  return normalizeText(value)
+    .split(/\s+/)
+    .map(token => token.trim())
+    .filter(token => token.length >= 3 && !TOPIC_STOP_WORDS.has(token));
+}
+
+function compactSentence(value, maxLength = 160) {
+  const text = String(value || '')
+    .replace(/\s+/g, ' ')
+    .replace(/[^\S\r\n]+/g, ' ')
+    .trim();
+  if (text.length <= maxLength) {
+    return text;
+  }
+  return `${text.slice(0, maxLength - 3).trim()}...`;
+}
 
 class ContextManager {
   constructor(config) {
@@ -9,10 +44,13 @@ class ContextManager {
     this.history = [];
     this.sessionData = new Map();
     this.maxHistory = config?.chat?.maxHistory || MAX_HISTORY;
+    this.maxContextAgeMs = Number(config?.chat?.maxContextAgeMs || MAX_CONTEXT_AGE_MS);
+    this.maxTopicMemory = Number(config?.chat?.maxTopicMemory || MAX_TOPIC_MEMORY);
     this.lastInteraction = null;
     this.userPreferences = new Map();
     this.userFacts = new Map();
     this.pendingTasks = [];
+    this.topicMemory = new Map();
   }
 
   record(input, parsed, result) {
@@ -37,6 +75,7 @@ class ContextManager {
     this.lastInteraction = Date.now();
     this._extractUserPreferences(input, result);
     this._trackPendingTask(input, result);
+    this._updateTopicMemory(entry);
 
     if (this.history.length > this.maxHistory) {
       this.history.shift();
@@ -168,6 +207,11 @@ class ContextManager {
     return this.history.slice(-count).map(h => h.input);
   }
 
+  getPreviousUserUtterance() {
+    const previous = this.history[this.history.length - 1];
+    return previous?.input || '';
+  }
+
   getCommandsToday() {
     const start = new Date();
     start.setHours(0, 0, 0, 0);
@@ -245,6 +289,70 @@ class ContextManager {
     return this._fileReferenceFromEntry(entry);
   }
 
+  getLastTopic() {
+    const topics = Array.from(this.topicMemory.values())
+      .sort((a, b) => b.lastSeen - a.lastSeen || b.score - a.score);
+    return topics[0] || null;
+  }
+
+  getRelevantHistory(query, limit = 5) {
+    const queryTokens = tokenizeTopic(query);
+    if (queryTokens.length === 0) {
+      return this.history.slice(-limit);
+    }
+
+    const now = Date.now();
+    return this.history
+      .map(entry => {
+        const haystack = [
+          entry.input,
+          entry.response,
+          entry.intent,
+          entry.entities?.query,
+          entry.entities?.mediaQuery,
+          entry.entities?.appName,
+          entry.data?.query
+        ].filter(Boolean).join(' ');
+        const tokens = new Set(tokenizeTopic(haystack));
+        const overlap = queryTokens.filter(token => tokens.has(token)).length;
+        const ageMinutes = Math.max(0, (now - entry.timestamp) / 60000);
+        const recency = Math.max(0, 1 - (ageMinutes / 120));
+        return { entry, score: overlap + recency };
+      })
+      .filter(item => item.score > 0.2)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, limit)
+      .map(item => item.entry);
+  }
+
+  buildConversationDigest(options = {}) {
+    const limit = Number(options.limit || 8);
+    const recent = this.history
+      .slice(-limit)
+      .filter(entry => entry?.input)
+      .map(entry => ({
+        input: compactSentence(entry.input, 120),
+        intent: entry.intent || 'conversation',
+        success: Boolean(entry.success),
+        target: this._entryTarget(entry)
+      }));
+    const topics = Array.from(this.topicMemory.values())
+      .sort((a, b) => b.score - a.score || b.lastSeen - a.lastSeen)
+      .slice(0, 5)
+      .map(topic => topic.label);
+    const lines = recent.map(entry => {
+      const target = entry.target ? ` (${entry.target})` : '';
+      return `${entry.input}${target}`;
+    });
+    return {
+      recent,
+      topics,
+      summaryText: lines.length
+        ? `Recent chat: ${lines.join('; ')}. ${topics.length ? `Main topics: ${topics.join(', ')}.` : ''}`.trim()
+        : ''
+    };
+  }
+
   getConversationSummary() {
     const successful = this.history.filter(h => h.success).length;
     const total = this.history.length;
@@ -257,19 +365,134 @@ class ContextManager {
       verifiedCommands: verified,
       failedVerificationCommands: failedVerification,
       lastInteraction: this.lastInteraction,
-      sessionKeys: Array.from(this.sessionData.keys())
+      sessionKeys: Array.from(this.sessionData.keys()),
+      recentTopics: Array.from(this.topicMemory.values())
+        .sort((a, b) => b.score - a.score || b.lastSeen - a.lastSeen)
+        .slice(0, 5)
+        .map(topic => topic.label)
     };
   }
 
   _cleanup() {
-    const cutoff = Date.now() - MAX_CONTEXT_AGE_MS;
+    const cutoff = Date.now() - this.maxContextAgeMs;
     this.history = this.history.filter(h => h.timestamp >= cutoff);
 
     for (const [key, data] of this.sessionData) {
-      if (Date.now() - data.timestamp > MAX_CONTEXT_AGE_MS) {
+      if (Date.now() - data.timestamp > this.maxContextAgeMs) {
         this.sessionData.delete(key);
       }
     }
+
+    for (const [key, topic] of this.topicMemory) {
+      if (topic.lastSeen < cutoff) {
+        this.topicMemory.delete(key);
+      }
+    }
+    this._trimTopicMemory();
+  }
+
+  _updateTopicMemory(entry) {
+    const candidates = this._topicCandidatesFromEntry(entry);
+    if (candidates.length === 0) {
+      return;
+    }
+
+    const now = entry.timestamp || Date.now();
+    for (const label of candidates) {
+      const tokens = tokenizeTopic(label);
+      if (tokens.length === 0) {
+        continue;
+      }
+      const key = tokens.slice(0, 6).join(' ');
+      const existing = this.topicMemory.get(key);
+      const scoreBoost = entry.success ? 1.4 : 0.8;
+      this.topicMemory.set(key, {
+        key,
+        label: compactSentence(label, 80),
+        tokens,
+        score: Number(existing?.score || 0) + scoreBoost,
+        count: Number(existing?.count || 0) + 1,
+        firstSeen: existing?.firstSeen || now,
+        lastSeen: now,
+        lastInput: entry.input,
+        lastIntent: entry.intent || null
+      });
+    }
+
+    this._trimTopicMemory();
+  }
+
+  _topicCandidatesFromEntry(entry) {
+    const entities = entry.entities || {};
+    const data = entry.data || {};
+    const candidates = [
+      entities.query,
+      entities.mediaQuery,
+      entities.appName,
+      entities.windowName,
+      entities.folderName,
+      entities.filename,
+      entities.fileName,
+      entities.contactName,
+      data.query,
+      data.topic
+    ].filter(Boolean);
+
+    const cleanedInputTopic = this._topicFromInput(entry.input);
+    if (cleanedInputTopic) {
+      candidates.push(cleanedInputTopic);
+    }
+
+    return Array.from(new Set(candidates
+      .map(value => compactSentence(value, 100))
+      .filter(value => tokenizeTopic(value).length > 0)));
+  }
+
+  _topicFromInput(input) {
+    const text = normalizeText(input)
+      .replace(/^(?:can|could|would)\s+you\s+/, '')
+      .replace(/^(?:please\s+)?(?:explain|tell\s+me\s+about|teach\s+me|search\s+for|find|look\s+up|play|open|show)\s+/, '')
+      .replace(/\b(?:in\s+simple\s+words?|for\s+me|please|today|now)\b/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    const tokens = tokenizeTopic(text);
+    if (tokens.length === 0 || tokens.length > 8) {
+      return '';
+    }
+    return text;
+  }
+
+  _trimTopicMemory() {
+    if (this.topicMemory.size <= this.maxTopicMemory) {
+      return;
+    }
+
+    const keep = new Set(Array.from(this.topicMemory.values())
+      .sort((a, b) => b.score - a.score || b.lastSeen - a.lastSeen)
+      .slice(0, this.maxTopicMemory)
+      .map(topic => topic.key));
+
+    for (const key of this.topicMemory.keys()) {
+      if (!keep.has(key)) {
+        this.topicMemory.delete(key);
+      }
+    }
+  }
+
+  _entryTarget(entry) {
+    const entities = entry.entities || {};
+    const data = entry.data || {};
+    return [
+      entities.query,
+      entities.mediaQuery,
+      entities.appName,
+      entities.windowName,
+      entities.folderName,
+      entities.filename,
+      entities.fileName,
+      entities.contactName,
+      data.query
+    ].map(value => String(value || '').trim()).find(Boolean) || '';
   }
 
   _fileReferenceFromEntry(entry) {

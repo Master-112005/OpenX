@@ -17,8 +17,12 @@ class MediaUnderstandingRouter {
   }
 
   route(input, options = {}) {
-    const context = options.context || this._getContext();
     const source = options.source || 'voice-command';
+    const context = {
+      ...this._getContext(),
+      ...(options.context || {}),
+      source
+    };
     const parsed = this.parser.parse(input, context);
 
     if (!parsed.intent || parsed.confidence < EXECUTABLE_CONFIDENCE) {
@@ -50,8 +54,6 @@ class MediaUnderstandingRouter {
     if (parsed.intent === 'media.play' || parsed.intent === 'media.search') {
       payload.mediaQuery = parsed.query;
       payload.mediaPlatform = parsed.platform;
-      payload.artist = parsed.artist;
-      payload.song = parsed.song;
       payload.genre = parsed.genre;
     }
 

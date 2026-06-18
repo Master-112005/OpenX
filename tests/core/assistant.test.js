@@ -46,6 +46,42 @@ describe('Assistant Confirmation Flow', function() {
     assert.equal(assistant.getStatus().awaitingConfirmation, false);
   });
 
+  it('should continue remaining multi-command steps after confirming a protected first step', async function() {
+    const executed = [];
+    const automation = {
+      execute: async (actionId, entities) => {
+        executed.push({ actionId, entities });
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const assistant = new Assistant({
+      permissions: {
+        levels: {
+          low: { requiresConfirmation: false, requiresAuth: false },
+          medium: { requiresConfirmation: true, requiresAuth: false }
+        }
+      },
+      activeLearning: { enabled: false }
+    }, {
+      automation,
+      eventBus: { publish() {} }
+    });
+
+    const first = await assistant.processCommand('close chrome and set vol 100');
+    assert.equal(first.requiresConfirmation, true);
+    assert.equal(first.intent, 'multi.command');
+    assert.match(first.response, /Close an application/i);
+
+    const confirmed = await assistant.processCommand('yes');
+
+    assert.equal(confirmed.success, true);
+    assert.equal(confirmed.intent, 'multi.command');
+    assert.deepEqual(executed.map(step => step.actionId), ['app.close', 'volume.set']);
+    assert.equal(executed[0].entities.appName, 'chrome');
+    assert.equal(executed[1].entities.value, 100);
+    assert.match(confirmed.response, /Completed 2 commands/i);
+  });
+
   it('should close a selected window after an ambiguity prompt', async function() {
     let selectedEntities = null;
     const router = {
@@ -88,6 +124,109 @@ describe('Assistant Confirmation Flow', function() {
     assert.equal(second.success, true);
     assert.equal(selectedEntities.appName, 'chrome');
     assert.equal(selectedEntities.targetProcessId, 202);
+  });
+
+  it('should use the last knowledge topic for explanation follow-up commands', async function() {
+    const routedInputs = [];
+    const router = {
+      process: async input => {
+        routedInputs.push(input);
+        return {
+          commandId: `cmd-${routedInputs.length}`,
+          success: true,
+          intent: 'browser.search',
+          confidence: 1,
+          entities: {
+            query: String(input).replace(/^search for\s+/i, '')
+          },
+          response: 'Searched.'
+        };
+      }
+    };
+
+    const assistant = new Assistant({ activeLearning: { enabled: false } }, {
+      router,
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    await assistant.processCommand('Explain Docker in simple words.', 'chat');
+    await assistant.processCommand('Can you make that easier to understand?', 'chat');
+    await assistant.processCommand('Give me a real-world example.', 'chat');
+    await assistant.processCommand('Summarize that in one minute.', 'chat');
+
+    assert.equal(routedInputs[0], 'Explain Docker in simple words.');
+    assert.equal(routedInputs[1], 'search for docker simple beginner explanation');
+    assert.equal(routedInputs[2], 'search for docker real world example');
+    assert.equal(routedInputs[3], 'search for docker one minute summary');
+  });
+
+  it('should use conversation topic memory for natural pronoun follow-ups', async function() {
+    const routedInputs = [];
+    const router = {
+      process: async input => {
+        routedInputs.push(input);
+        return {
+          commandId: `cmd-topic-${routedInputs.length}`,
+          success: true,
+          intent: 'browser.search',
+          confidence: 1,
+          entities: {
+            query: String(input).replace(/^search for\s+/i, '')
+          },
+          response: 'Searched.'
+        };
+      }
+    };
+
+    const assistant = new Assistant({ activeLearning: { enabled: false } }, {
+      router,
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    await assistant.processCommand('Explain Docker in simple words.', 'chat');
+    await assistant.processCommand('How does it work?', 'chat');
+    await assistant.processCommand('What are its uses?', 'chat');
+
+    assert.deepEqual(routedInputs, [
+      'Explain Docker in simple words.',
+      'search for how docker works',
+      'search for docker uses'
+    ]);
+  });
+
+  it('should answer recent chat memory questions without routing', async function() {
+    const routedInputs = [];
+    const router = {
+      process: async input => {
+        routedInputs.push(input);
+        return {
+          commandId: `cmd-memory-${routedInputs.length}`,
+          success: true,
+          intent: 'browser.search',
+          confidence: 1,
+          entities: { query: input },
+          response: 'Searched.'
+        };
+      }
+    };
+
+    const assistant = new Assistant({ activeLearning: { enabled: false } }, {
+      router,
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    await assistant.processCommand('Explain Kubernetes in simple words.', 'chat');
+    const previous = await assistant.processCommand('what did I just say?', 'chat');
+    const recap = await assistant.processCommand('what were we talking about?', 'chat');
+    const about = await assistant.processCommand('what did I say about Kubernetes?', 'chat');
+
+    assert.match(previous.response, /Explain Kubernetes/i);
+    assert.match(recap.response, /Kubernetes/i);
+    assert.match(about.response, /Kubernetes/i);
+    assert.deepEqual(routedInputs, ['Explain Kubernetes in simple words.']);
   });
 
   it('should execute a yes/no clarification with confirm entities', async function() {
@@ -674,6 +813,53 @@ describe('Assistant Confirmation Flow', function() {
     assert.match(first.response, /Did that work correctly/i);
     assert.equal(second.learned, true);
     assert.equal(feedback[0].rating, 'positive');
+    assert.equal(assistant.getStatus().awaitingFeedback, false);
+  });
+
+  it('should not ask for feedback after verified media playback', async function() {
+    const learning = {
+      enabled: true,
+      askForFeedback: true,
+      findCorrection: () => null,
+      learnFromText: () => null,
+      recordFeedback: () => {
+        throw new Error('media playback should not request learning feedback');
+      }
+    };
+    const router = {
+      process: async () => ({
+        commandId: 'cmd-media-feedback',
+        success: true,
+        intent: 'media.play',
+        confidence: 1,
+        entities: { mediaQuery: 'playdate song', mediaPlatform: 'youtube' },
+        data: {
+          query: 'playdate song',
+          platform: 'youtube',
+          appName: 'YouTube',
+          launchMethod: 'existing-window',
+          replacedExisting: true,
+          playbackVerification: {
+            type: 'media.play',
+            valid: true,
+            requestedQuery: 'playdate song',
+            requestedPlatform: 'youtube'
+          }
+        },
+        response: 'I have replaced the current playback with "playdate song" on YouTube.'
+      })
+    };
+
+    const assistant = new Assistant({}, {
+      router,
+      learning,
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    const result = await assistant.processCommand('play playdate song');
+
+    assert.doesNotMatch(result.response, /Did that work correctly/i);
     assert.equal(assistant.getStatus().awaitingFeedback, false);
   });
 
@@ -1290,6 +1476,41 @@ describe('Assistant Confirmation Flow', function() {
     assert.match(school.response, /OpenX University/);
     assert.match(identity.response, /you live in Hyderabad/);
     assert.deepEqual(routedInputs, []);
+  });
+
+  it('should save an explicit compact chat summary for later recall', async function() {
+    const ActiveLearningStore = require('../../core/assistant/learning/index');
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-chat-memory-'));
+    const learning = new ActiveLearningStore({
+      app: { dataDir: tempDir },
+      activeLearning: { enabled: true, askForFeedback: false }
+    });
+    const router = {
+      process: async input => ({
+        commandId: `cmd-${input}`,
+        success: true,
+        intent: 'browser.search',
+        confidence: 1,
+        entities: { query: input },
+        response: 'Searched.'
+      })
+    };
+
+    const assistant = new Assistant({}, {
+      router,
+      learning,
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    await assistant.processCommand('Explain Docker in simple words');
+    await assistant.processCommand('Find Kubernetes beginner course');
+    const saved = await assistant.processCommand('remember this chat');
+    const recalled = await assistant.processCommand('what did we talk about last time');
+
+    assert.equal(saved.learned, true);
+    assert.match(recalled.response, /Docker/i);
+    assert.match(recalled.response, /Kubernetes/i);
   });
 
   it('should vary conversational greetings by user phrasing', async function() {
