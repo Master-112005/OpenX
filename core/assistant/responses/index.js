@@ -86,6 +86,7 @@ function humanizeError(error) {
   if (lowered.includes('invalid reminder time')) return 'I could not understand when you want the reminder';
   if (lowered.includes('reminder text is required')) return 'I need to know what you want to be reminded about';
   if (lowered.includes('could not schedule')) return 'I could not schedule that right now';
+  if (lowered.includes('no form fields or form text')) return 'I can fill forms from your saved details, but I need the active form fields or form text first';
   if (lowered.includes('contact not found')) return 'I could not find that contact in the assistant contact book';
   if (lowered.includes('contact does not have a phone number')) return 'That contact does not have a phone number saved';
   if (lowered.includes('contact does not have an email address')) return 'I found the contact, but there is no email address saved for them';
@@ -342,6 +343,27 @@ const RESPONSE_BUILDERS = {
       return remaining > 0
         ? `${location} has ${count} ${typeLabel}. The first ones are ${names}, and ${remaining} more.`
         : `${location} has ${count} ${typeLabel}: ${names}.`;
+    },
+    'form.fill': context => {
+      const filledFields = valueFromContext(context, 'filledFields', []);
+      const skippedFields = valueFromContext(context, 'skippedFields', []);
+      const filledCount = Array.isArray(filledFields) ? filledFields.length : 0;
+      const skippedCount = Array.isArray(skippedFields) ? skippedFields.length : 0;
+      const totalFields = valueFromContext(context, 'totalFields', filledCount + skippedCount);
+      const mode = valueFromContext(context, 'mode', 'field-list');
+      const label = totalFields === 1 ? 'field' : 'fields';
+
+      if (!totalFields) {
+        return 'I can fill forms from your saved details, but I need the active form fields or form text first.';
+      }
+
+      const missing = skippedCount > 0
+        ? ` ${skippedCount} required ${skippedCount === 1 ? 'field still needs' : 'fields still need'} your input.`
+        : '';
+      const prepared = mode === 'text-template'
+        ? 'I filled the text form template from your saved details.'
+        : 'I prepared the form fields from your saved details.';
+      return `${prepared} Filled ${filledCount} of ${totalFields} ${label}.${missing}`;
     },
     'folder.create': context => {
       const folderPath = valueFromContext(context, 'path');

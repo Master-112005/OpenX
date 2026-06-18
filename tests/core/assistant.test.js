@@ -1142,6 +1142,49 @@ describe('Assistant Confirmation Flow', function() {
     assert.deepEqual(routedInputs, []);
   });
 
+  it('should answer broader personal context before routing', async function() {
+    const ActiveLearningStore = require('../../core/assistant/learning/index');
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-learning-'));
+    const learning = new ActiveLearningStore({
+      app: { dataDir: tempDir },
+      activeLearning: { enabled: true, askForFeedback: false }
+    });
+    const routedInputs = [];
+    const router = {
+      process: async input => {
+        routedInputs.push(input);
+        return {
+          commandId: 'cmd-search',
+          success: true,
+          intent: 'browser.search',
+          entities: { query: input },
+          response: 'Searched web.'
+        };
+      }
+    };
+    const assistant = new Assistant({}, {
+      router,
+      learning,
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    await assistant.processCommand('remember that I live in Hyderabad');
+    await assistant.processCommand('my mobile number is 9876543210');
+    await assistant.processCommand('remember that I study at OpenX University');
+
+    const location = await assistant.processCommand('where do I live');
+    const phone = await assistant.processCommand('what is my phone number');
+    const school = await assistant.processCommand('where do I study');
+    const identity = await assistant.processCommand('tell me about myself');
+
+    assert.match(location.response, /Hyderabad/);
+    assert.match(phone.response, /9876543210/);
+    assert.match(school.response, /OpenX University/);
+    assert.match(identity.response, /you live in Hyderabad/);
+    assert.deepEqual(routedInputs, []);
+  });
+
   it('should vary conversational greetings by user phrasing', async function() {
     const assistant = new Assistant({}, {
       automation: {

@@ -12,6 +12,7 @@ const SystemController = require('./system/index');
 const WindowsController = require('./windows/index');
 const SchedulerController = require('./scheduler/index');
 const ScreenshotController = require('./screenshot/index');
+const FormAutomation = require('./forms/index');
 const ActionVerifier = require('./common/action-verifier');
 
 class AutomationEngine {
@@ -31,6 +32,11 @@ class AutomationEngine {
     this.windows = new WindowsController(config);
     this.scheduler = new SchedulerController(config);
     this.screenshot = new ScreenshotController(config);
+    this.forms = new FormAutomation(config, {
+      learning: config?.learningStore || null,
+      browser: this.browser,
+      windows: this.windows
+    });
     this.verifier = new ActionVerifier({
       apps: this.apps,
       browser: this.browser,
@@ -141,6 +147,7 @@ class AutomationEngine {
       'system.date': () => this.system.getDate(),
       'system.calculate': (entities) => this.system.calculate(entities.expression),
       'system.screenshot': () => this.screenshot.capture(),
+      'form.fill': (entities) => this.forms.fill(entities),
       'system.cpu': () => this.system.getCPUUsage(),
       'system.memory': () => this.system.getMemoryUsage(),
       'system.battery': () => this.system.getBatteryStatus(),

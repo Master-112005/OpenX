@@ -144,6 +144,41 @@ describe('Active Learning Store', function() {
     assert.equal(answer.response, 'Your favorite color is blue, sir.');
   });
 
+  it('should normalize and answer broader personal context aliases', function() {
+    const { tempDir, store } = createStore();
+
+    assert.equal(store.learnFromText('remember that I live in Hyderabad').type, 'user-fact');
+    assert.equal(store.learnFromText('my mobile number is 9876543210').type, 'user-fact');
+    assert.equal(store.learnFromText('remember that I study at OpenX University').type, 'user-fact');
+    assert.equal(store.learnFromText('remember that I work at Stark Labs').type, 'user-fact');
+
+    const reloaded = new ActiveLearningStore({
+      app: { dataDir: tempDir },
+      activeLearning: { enabled: true }
+    });
+
+    const location = reloaded.answerPersonalQuestion('where do I live');
+    const phone = reloaded.answerPersonalQuestion('what is my phone number');
+    const school = reloaded.answerPersonalQuestion('where do I study');
+    const work = reloaded.answerPersonalQuestion('where do I work');
+    const identity = reloaded.answerPersonalQuestion('tell me about myself');
+    const summary = reloaded.getUserIdentitySummary();
+
+    assert.equal(location.known, true);
+    assert.equal(location.fact, 'location');
+    assert.match(location.response, /Hyderabad/);
+    assert.equal(phone.known, true);
+    assert.equal(phone.fact, 'phone');
+    assert.match(phone.response, /9876543210/);
+    assert.equal(school.fact, 'school');
+    assert.match(school.response, /OpenX University/);
+    assert.equal(work.fact, 'workplace');
+    assert.match(work.response, /Stark Labs/);
+    assert.match(identity.response, /you live in Hyderabad/);
+    assert.match(summary, /location: Hyderabad/);
+    assert.match(summary, /school: OpenX University/);
+  });
+
   it('should preserve validation and verification evidence on feedback records', function() {
     const { store } = createStore();
 

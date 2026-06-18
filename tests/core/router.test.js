@@ -31,6 +31,51 @@ describe('Action Router', function() {
     assert.ok(result.entities.appName);
   });
 
+  it('should route fill this from typo as a form fill request', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } },
+      learningStore: {
+        getAllUserFacts() {
+          return { name: 'Rakesh', email: 'rakesh@example.com', phone: '+919876543210' };
+        }
+      }
+    };
+    const engine = {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, engine);
+    const result = await router.process('fill this from', 'chat');
+
+    assert.equal(result.success, true);
+    assert.equal(result.intent, 'form.fill');
+    assert.equal(result.entities.action, 'fill');
+    assert.equal(result.entities.userFacts.email, 'rakesh@example.com');
+  });
+
+  it('should pass Google Form URLs into form fill requests', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } },
+      learningStore: {
+        getAllUserFacts() {
+          return { name: 'Rakesh' };
+        }
+      }
+    };
+    const engine = {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, engine);
+    const result = await router.process('fill this form https://forms.gle/mKKt1eaLgRQjYpA49', 'chat');
+
+    assert.equal(result.success, true);
+    assert.equal(result.intent, 'form.fill');
+    assert.equal(result.entities.url, 'https://forms.gle/mKKt1eaLgRQjYpA49');
+  });
+
   it('should route close app commands through the explicit app resolver', async function() {
     const config = {
       permissions: {
@@ -1411,6 +1456,23 @@ describe('Action Router', function() {
     const result = await router.process('put on the playdate song on youtube', 'chat');
     assert.equal(result.intent, 'media.play');
     assert.equal(result.entities.mediaQuery, 'playdate');
+    assert.equal(result.entities.mediaPlatform, 'youtube');
+  });
+
+  it('should preserve media playback phrases during noisy repair', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const result = await router.process('play shape of you on youtube', 'chat');
+
+    assert.equal(result.intent, 'media.play');
+    assert.equal(result.entities.mediaQuery, 'shape of you');
     assert.equal(result.entities.mediaPlatform, 'youtube');
   });
 

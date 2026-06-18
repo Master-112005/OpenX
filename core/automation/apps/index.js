@@ -6,7 +6,14 @@ const WindowsSessionController = require('../common/windows-session');
 
 const KNOWN_APPS = {
   'code': { path: null, cmd: 'code', processName: 'Code' },
-  'chrome': { path: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe', cmd: 'chrome' },
+  'chrome': {
+    path: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+    cmd: 'chrome',
+    closeStrategy: 'window',
+    windowQuery: 'chrome',
+    preferredTitleTokens: ['chrome', 'new tab', '- google chrome'],
+    preferredProcessNames: ['chrome', 'ApplicationFrameHost']
+  },
   'msedge': { path: 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe', cmd: 'msedge' },
   'edge': { path: 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe', cmd: 'msedge' },
   'firefox': { path: 'C:\\Program Files\\Mozilla Firefox\\firefox.exe', cmd: 'firefox' },

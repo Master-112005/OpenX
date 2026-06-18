@@ -25,6 +25,7 @@ describe('Automation Engine', function() {
     assert.ok(actions.includes('browser.search'));
     assert.ok(actions.includes('browser.closeTab'));
     assert.ok(actions.includes('browser.listTabs'));
+    assert.ok(actions.includes('form.fill'));
     assert.ok(actions.includes('message.compose'));
     assert.ok(actions.includes('email.compose'));
     assert.ok(actions.includes('call.start'));
@@ -41,6 +42,82 @@ describe('Automation Engine', function() {
     assert.ok(actions.includes('help'));
     assert.ok(actions.includes('greeting'));
     assert.ok(actions.includes('thanks'));
+  });
+
+  it('should fill extracted form fields from saved personal context', async function() {
+    const engine = new AutomationEngine({});
+    const result = await engine.execute('form.fill', {
+      userFacts: {
+        name: 'Rakesh',
+        email: 'rakesh@example.com',
+        phone: '+919876543210'
+      },
+      fields: [
+        { name: 'Name', required: true },
+        { name: 'Gmail', required: true },
+        { name: 'Phone Number', required: true }
+      ]
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(result.data.filledData.Name, 'Rakesh');
+    assert.equal(result.data.filledData.Gmail, 'rakesh@example.com');
+    assert.equal(result.data.filledData['Phone Number'], '+919876543210');
+    assert.equal(result.data.skippedFields.length, 0);
+    assert.equal(result.data.canSubmit, true);
+  });
+
+  it('should fill blank text form templates from saved personal context', async function() {
+    const FormAutomation = require('../../core/automation/forms/index');
+    const forms = new FormAutomation({});
+    const result = await forms.fill({
+      userFacts: {
+        name: 'Rakesh',
+        email: 'rakesh@example.com',
+        phone: '+919876543210'
+      },
+      formText: 'Name:\nGmail:\nPhone Number:'
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(result.data.filledText, 'Name: Rakesh\nGmail: rakesh@example.com\nPhone Number: +919876543210');
+    assert.equal(result.data.filledFields.length, 3);
+    assert.equal(result.data.skippedFields.length, 0);
+  });
+
+  it('should inspect a Google Form and open a prefilled URL', async function() {
+    const FormAutomation = require('../../core/automation/forms/index');
+    const opened = [];
+    const forms = new FormAutomation({}, {
+      browser: {
+        open(url) {
+          opened.push(url);
+          return { success: true, data: { url } };
+        }
+      }
+    });
+    forms._resolveUrl = async url => url;
+    forms._fetchTextResponse = async url => ({
+      finalUrl: url,
+      body: '<script>var FB_PUBLIC_LOAD_DATA_ = [null,[null,[[null,"Name",null,0,[[123,null,1]]],[null,"Gmail",null,0,[[456,null,1]]],[null,"Phone Number",null,0,[[789,null,1]]]]]];</script>'
+    });
+
+    const result = await forms.fill({
+      url: 'https://docs.google.com/forms/d/e/sample/viewform',
+      userFacts: {
+        name: 'Rakesh',
+        email: 'rakesh@example.com',
+        phone: '+919876543210'
+      }
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(result.data.mode, 'google-form-prefill');
+    assert.equal(result.data.filledFields.length, 3);
+    assert.ok(opened[0].includes('usp=pp_url'));
+    assert.ok(opened[0].includes('entry.123=Rakesh'));
+    assert.ok(opened[0].includes('entry.456=rakesh%40example.com'));
+    assert.ok(opened[0].includes('entry.789=%2B919876543210'));
   });
 
   it('should allow registering custom actions', async function() {

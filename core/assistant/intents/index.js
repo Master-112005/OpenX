@@ -289,6 +289,33 @@ const INTENT_DEFINITIONS = [
     description: 'List visible browser tabs and browser windows'
   },
   {
+    id: 'form.fill',
+    patterns: [
+      'fill form',
+      'fill the form',
+      'fill this form',
+      'fill this from',
+      'fill details',
+      'fill my details',
+      'fill out form',
+      'complete form',
+      'complete this form',
+      'autofill form',
+      'auto fill form',
+      'fill google form',
+      'fill google forms'
+    ],
+    permissionLevel: 'low',
+    action: 'form.fill',
+    entities: [
+      { name: 'action', type: 'string', required: false },
+      { name: 'targetForm', type: 'string', required: false },
+      { name: 'fields', type: 'array', required: false },
+      { name: 'formText', type: 'string', required: false }
+    ],
+    description: 'Fill form fields from saved personal context'
+  },
+  {
     id: 'system.time',
     patterns: ['what time is it', 'current time', 'tell me the time', 'time now'],
     permissionLevel: 'low',
@@ -357,11 +384,22 @@ const INTENT_DEFINITIONS = [
   },
   {
     id: 'timer.set',
-    patterns: ['set timer for', 'start timer for', 'timer for'],
+    patterns: [
+      'set timer for', 'start timer for', 'timer for',
+      'set a timer at', 'set timer at', 'set me timer at',
+      'set a timer for', 'start a timer at', 'create a timer at',
+      'timer at', 'a timer at',
+      'set alarm at', 'set alarm for', 'set me alarm at',
+      'set a alarm at', 'alarm at', 'a alarm at',
+      'wake me up at', 'wake me at'
+    ],
     permissionLevel: 'low',
     action: 'timer.set',
-    entities: [{ name: 'duration', type: 'number', required: true }],
-    description: 'Set a timer'
+    entities: [
+      { name: 'duration', type: 'number', required: false },
+      { name: 'timeExpression', type: 'string', required: false }
+    ],
+    description: 'Set a timer or alarm at a specific time or duration'
   },
   {
     id: 'alarm.set',
@@ -373,7 +411,15 @@ const INTENT_DEFINITIONS = [
   },
   {
     id: 'reminder.set',
-    patterns: ['remind me at', 'remind at', 'remind me in', 'remind in', 'set reminder for'],
+    patterns: [
+      'remind me at', 'remind at', 'remind me in', 'remind in', 'set reminder for',
+      'remind me tomorrow at', 'remind tomorrow at', 'remind me tomorrow',
+      'remind me in the morning at', 'remind in the morning at',
+      'remind me in the evening at', 'remind in the evening at',
+      'remind me at night at', 'remind at night at',
+      'remind me later at', 'remind later at',
+      'set a reminder for', 'create reminder for', 'add reminder for'
+    ],
     permissionLevel: 'low',
     action: 'reminder.set',
     entities: [

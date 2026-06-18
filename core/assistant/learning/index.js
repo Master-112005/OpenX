@@ -28,6 +28,62 @@ const ACCOUNT_SERVICES = [
   'general'
 ];
 const ACCOUNT_SERVICE_PATTERN = ACCOUNT_SERVICES.join('|');
+const PERSONAL_FACT_ALIASES = {
+  email_address: 'email',
+  e_mail: 'email',
+  mobile: 'phone',
+  mobile_number: 'phone',
+  phone_number: 'phone',
+  telephone: 'phone',
+  telephone_number: 'phone',
+  city: 'location',
+  current_city: 'location',
+  current_location: 'location',
+  address: 'location',
+  home: 'location',
+  hometown: 'hometown',
+  native_place: 'hometown',
+  born_place: 'hometown',
+  school: 'school',
+  college: 'school',
+  university: 'school',
+  institute: 'school',
+  institution: 'school',
+  company: 'workplace',
+  office: 'workplace',
+  work_place: 'workplace',
+  job_place: 'workplace',
+  friend: 'friend_name',
+  friend_name: 'friend_name',
+  favourite_color: 'favorite_color',
+  favourite_colour: 'favorite_color',
+  favorite_colour: 'favorite_color',
+  favourite_food: 'favorite_food',
+  favourite_movie: 'favorite_movie',
+  favourite_music: 'favorite_music',
+  favourite_sport: 'favorite_sport'
+};
+
+const PERSONAL_FACT_LABELS = {
+  email: 'email',
+  phone: 'phone number',
+  location: 'location',
+  hometown: 'hometown',
+  school: 'school',
+  workplace: 'workplace',
+  friend_name: "friend's name",
+  favorite_color: 'favorite color',
+  favorite_food: 'favorite food',
+  favorite_movie: 'favorite movie',
+  favorite_music: 'favorite music',
+  favorite_sport: 'favorite sport',
+  likes: 'likes',
+  possessions: 'possessions',
+  profession: 'profession',
+  name: 'name'
+};
+
+const PROTECTED_FACT_KEY_PATTERN = /^(?:password|account_password|googlePassword|applePassword|microsoftPassword|facebookPassword|instagramPassword|generalPassword)$/;
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -50,6 +106,20 @@ function normalizeMemoryKey(value) {
     .replace(/[.!?]+$/g, '')
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '');
+}
+
+function normalizePersonalFactKey(value) {
+  const raw = cleanCommand(value);
+  if (/^[a-z]+Password$/.test(raw)) {
+    return raw;
+  }
+  const key = normalizeMemoryKey(value);
+  return PERSONAL_FACT_ALIASES[key] || key;
+}
+
+function personalFactLabel(key) {
+  const normalized = normalizePersonalFactKey(key);
+  return PERSONAL_FACT_LABELS[normalized] || normalized.replace(/_/g, ' ');
 }
 
 function normalizeAccountService(value) {
@@ -174,7 +244,7 @@ class ActiveLearningStore {
       return null;
     }
 
-    const normalizedKind = normalizeCommand(kind).replace(/\s+/g, '.');
+    const normalizedKind = normalizePersonalFactKey(kind).replace(/\s+/g, '.');
     const cleanValue = cleanCommand(value);
     if (!normalizedKind || !cleanValue) {
       return null;
@@ -199,7 +269,7 @@ getUserFact(kind) {
       return null;
     }
 
-    const normalizedKind = normalizeCommand(kind).replace(/\s+/g, '.');
+    const normalizedKind = normalizePersonalFactKey(kind).replace(/\s+/g, '.');
     const record = this.data.userFacts[normalizedKind];
     return record ? { ...record, kind: normalizedKind } : null;
   }
@@ -222,13 +292,21 @@ getUserFact(kind) {
     const summary = [];
     if (facts.name) summary.push(`name: ${facts.name}`);
     if (facts.profession) summary.push(`profession: ${facts.profession}`);
+    if (facts.location) summary.push(`location: ${facts.location}`);
+    if (facts.hometown) summary.push(`hometown: ${facts.hometown}`);
+    if (facts.school) summary.push(`school: ${facts.school}`);
+    if (facts.workplace) summary.push(`workplace: ${facts.workplace}`);
     if (facts.favorite_color) summary.push(`favorite color: ${facts.favorite_color}`);
     if (facts.favorite_food) summary.push(`favorite food: ${facts.favorite_food}`);
+    if (facts.favorite_movie) summary.push(`favorite movie: ${facts.favorite_movie}`);
+    if (facts.favorite_music) summary.push(`favorite music: ${facts.favorite_music}`);
+    if (facts.favorite_sport) summary.push(`favorite sport: ${facts.favorite_sport}`);
+    if (facts.friend_name) summary.push(`friend: ${facts.friend_name}`);
     if (facts.phone) summary.push(`phone: ${facts.phone}`);
     if (facts.email) summary.push(`email: ${facts.email}`);
-    if (facts.location) summary.push(`location: ${facts.location}`);
     if (facts.applePassword) summary.push(`has apple password`);
     if (facts.googlePassword) summary.push(`has google password`);
+    if (facts.generalPassword) summary.push(`has general password`);
     return summary.length > 0 ? summary.join(', ') : 'no personal facts stored';
   }
 
@@ -354,7 +432,7 @@ getUserFact(kind) {
       };
     }
 
-    const professionMatch = /^(?:what|who)\s+(?:is|are)\s+(?:i|me|my\s+)(?:profession|job|work|career)\b|^do\s+you\s+(?:know|remember)\s+(?:my\s+)?(?:profession|job|work|career)\b/.test(normalized);
+    const professionMatch = /^(?:what|who)\s+(?:is|are)\s+(?:i|me|my\s+)(?:profession|job|work|career)\b|^do\s+you\s+(?:know|remember)\s+(?:my\s+)?(?:profession|job|work|career)\b|^(?:what|whats)\s+(?:do\s+i|my)\s+(?:do|work)\b/.test(normalized);
     if (professionMatch) {
       const profession = this.getUserFact('profession');
       if (profession?.value) {
@@ -375,11 +453,23 @@ getUserFact(kind) {
 
     const whoAmIMatch = /^(?:who|what)\s+am\s+i\b|^do\s+you\s+know\s+me\b|^tell\s+me\s+about\s+myself\b/.test(normalized);
     if (whoAmIMatch) {
-      const name = this.getUserFact('name');
-      const profession = this.getUserFact('profession');
       const parts = [];
-      if (name?.value) parts.push(`Your name is ${name.value}`);
-      if (profession?.value) parts.push(`you are a ${profession.value}`);
+      const summaryFacts = [
+        ['name', value => `Your name is ${value}`],
+        ['profession', value => `you are a ${value}`],
+        ['location', value => `you live in ${value}`],
+        ['hometown', value => `you are from ${value}`],
+        ['school', value => `you study at ${value}`],
+        ['workplace', value => `you work at ${value}`],
+        ['favorite_color', value => `your favorite color is ${value}`],
+        ['favorite_food', value => `your favorite food is ${value}`]
+      ];
+      for (const [key, formatter] of summaryFacts) {
+        const fact = this.getUserFact(key);
+        if (fact?.value) {
+          parts.push(formatter(fact.value));
+        }
+      }
       if (parts.length > 0) {
         return {
           type: 'user-fact',
@@ -396,18 +486,74 @@ getUserFact(kind) {
       };
     }
 
-    const factMatch = normalized.match(/^(?:(what\s+is|what'?s|tell me|do\s+you\s+(?:know|remember))\s+)?my\s+(.+)$/);
-    if (factMatch?.[2]) {
-      const questionPrefix = factMatch[1] || '';
-      const key = normalizeMemoryKey(factMatch[2]);
-      if (key && !/^(?:name|password|account_password|googlePassword|applePassword|microsoftPassword|facebookPassword|instagramPassword)$/.test(key)) {
+    const locationMatch = /^(?:where\s+(?:do\s+i\s+live|am\s+i\s+from|was\s+i\s+born)|what\s+is\s+my\s+(?:location|address|hometown|native\s+place))\b/.test(normalized);
+    if (locationMatch) {
+      const key = /\b(?:from|born|hometown|native\s+place)\b/.test(normalized) ? 'hometown' : 'location';
+      const fact = this.getUserFact(key);
+      return {
+        type: 'user-fact',
+        known: Boolean(fact?.value),
+        fact: key,
+        response: fact?.value
+          ? `Your ${personalFactLabel(key)} is ${fact.value}, sir.`
+          : `I do not have your ${personalFactLabel(key)} stored yet, sir.`
+      };
+    }
+
+    const placeQuestionMatch = /^(?:where\s+do\s+i\s+(study|work)|what\s+is\s+my\s+(school|college|university|workplace|company|office))\b/.exec(normalized);
+    if (placeQuestionMatch) {
+      const key = /work|company|office/.test(placeQuestionMatch[1] || placeQuestionMatch[2] || '')
+        ? 'workplace'
+        : 'school';
+      const fact = this.getUserFact(key);
+      return {
+        type: 'user-fact',
+        known: Boolean(fact?.value),
+        fact: key,
+        response: fact?.value
+          ? `Your ${personalFactLabel(key)} is ${fact.value}, sir.`
+          : `I do not have your ${personalFactLabel(key)} stored yet, sir.`
+      };
+    }
+
+    const directPersonalFactMatch = normalized.match(/^(?:what\s+is|what'?s|tell\s+me|do\s+you\s+(?:know|remember))\s+my\s+(.+)$/);
+    if (directPersonalFactMatch?.[1]) {
+      const key = normalizePersonalFactKey(directPersonalFactMatch[1]);
+      if (key && !PROTECTED_FACT_KEY_PATTERN.test(key)) {
         const fact = this.getUserFact(key);
         if (fact?.value) {
           return {
             type: 'user-fact',
             known: true,
             fact: key,
-            response: `Your ${key.replace(/_/g, ' ')} is ${fact.value}, sir.`
+            response: `Your ${personalFactLabel(key)} is ${fact.value}, sir.`
+          };
+        }
+
+        const knownPersonalKey = Boolean(PERSONAL_FACT_LABELS[key] || PERSONAL_FACT_ALIASES[key]);
+        if (knownPersonalKey) {
+          return {
+            type: 'user-fact',
+            known: false,
+            fact: key,
+            response: `I do not have your ${personalFactLabel(key)} stored yet, sir. You can say, "remember my ${personalFactLabel(key)} is [value]."`
+          };
+        }
+      }
+    }
+
+    const factMatch = normalized.match(/^(?:(what\s+is|what'?s|tell me|do\s+you\s+(?:know|remember))\s+)?my\s+(.+)$/);
+    if (factMatch?.[2]) {
+      const questionPrefix = factMatch[1] || '';
+      const key = normalizePersonalFactKey(factMatch[2]);
+      if (key && !PROTECTED_FACT_KEY_PATTERN.test(key)) {
+        const fact = this.getUserFact(key);
+        if (fact?.value) {
+          return {
+            type: 'user-fact',
+            known: true,
+            fact: key,
+            response: `Your ${personalFactLabel(key)} is ${fact.value}, sir.`
           };
         }
         if (/\b(?:tell me|do\s+you\s+(?:know|remember))\b/.test(questionPrefix)) {
@@ -415,7 +561,7 @@ getUserFact(kind) {
             type: 'user-fact',
             known: false,
             fact: key,
-            response: `I do not have your ${key.replace(/_/g, ' ')} stored yet, sir. You can say, "remember my ${key.replace(/_/g, ' ')} is [value]."`
+            response: `I do not have your ${personalFactLabel(key)} stored yet, sir. You can say, "remember my ${personalFactLabel(key)} is [value]."`
           };
         }
       }
@@ -646,7 +792,11 @@ getUserFact(kind) {
       }
 }
 
-    const identityMatch = text.match(/^(?:remember\s+(?:that\s+)?)?i\s+am\s+(?:a\s+)?(.+)$/i);
+    const personalText = text
+      .replace(/^(?:remember|note|learn)\s+(?:this\s+)?(?:that\s+)?/i, '')
+      .trim();
+
+    const identityMatch = personalText.match(/^i\s+am\s+(?:a\s+)?(.+)$/i);
 
     const passwordRememberMatch = text.match(new RegExp(`^(?:remember|save|store)\\s+(?:my\\s+)?((?:${ACCOUNT_SERVICE_PATTERN})\\s+)?(?:account\\s+)?password\\s+(?:is\\s+)?(.+)$`, 'i'));
     if (passwordRememberMatch && (passwordRememberMatch[1] || passwordRememberMatch[2])) {
@@ -715,24 +865,24 @@ if (fact) {
 
     const genericRememberMatch = text.match(/^(?:remember|note)\s+(?:this\s+)?(?:that\s+)?(?:my\s+)?(.+?)\s+(?:is|was|are|were)\s+(.+)$/i);
     if (genericRememberMatch && genericRememberMatch[1] && genericRememberMatch[2]) {
-      const key = normalizeMemoryKey(genericRememberMatch[1]);
+      const key = normalizePersonalFactKey(genericRememberMatch[1]);
       const value = genericRememberMatch[2].replace(/[.!?]+$/g, '').trim();
-      if (key && value && key.length > 1 && value.length > 0 && value.length < 100 && key !== 'password' && !/^(?:i|my|the|a|an|this|that|it|they|them|his|her|their)\b/i.test(key)) {
+      if (key && value && key.length > 1 && value.length > 0 && value.length < 100 && !PROTECTED_FACT_KEY_PATTERN.test(key) && !/^(?:i|my|the|a|an|this|that|it|they|them|his|her|their)\b/i.test(key)) {
         const fact = this.rememberUserFact(key, value, {
           source: /^remember\b/i.test(text) ? 'explicit-memory' : 'user-stated-fact'
         });
         if (fact) {
           return {
             type: 'user-fact',
-            response: `Noted, sir. I will remember that ${key.replace(/_/g, ' ')} is ${fact.value}.`
+            response: `Noted, sir. I will remember that ${personalFactLabel(key)} is ${fact.value}.`
           };
         }
       }
     }
 
-    const myXIsYMatch = text.match(/^my\s+(.+?)\s+(?:is|was|are|were)\s+(.+)$/i);
+    const myXIsYMatch = personalText.match(/^my\s+(.+?)\s+(?:is|was|are|were)\s+(.+)$/i);
     if (myXIsYMatch && myXIsYMatch[1] && myXIsYMatch[2]) {
-      const key = normalizeMemoryKey(myXIsYMatch[1]);
+      const key = normalizePersonalFactKey(myXIsYMatch[1]);
       const value = myXIsYMatch[2].replace(/[.!?]+$/g, '').trim();
       if (key && value && key.length > 1 && value.length > 0 && value.length < 100 && !/^(?:name|password|email|phone|mobile|card|number)\b/i.test(key)) {
         const fact = this.rememberUserFact(key, value, {
@@ -741,9 +891,156 @@ if (fact) {
         if (fact) {
           return {
             type: 'user-fact',
-            response: `Noted, sir. I will remember that your ${key.replace(/_/g, ' ')} is ${fact.value}.`
-          };
+            response: `Noted, sir. I will remember that your ${personalFactLabel(key)} is ${fact.value}.`
+};
         }
+      }
+    }
+
+    const callMeMatch = personalText.match(/^(?:you\s+can\s+)?call\s+me\s+(.+)$/i);
+    if (callMeMatch?.[1]) {
+      const name = callMeMatch[1].replace(/[.!?]+$/g, '').trim();
+      if (name && name.length > 0 && name.length < 50) {
+        const fact = this.rememberUserFact('name', name, { source: 'explicit-memory' });
+        if (fact) {
+          return { type: 'user-fact', response: `Understood, sir. I will call you ${fact.value}.` };
+        }
+      }
+    }
+
+    const myFriendMatch = personalText.match(/^my\s+friend(?:\'s)?\s+(?:name\s+is\s+)?(.+)$/i);
+    if (myFriendMatch?.[1]) {
+      const friendName = myFriendMatch[1].replace(/[.!?]+$/g, '').trim();
+      if (friendName && friendName.length > 0 && friendName.length < 50) {
+        const fact = this.rememberUserFact('friend_name', friendName, { source: 'user-stated-fact' });
+        if (fact) {
+          return { type: 'user-fact', response: `Noted, sir. Your friend's name is ${fact.value}.` };
+        }
+      }
+    }
+
+    const liveInMatch = personalText.match(/^(?:i\s+)?live\s+(?:in|at)\s+(.+)$/i);
+    if (liveInMatch?.[1]) {
+      const location = liveInMatch[1].replace(/[.!?]+$/g, '').trim();
+      if (location && location.length > 1 && location.length < 100) {
+        const fact = this.rememberUserFact('location', location, { source: 'user-stated-fact' });
+        if (fact) {
+          return { type: 'user-fact', response: `Noted, sir. You live in ${fact.value}.` };
+        }
+      }
+    }
+
+    const fromMatch = personalText.match(/^(?:i(?:\'m|\s+am))?\s*(?:from|born\s+in)\s+(.+)$/i);
+    if (fromMatch?.[1]) {
+      const place = fromMatch[1].replace(/[.!?]+$/g, '').trim();
+      if (place && place.length > 1 && place.length < 100) {
+        const fact = this.rememberUserFact('hometown', place, { source: 'user-stated-fact' });
+        if (fact) {
+          return { type: 'user-fact', response: `Noted, sir. You are from ${fact.value}.` };
+        }
+      }
+    }
+
+    const studyAtMatch = personalText.match(/^(?:i\s+)?study\s+(?:at|in)\s+(.+)$/i);
+    if (studyAtMatch?.[1]) {
+      const institution = studyAtMatch[1].replace(/[.!?]+$/g, '').trim();
+      if (institution && institution.length > 1 && institution.length < 100) {
+        const fact = this.rememberUserFact('school', institution, { source: 'user-stated-fact' });
+        if (fact) {
+          return { type: 'user-fact', response: `Noted, sir. You study at ${fact.value}.` };
+        }
+      }
+    }
+
+const workAtMatch = personalText.match(/^(?:i\s+)?work\s+(?:at|in|for)\s+(.+)$/i);
+    if (workAtMatch?.[1]) {
+      const workplace = workAtMatch[1].replace(/[.!?]+$/g, '').trim();
+      if (workplace && workplace.length > 1 && workplace.length < 100) {
+        const fact = this.rememberUserFact('workplace', workplace, { source: 'user-stated-fact' });
+        if (fact) {
+          return { type: 'user-fact', response: `Noted, sir. You work at ${fact.value}.` };
+        }
+      }
+    }
+
+    const studentAtMatch = personalText.match(/^i\s+am\s+(?:a\s+)?student\s+(?:at|in|of)\s+(.+)$/i);
+    if (studentAtMatch?.[1]) {
+      const institution = studentAtMatch[1].replace(/[.!?]+$/g, '').trim();
+      if (institution && institution.length > 1 && institution.length < 100) {
+        const fact = this.rememberUserFact('school', institution, { source: 'user-stated-fact' });
+        if (fact) {
+          return { type: 'user-fact', response: `Noted, sir. You are a student at ${fact.value}.` };
+        }
+      }
+    }
+
+    const professionStudentMatch = personalText.match(/^i\s+am\s+(?:a|an)\s+(.+)$/i);
+    if (professionStudentMatch?.[1]) {
+      const profession = professionStudentMatch[1].replace(/[.!?]+$/g, '').trim();
+      if (profession && profession.length > 1 && profession.length < 50 && !/^(?:student|going|doing|here|ready|available)\b/i.test(profession)) {
+        const fact = this.rememberUserFact('profession', profession, { source: 'user-stated-fact' });
+        if (fact) {
+          return { type: 'user-fact', response: `Noted, sir. Your profession is ${fact.value}.` };
+        }
+      }
+    }
+
+    const likeMatch = personalText.match(/^(?:i\s+)?(?:like|love|prefer)\s+(?:my\s+)?(.+)$/i);
+    if (likeMatch?.[1]) {
+      const thing = likeMatch[1].replace(/[.!?]+$/g, '').trim();
+      const lowerThing = thing.toLowerCase();
+      if (thing && thing.length > 1 && thing.length < 100) {
+        if (/\b(food|burger|pizza|pasta|rice|chicken|fish|vegetables|fruit|coffee|tea)\b/i.test(lowerThing)) {
+          const fact = this.rememberUserFact('favorite_food', thing, { source: 'user-stated-fact' });
+          if (fact) return { type: 'user-fact', response: `Noted, sir. Your favorite food is ${fact.value}.` };
+        }
+        if (/\b(color|colour|blue|red|green|black|white|pink|purple|yellow|orange)\b/i.test(lowerThing)) {
+          const fact = this.rememberUserFact('favorite_color', thing, { source: 'user-stated-fact' });
+          if (fact) return { type: 'user-fact', response: `Noted, sir. Your favorite color is ${fact.value}.` };
+        }
+        if (/\b(movie|film|series|show|netflix|amazon)\b/i.test(lowerThing)) {
+          const fact = this.rememberUserFact('favorite_movie', thing, { source: 'user-stated-fact' });
+          if (fact) return { type: 'user-fact', response: `Noted, sir. Your favorite movie is ${fact.value}.` };
+        }
+        if (/\b(music|song|artist|band|spotify)\b/i.test(lowerThing)) {
+          const fact = this.rememberUserFact('favorite_music', thing, { source: 'user-stated-fact' });
+          if (fact) return { type: 'user-fact', response: `Noted, sir. Your favorite music is ${fact.value}.` };
+        }
+        if (/\b(sport|cricket|football|basketball|tennis|hockey)\b/i.test(lowerThing)) {
+          const fact = this.rememberUserFact('favorite_sport', thing, { source: 'user-stated-fact' });
+          if (fact) return { type: 'user-fact', response: `Noted, sir. Your favorite sport is ${fact.value}.` };
+        }
+        const fact = this.rememberUserFact('likes', thing, { source: 'user-stated-fact' });
+        if (fact) return { type: 'user-fact', response: `Noted, sir. You like ${fact.value}.` };
+      }
+    }
+
+    const haveMatch = personalText.match(/^(?:i\s+)?have\s+(?:a\s+)?(.+)$/i);
+    if (haveMatch?.[1]) {
+      const item = haveMatch[1].replace(/[.!?]+$/g, '').trim();
+      if (item && item.length > 1 && item.length < 100 && !/^(?:a|an|the|no|not|some|many|much)\b/i.test(item)) {
+        const fact = this.rememberUserFact('possessions', item, { source: 'user-stated-fact' });
+        if (fact) {
+          return { type: 'user-fact', response: `Noted, sir. You have ${fact.value}.` };
+        }
+      }
+    }
+
+    const emailMatch = personalText.match(/^(?:my\s+)?(?:email|e-?mail)(?:\s+is|\s+address\s+is)?\s*[:=]?\s*(.+)$/i);
+    if (emailMatch?.[1]) {
+      const email = emailMatch[1].replace(/[.!?]+$/g, '').trim();
+      if (email && email.includes('@')) {
+        const fact = this.rememberUserFact('email', email, { source: 'user-stated-fact' });
+        if (fact) return { type: 'user-fact', response: `Noted, sir. Your email is ${fact.value}.` };
+      }
+    }
+
+    const phoneNumMatch = personalText.match(/^(?:my\s+)?(?:phone|mobile|telephone)(?:\s+number)?\s*(?::|is)?\s*(.+)$/i);
+    if (phoneNumMatch?.[1]) {
+      const phone = phoneNumMatch[1].replace(/[.!?]+$/g, '').replace(/\s+/g, '').trim();
+      if (phone && phone.length >= 7) {
+        const fact = this.rememberUserFact('phone', phone, { source: 'user-stated-fact' });
+        if (fact) return { type: 'user-fact', response: `Noted, sir. Your phone number is ${fact.value}.` };
       }
     }
 

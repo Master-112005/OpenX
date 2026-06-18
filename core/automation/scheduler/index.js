@@ -85,7 +85,30 @@ class SchedulerController {
       return new Date(Date.now() + (minutes * 60 * 1000));
     }
 
-    const relativeDayMatch = value.match(/^(today|tomorrow|tonight)$/i);
+    const morningEveningNightMatch = value.match(/^(in\s+(?:the\s+)?)?(morning|afternoon|evening|night)(?:\s+at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)?$/i);
+    if (morningEveningNightMatch) {
+      const period = morningEveningNightMatch[2].toLowerCase();
+      const timePart = morningEveningNightMatch[3] || '';
+      const dueAt = new Date();
+      dueAt.setSeconds(0, 0);
+
+      if (period === 'morning') {
+        dueAt.setHours(timePart ? this._parseClockParts(timePart)?.hours || 9 : 9, timePart ? this._parseClockParts(timePart)?.minutes || 0 : 0, 0, 0);
+      } else if (period === 'afternoon') {
+        dueAt.setHours(timePart ? this._parseClockParts(timePart)?.hours || 15 : 15, timePart ? this._parseClockParts(timePart)?.minutes || 0 : 0, 0, 0);
+      } else if (period === 'evening') {
+        dueAt.setHours(timePart ? this._parseClockParts(timePart)?.hours || 18 : 18, timePart ? this._parseClockParts(timePart)?.minutes || 0 : 0, 0, 0);
+      } else if (period === 'night') {
+        dueAt.setHours(timePart ? this._parseClockParts(timePart)?.hours || 21 : 21, timePart ? this._parseClockParts(timePart)?.minutes || 0 : 0, 0, 0);
+      }
+
+      if (dueAt.getTime() <= Date.now()) {
+        dueAt.setDate(dueAt.getDate() + 1);
+      }
+      return dueAt;
+    }
+
+    const relativeDayMatch = value.match(/^(today|tonight)$/i);
     if (relativeDayMatch) {
       const dueAt = new Date();
       dueAt.setSeconds(0, 0);
@@ -94,6 +117,55 @@ class SchedulerController {
         dueAt.setDate(dueAt.getDate() + 1);
       }
       return dueAt;
+    }
+
+    const tomorrowMatch = value.match(/^(tomorrow)\s+(?:at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)?$/i);
+    if (tomorrowMatch) {
+      const dueAt = new Date();
+      dueAt.setSeconds(0, 0);
+      dueAt.setDate(dueAt.getDate() + 1);
+      if (tomorrowMatch[2]) {
+        const timeParts = this._parseClockParts(tomorrowMatch[2]);
+        if (timeParts) {
+          dueAt.setHours(timeParts.hours, timeParts.minutes, 0, 0);
+        } else {
+          dueAt.setHours(9, 0, 0, 0);
+        }
+      } else {
+        dueAt.setHours(9, 0, 0, 0);
+      }
+      return dueAt;
+    }
+
+    const timeThenTomorrowMatch = value.match(/^(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s+(tomorrow)$/i);
+    if (timeThenTomorrowMatch) {
+      const dueAt = new Date();
+      dueAt.setSeconds(0, 0);
+      const timeParts = this._parseClockParts(timeThenTomorrowMatch[1]);
+      if (timeParts) {
+        dueAt.setHours(timeParts.hours, timeParts.minutes, 0, 0);
+      } else {
+        dueAt.setHours(9, 0, 0, 0);
+      }
+      dueAt.setDate(dueAt.getDate() + 1);
+      if (dueAt.getTime() <= Date.now()) {
+        dueAt.setDate(dueAt.getDate() + 1);
+      }
+      return dueAt;
+    }
+
+    const simpleAtTimeMatch = value.match(/^at\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)$/i);
+    if (simpleAtTimeMatch && simpleAtTimeMatch[1]) {
+      const parsed = this._parseClockParts(simpleAtTimeMatch[1]);
+      if (parsed) {
+        const dueAt = new Date();
+        dueAt.setSeconds(0, 0);
+        dueAt.setHours(parsed.hours, parsed.minutes, 0, 0);
+        if (dueAt.getTime() <= Date.now()) {
+          dueAt.setDate(dueAt.getDate() + 1);
+        }
+        return dueAt;
+      }
     }
 
     const weekdayMatch = value.match(/^(?:(next)\s+)?(monday|tuesday|wednesday|thursday|friday|saturday|sunday)(?:\s+(?:at\s+)?)?(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)?$/i);

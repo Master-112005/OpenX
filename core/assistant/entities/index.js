@@ -61,6 +61,22 @@ const APP_ALIASES = {
   'applemusic': 'apple music',
   'apple tv': 'apple tv',
   'youtube': 'youtube',
+  'github': 'github',
+  'git hub': 'github',
+  'hacker rank': 'hacker rank',
+  'hacker rank website': 'hacker rank',
+  'hackerrank': 'hacker rank',
+  'linkedin': 'linkedin',
+  'linked in': 'linkedin',
+  'facebook': 'facebook',
+  'fb': 'facebook',
+  'twitter': 'twitter',
+  'x.com': 'twitter',
+  'instagram': 'instagram',
+  'ig': 'instagram',
+  'amazon': 'amazon',
+  'amazon website': 'amazon',
+  'netflix': 'netflix',
   'recycle bin': 'recycle bin',
   'microsoft store': 'microsoft store',
   'store': 'microsoft store',
@@ -749,9 +765,25 @@ class EntityExtractor {
       }
     }
 
-    const alarmMatch = source.match(/\b(?:set alarm for|alarm for|wake me at)\s+(.+)$/i);
+    const alarmMatch = source.match(/\b(?:set alarm for|alarm for|wake me at|set alarm at|set a alarm at|set me alarm at)\s+(.+)$/i);
     if (alarmMatch && alarmMatch[1]) {
       return alarmMatch[1].trim();
+    }
+
+    const timerAtMatch = source.match(/\b(?:set\s+(?:a\s+)?timer\s+(?:at|for)|timer\s+at|set\s+me\s+timer\s+at|set\s+a\s+timer\s+at|start\s+(?:a\s+)?timer\s+at|create\s+(?:a\s+)?timer\s+at)\s+(.+?)(?:\s+to\s+.+)?$/i);
+    if (timerAtMatch && timerAtMatch[1]) {
+      return timerAtMatch[1].trim();
+    }
+
+    const simpleTimeAtMatch = source.match(/\bat\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\b/i);
+    if (simpleTimeAtMatch && simpleTimeAtMatch[1]) {
+      return simpleTimeAtMatch[1].replace(/\s+/g, '').trim();
+    }
+
+    const morningEveningMatch = source.match(/\bin\s+(?:the\s+)?(morning|afternoon|evening|night)\s+(?:at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)?\b/i);
+    if (morningEveningMatch && morningEveningMatch[1]) {
+      const timePart = morningEveningMatch[2] ? ` at ${morningEveningMatch[2]}` : '';
+      return morningEveningMatch[1] + timePart;
     }
 
     return null;
@@ -759,18 +791,53 @@ class EntityExtractor {
 
   _extractReminderText(text, raw) {
     const source = String(raw || '');
-    const toMatch = source.match(/\bto\s+(.+)$/i);
-    if (toMatch && toMatch[1]) {
-      const cleaned = toMatch[1]
+
+    const directRemindMatch = source.match(/^remind\s+me\s+(?:tomorrow\s+at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s+)?to\s+(.+)$/i);
+    if (directRemindMatch && directRemindMatch[1]) {
+      const cleaned = directRemindMatch[1]
         .replace(/\s+\bat\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*$/i, '')
         .trim();
-      return /^(?:me|myself)$/i.test(cleaned) ? null : cleaned;
+      if (cleaned && !/^(?:me|myself|remind|reminder)$/i.test(cleaned)) {
+        return cleaned;
+      }
     }
 
-    const forMatch = source.match(/\bset reminder for\s+.+?\s+(.+)$/i);
+    const simpleRemindToMatch = source.match(/^remind\s+me\s+to\s+(.+)$/i);
+    if (simpleRemindToMatch && simpleRemindToMatch[1]) {
+      const cleaned = simpleRemindToMatch[1]
+        .replace(/\s+\bat\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*$/i, '')
+        .trim();
+      if (cleaned && !/^(?:me|myself|remind|reminder)$/i.test(cleaned)) {
+        return cleaned;
+      }
+    }
+
+    const afterToMatch = source.match(/\bto\s+(.+)$/i);
+    if (afterToMatch && afterToMatch[1]) {
+      const cleaned = afterToMatch[1]
+        .replace(/\s+\bat\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*$/i, '')
+        .trim();
+      if (cleaned && !/^(?:me|myself|remind|reminder)$/i.test(cleaned) && cleaned.length > 0) {
+        return cleaned;
+      }
+    }
+
+    const reminderMatch = source.match(/\bremind(?: me)?\s+(?:at|for|in)\s+.+?\s+to\s+(.+)$/i);
+    if (reminderMatch && reminderMatch[1]) {
+      const cleaned = reminderMatch[1]
+        .replace(/\s+\bat\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*$/i, '')
+        .trim();
+      if (cleaned && !/^(?:me|myself)$/i.test(cleaned)) {
+        return cleaned;
+      }
+    }
+
+    const forMatch = source.match(/\bset\s+(?:a\s+)?reminder\s+(?:for|at|in)\s+.+?\s+(.+)$/i);
     if (forMatch && forMatch[1]) {
       const cleaned = forMatch[1].trim();
-      return /^(?:me|myself)$/i.test(cleaned) ? null : cleaned;
+      if (cleaned && !/^(?:me|myself)$/i.test(cleaned)) {
+        return cleaned;
+      }
     }
 
     return null;

@@ -11,6 +11,41 @@ const { MediaUnderstandingRouter } = require('../../media-understanding/media-ro
 
 const CONFIDENCE_THRESHOLD = 0.5;
 
+const WEBSITE_URL_MAP = {
+  'github': 'https://github.com',
+  'git hub': 'https://github.com',
+  'hacker rank': 'https://www.hackerrank.com',
+  'hackerrank': 'https://www.hackerrank.com',
+  'linkedin': 'https://www.linkedin.com',
+  'linked in': 'https://www.linkedin.com',
+  'facebook': 'https://www.facebook.com',
+  'fb': 'https://www.facebook.com',
+  'twitter': 'https://twitter.com',
+  'x.com': 'https://x.com',
+  'instagram': 'https://www.instagram.com',
+  'ig': 'https://www.instagram.com',
+  'amazon': 'https://www.amazon.com',
+  'netflix': 'https://www.netflix.com',
+  'youtube': 'https://www.youtube.com',
+  'google': 'https://www.google.com',
+  'wikipedia': 'https://www.wikipedia.org',
+  'reddit': 'https://www.reddit.com',
+  'stackoverflow': 'https://stackoverflow.com',
+  'stack overflow': 'https://stackoverflow.com',
+  'gfg': 'https://www.geeksforgeeks.org',
+  'geeksforgeeks': 'https://www.geeksforgeeks.org',
+  'leetcode': 'https://leetcode.com',
+  'codeforces': 'https://codeforces.com',
+  'codechef': 'https://www.codechef.com',
+  'hackerearth': 'https://www.hackerearth.com',
+  'kaggle': 'https://www.kaggle.com',
+  'coursera': 'https://www.coursera.org',
+  'udemy': 'https://www.udemy.com',
+  'w3schools': 'https://www.w3schools.com',
+  'mozilla': 'https://www.mozilla.org',
+  'mozilla firefox': 'https://www.mozilla.org/firefox'
+};
+
 class ActionRouter {
   constructor(config, automationEngine) {
     this.logger = new Logger({ level: config?.logging?.level || 'info' });
@@ -58,6 +93,20 @@ class ActionRouter {
       ? effectiveCommandText
       : (parseResult.rawCommandText || parseResult.commandText);
 
+    if (this._isIncompleteCommand(rawCommandText, preparedInput)) {
+      return {
+        commandId,
+        success: false,
+        error: 'Could not determine intent',
+        response: this._buildResponse('error', 'unknownCommand', {
+          input: rawCommandText,
+          suggestions: []
+        }),
+        normalizedInput: preparedInput.correctedText || parseResult.commandText,
+        languageUnderstanding: this._buildLanguageUnderstanding(preparedInput, null, [], 'failed')
+      };
+    }
+
     if (options.allowMulti !== false) {
       const multiPlan = this._buildMultiCommandPlan(rawCommandText, source);
       if (multiPlan) {
@@ -76,7 +125,7 @@ class ActionRouter {
           error: 'Could not determine intent',
           response: this._buildResponse('error', 'unknownCommand', {
             input: rawCommandText,
-            suggestions: this._suggestAlternatives(preparedInput)
+            suggestions: this._shouldSuggestAlternatives(preparedInput) ? this._suggestAlternatives(preparedInput) : []
           }),
           normalizedInput: preparedInput.correctedText || parseResult.commandText,
           languageUnderstanding: this._buildLanguageUnderstanding(preparedInput, intentResult, [], 'failed')
@@ -93,7 +142,7 @@ class ActionRouter {
         error: 'Could not determine intent',
         response: this._buildResponse('error', 'unknownCommand', {
           input: rawCommandText,
-          suggestions: this._suggestAlternatives(preparedInput)
+          suggestions: this._shouldSuggestAlternatives(preparedInput) ? this._suggestAlternatives(preparedInput) : []
         }),
         normalizedInput: preparedInput.correctedText || parseResult.commandText,
         languageUnderstanding: this._buildLanguageUnderstanding(preparedInput, intentResult, [], 'failed')
@@ -125,9 +174,11 @@ class ActionRouter {
       this._resolveSystemInsightIntent(rawCommandText, preparedInput) ||
       this._resolveWorkspaceSetupIntent(rawCommandText, preparedInput) ||
       this._resolveScreenshotIntent(rawCommandText, preparedInput) ||
+      this._resolveFormFillIntent(rawCommandText, preparedInput) ||
       this._resolveSmartFileIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitFileIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitFolderMoveIntent(rawCommandText, preparedInput) ||
+      this._resolveExplicitTimerIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitMediaControlIntent(rawCommandText, preparedInput) ||
       this._resolveMediaUnderstandingIntent(rawCommandText, source) ||
       this._resolveExplicitMediaIntent(rawCommandText, preparedInput) ||
@@ -138,9 +189,9 @@ class ActionRouter {
       this._resolveExplicitWindowIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitCommunicationIntent(rawCommandText, preparedInput) ||
       this._resolveBrowserFollowupIntent(rawCommandText, preparedInput) ||
+      this._resolveKnownWebOpenIntent(rawCommandText, preparedInput) ||
       this._resolveSiteSearchIntent(rawCommandText, preparedInput) ||
       this._resolvePersonalPhotoIntent(rawCommandText, preparedInput) ||
-      this._resolveKnownWebOpenIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitOpenIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitAppOpenIntent(rawCommandText, preparedInput) ||
       this._resolveCalculationIntent(rawCommandText, preparedInput) ||
@@ -433,7 +484,7 @@ class ActionRouter {
       [/(?:search|google|find|look)\s+(?:for\s+)?\w+/, /(?:open|launch|play)\s+\w+/],
       [/(?:open|launch|start)\s+\w+/, /(?:search|google)\s+\w+/],
       [/(?:search|find)\s+\w+/, /(?:and|then|also)\s+\w+/],
-      [/\w+\s+(?:and|then|also)\s+\w+/]
+      [/\w+\s+(?:and|then|also)\s+\w+/, /\b(?:open|close|search|find|play|set|turn|send|call|remind)\b/]
     ];
     for (const [pattern1, pattern2] of actionPairs) {
       if (pattern1.test(normalized) && pattern2.test(normalized)) {
@@ -760,6 +811,10 @@ class ActionRouter {
       return false;
     }
 
+    if (/\b(?:play|stream|listen\s+to|watch|queue|put\s+on|start\s+playing)\b.+\b(?:youtube|spotify|soundcloud|gaana|jiosaavn|amazon\s+music|apple\s+music)\b/i.test(String(rawText || ''))) {
+      return false;
+    }
+
     if (this._resolveLocalInfoIntent(rawText, preparedInput)) {
       return false;
     }
@@ -867,8 +922,8 @@ class ActionRouter {
     }
 
     const isMediaRequest =
-      /^(?:play|stream|listen\s+to|watch|queue)\b/i.test(correctedText) ||
-      /\b(?:play|stream|listen|watch|queue)\b/i.test(correctedText);
+      /^(?:play|stream|listen\s+to|watch|queue|put\s+on|start\s+playing)\b/i.test(correctedText) ||
+      /\b(?:play|stream|listen|watch|queue|put\s+on|start\s+playing)\b/i.test(correctedText);
     if (!isMediaRequest) return null;
 
     const mediaIntent = this.intentRegistry.get('media.play');
@@ -1061,6 +1116,50 @@ class ActionRouter {
     return entities
       ? { intent, confidence: 0.98, entities }
       : null;
+  }
+
+  _resolveFormFillIntent(rawText, preparedInput) {
+    const corrected = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
+    const raw = String(rawText || corrected || '').trim().toLowerCase();
+    const input = `${raw} ${corrected}`.replace(/\s+/g, ' ').trim();
+    if (!input) {
+      return null;
+    }
+
+    const formAwareInput = input.replace(/\bfrom\b/g, 'form');
+    const hasFormAction = /\b(?:fill|complete|autofill|auto\s+fill|submit|validate|check|verify)\b/.test(input);
+    const hasFormTarget = /\b(?:form|forms|details|application|registration|signup|sign\s+up|google\s+form|google\s+forms)\b/.test(formAwareInput);
+    if (!hasFormAction || !hasFormTarget) {
+      return null;
+    }
+
+    const intent = this.intentRegistry.get('form.fill');
+    if (!intent) {
+      return null;
+    }
+
+    const action = /\b(?:submit|send)\b/.test(input)
+      ? 'submit'
+      : /\b(?:validate|check|verify)\b/.test(input)
+        ? 'validate'
+        : 'fill';
+    const targetMatch = formAwareInput.match(/\b(?:form|forms|application|registration|signup|sign\s+up)\s+(?:for|on|in|at)\s+(.+)$/);
+    const targetForm = targetMatch?.[1]
+      ? targetMatch[1].replace(/\b(?:please|now)\b/g, '').trim()
+      : '';
+    const url = this._extractUrl(rawText || corrected);
+
+    return {
+      intent,
+      confidence: 1,
+      entities: {
+        action,
+        command: rawText,
+        url,
+        targetForm,
+        userFacts: this.learningStore?.getAllUserFacts?.() || {}
+      }
+    };
   }
 
   _buildSmartFileEntities(input) {
@@ -1283,6 +1382,10 @@ class ActionRouter {
       return null;
     }
 
+    if (/\btimers?\b|\balarm\b|\bremind\b|\bset\s+(?:a\s+)?timer\b|\bset\s+(?:a\s+)?alarm\b/.test(correctedText)) {
+      return null;
+    }
+
     const appIntentConfigs = [
       {
         intentId: 'app.close',
@@ -1323,6 +1426,11 @@ class ActionRouter {
     if (!input) return null;
 
     const lower = input.toLowerCase();
+
+    if (/\btimers?\b|\balarm\b|\bremind\b|\bset\s+(?:a\s+)?timer\b|\bset\s+(?:a\s+)?alarm\b/.test(lower)) {
+      return null;
+    }
+
     const isOpenRequest = /^(open|launch|start|run|show|navigate to|go to)\b/i.test(lower);
     if (!isOpenRequest) {
       return null;
@@ -1335,6 +1443,20 @@ class ActionRouter {
 
     if (browserIntent && this._looksLikeUrlRequest(rawText)) {
       return { intent: browserIntent, confidence: 1 };
+    }
+
+    const websiteMatch = lower.match(/^(?:open|launch|start|go\s+to)\s+(?:the\s+)?(?:website\s+of\s+)?(.+)$/i);
+    if (websiteMatch && websiteMatch[1]) {
+      const targetWebsite = websiteMatch[1].trim().toLowerCase();
+      const websiteUrl = WEBSITE_URL_MAP[targetWebsite];
+      if (websiteUrl) {
+        return { intent: browserIntent, confidence: 1, entities: { url: websiteUrl } };
+      }
+    }
+
+    const targetAfterOpen = lower.replace(/^(?:open|launch|start|run|show|navigate to|go to)\s+/i, '').trim();
+    if (targetAfterOpen && WEBSITE_URL_MAP[targetAfterOpen]) {
+      return { intent: browserIntent, confidence: 1, entities: { url: WEBSITE_URL_MAP[targetAfterOpen] } };
     }
 
     const fileIntent = this.intentRegistry.get('file.open');
@@ -1946,6 +2068,39 @@ class ActionRouter {
       : null;
   }
 
+_resolveExplicitTimerIntent(rawText, preparedInput) {
+    const corrected = String(preparedInput?.correctedText || rawText || '').trim();
+    const raw = String(rawText || corrected || '').trim();
+    const combined = `${raw} ${corrected}`.toLowerCase().replace(/\s+/g, ' ').trim();
+    if (!/\b(?:set|start|create|run)\b.*\btimers?\b|\btimers?\b.*\b(?:for|of|at)\s+\d|\b(?:set|start|create|run)\b.*\balarm\b|\balarm\b.*\b(?:for|at)\s+\d/.test(combined)) {
+      return null;
+    }
+
+    const intent = this.intentRegistry.get('timer.set');
+    if (!intent) {
+      return null;
+    }
+
+    const entities = this.entityExtractor.extract(intent, raw);
+    if (entities.timeExpression || entities.duration) {
+      return { intent, confidence: 1, entities };
+    }
+
+    const timeExprMatch = raw.match(/\bat\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\b/i);
+    if (timeExprMatch && timeExprMatch[1]) {
+      entities.timeExpression = timeExprMatch[1].replace(/\s+/g, '');
+      return { intent, confidence: 0.95, entities };
+    }
+
+    const morningTimeMatch = raw.match(/\bin\s+(?:the\s+)?morning\s+(?:at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\b/i);
+    if (morningTimeMatch && morningTimeMatch[1]) {
+      entities.timeExpression = `morning at ${morningTimeMatch[1].replace(/\s+/g, '')}`;
+      return { intent, confidence: 0.95, entities };
+    }
+
+    return null;
+  }
+
   _resolveLocalInfoIntent(rawText, preparedInput) {
     const input = this._normalizeSystemCommandText(preparedInput?.correctedText || rawText);
     const publicKnowledgeContext = /\b(?:ipl|cricket|fifa|world\s+cup|match(?:es)?|fixtures?|schedule|score|scores|winner|winners|champion|champions|event|release|released|premiere|price|news|movie|movies)\b/.test(input);
@@ -2134,7 +2289,12 @@ class ActionRouter {
       .toLowerCase()
       .replace(/\behat\b/g, 'what')
       .replace(/\bteh\b/g, 'the');
+
     if (!text) {
+      return null;
+    }
+
+    if (/https?:\/\//.test(text) || /\b(?:github|hacker\s*rank|linkedin|facebook|twitter|instagram|youtube|google|amazon|netflix|spotify)\b/i.test(text)) {
       return null;
     }
 
@@ -2242,7 +2402,11 @@ class ActionRouter {
     if (!query) {
       return null;
     }
-    if (!/^(?:locate)\b/i.test(input) && !/\b(?:file|folder|directory|location|path)\b|[^\s]+\.[A-Za-z0-9]{1,10}\b/i.test(`${input} ${rawText || ''}`)) {
+    const fileEvidence = `${input} ${rawText || ''}`;
+    const hasLocalFileEvidence =
+      /\b(?:file|files|folder|folders|directory|location|path|pdf|pdfs|document|documents|docx?|xlsx?|pptx?|csv|json|image|images|photo|photos|picture|pictures|video|videos|screenshot|screenshots|downloaded|downloads|duplicate|duplicates)\b/i.test(fileEvidence) ||
+      /[^\s]+\.[A-Za-z0-9]{1,10}\b/i.test(fileEvidence);
+    if (!/^(?:locate)\b/i.test(input) && !hasLocalFileEvidence) {
       return null;
     }
 
@@ -2497,6 +2661,51 @@ class ActionRouter {
     return missing;
   }
 
+  _shouldSuggestAlternatives(preparedInput = {}) {
+    const tokens = Array.isArray(preparedInput.tokens) && preparedInput.tokens.length
+      ? preparedInput.tokens
+      : Normalizer.tokenize(preparedInput.correctedText || preparedInput.intentText || '');
+    if (!tokens.length) {
+      return false;
+    }
+
+    const actionTokens = new Set([
+      'ask',
+      'call',
+      'close',
+      'copy',
+      'create',
+      'delete',
+      'fill',
+      'find',
+      'launch',
+      'look',
+      'message',
+      'move',
+      'open',
+      'play',
+      'read',
+      'remind',
+      'rename',
+      'run',
+      'search',
+      'send',
+      'set',
+      'show',
+      'start',
+      'switch',
+      'tell',
+      'turn'
+    ]);
+
+    return tokens.some(token => actionTokens.has(token));
+  }
+
+  _extractUrl(value) {
+    const match = String(value || '').match(/https?:\/\/[^\s"'<>]+/i);
+    return match ? match[0].replace(/[.,;!?]+$/g, '') : '';
+  }
+
   _buildResponse(type, template, context) {
     const ResponseGenerator = require('../responses/index');
     const generator = new ResponseGenerator(this.config);
@@ -2540,7 +2749,7 @@ class ActionRouter {
     }
 
     const helpIntent = this.intentRegistry.get('help');
-    if (helpIntent && /^(?:what do i do|how does this work|what can i say|help|commands|how to)\b/i.test(text)) {
+    if (helpIntent && /^(?:how does this work|what can i say|help|commands|how to)\b/i.test(text)) {
       return {
         commandId: IdGenerator.generate(),
         success: true,

@@ -23,6 +23,11 @@ The platform is designed around a layered architecture with intent routing, enti
 * Multi-window Electron desktop interface
 * 80+ built-in intents
 * Local-only processing for privacy and performance
+* **Form auto-fill with personal context learning**
+* **Multi-command natural language processing (",", "and", "then", "also", "plus")**
+* **40+ verb action vocabulary with advanced fuzzy matching**
+* **Formal servant-style responses with consistent honorific address**
+* **Context-aware error handling and clarification recovery**
 
 ---
 
@@ -138,6 +143,8 @@ OpenX/
 * Action Router
 * Context Manager
 * Response Generator
+* **Learning Engine** — active learning, personal facts, preferences, command corrections, password storage
+* **Response Style Engine** — formal servant tone, honorific application, context-aware responses
 
 ## Automation Controllers
 
@@ -152,6 +159,7 @@ OpenX/
 * System Controller
 * Windows Controller
 * Scheduler Controller
+* **Form Controller** — intelligent form field analysis, type inference, and auto-fill using personal context
 
 ## Context Awareness
 
@@ -220,6 +228,38 @@ OpenX/
 * Reminders
 * File search
 * Web search
+* **Form auto-fill with personal context** — automatically fills form fields using learned personal information
+
+## Natural Language Processing
+
+* **40+ verb action vocabulary** for flexible command interpretation
+* **Advanced fuzzy matching** (0.58 threshold) for typo tolerance
+* **Multi-command detection** via ",", "and", "then", "also", "plus" connectors
+* **Implicit command splitting** for natural compound requests
+* **Contextual follow-up resolution** ("open it", "close that")
+* **Noisy STT repair** — recovers executable commands from corrupted speech transcripts
+
+## Personal Context Learning
+
+The assistant learns and remembers personal information through natural conversation:
+
+* **Names** — "call me X", "my name is X"
+* **Locations** — "I live in X", "I'm from X"
+* **Education** — "I study at X"
+* **Work** — "I work at/in X"
+* **Preferences** — favorite food, color, movie, music, sport
+* **Possessions** — "I have a X"
+* **Contact info** — email, phone number
+* **Passwords** — learns credentials for 15+ services (Gmail, Outlook, LinkedIn, GitHub, Instagram, Facebook, Twitter, Amazon, Netflix, Spotify, WhatsApp, Zoom, Discord, Steam, Skype)
+* **Command corrections** — learns from user feedback to improve future responses
+* **Sequence learning** — remembers common command patterns
+
+## Response System
+
+* **Formal servant-style responses** — always addresses user as "sir"
+* **Context-aware error messages** — references recent actions in errors
+* **Clarification recovery** — handles unrelated input during pending confirmations
+* **Confirmation flows** —危险操作前的正式确认请求
 
 ---
 
