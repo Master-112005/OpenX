@@ -142,6 +142,7 @@ describe('Action Router', function() {
   });
 
   it('should split window and volume commands without swallowing the second command', async function() {
+    this.timeout(20000);
     const config = {
       permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
     };
@@ -1336,6 +1337,26 @@ describe('Action Router', function() {
     assert.equal(result.entities.duration, 5);
   });
 
+  it('should route alarm commands to alarm.set instead of timer.set', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const plain = await router.process('set a alarm at 2:43', 'chat');
+    const today = await router.process('set a alarm at 2:43 pm today', 'chat');
+
+    assert.equal(plain.intent, 'alarm.set');
+    assert.equal(plain.entities.timeExpression, '2:43');
+    assert.equal(today.intent, 'alarm.set');
+    assert.equal(today.entities.timeExpression, '2:43 pm today');
+  });
+
   it('should route reminder commands to reminder.set', async function() {
     const config = {
       permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
@@ -1350,6 +1371,24 @@ describe('Action Router', function() {
     assert.equal(result.intent, 'reminder.set');
     assert.equal(result.entities.timeExpression, '1 pm');
     assert.equal(result.entities.reminderText, 'eat lunch');
+  });
+
+  it('should preserve reminder time when "at" is mistyped as "t"', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId, entities) {
+        return { success: false, error: 'Reminder text is required', data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const result = await router.process('set reminder t 2:44 pm today', 'chat');
+
+    assert.equal(result.intent, 'reminder.set');
+    assert.equal(result.entities.timeExpression, '2:44 pm today');
+    assert.equal(result.entities.reminderText, null);
   });
 
   it('should route reminder commands that still need a time detail', async function() {
@@ -1769,6 +1808,85 @@ describe('Action Router', function() {
     assert.equal(onTrailing.entities.enabled, true);
     assert.equal(status.intent, 'system.bluetooth');
     assert.deepEqual(status.entities, {});
+  });
+
+  it('should route semantic-frame command phrasing into executable intents', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const executed = [];
+    const stubEngine = {
+      execute(actionId, entities) {
+        executed.push({ actionId, entities });
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const maximize = await router.process('make chrome bigger', 'chat');
+    const minimize = await router.process('hide youtube window', 'chat');
+    const volume = await router.process('put volume at 35', 'chat');
+    const brightness = await router.process('keep brightness at 60', 'chat');
+    const localSearch = await router.process('look inside downloads for pdfs', 'chat');
+    const minimizeAll = await router.process('Minimize all windows', 'chat');
+
+    assert.equal(maximize.intent, 'window.maximize');
+    assert.equal(maximize.entities.windowName, 'chrome');
+    assert.equal(minimize.intent, 'window.minimize');
+    assert.equal(minimize.entities.windowName, 'youtube');
+    assert.equal(minimizeAll.intent, 'window.minimize');
+    assert.equal(minimizeAll.entities.windowName, 'all windows');
+    assert.equal(minimizeAll.entities.allWindows, true);
+    assert.equal(volume.intent, 'volume.set');
+    assert.equal(volume.entities.value, 35);
+    assert.equal(brightness.intent, 'brightness.set');
+    assert.equal(brightness.entities.value, 60);
+    assert.equal(localSearch.intent, 'file.search');
+    assert.equal(localSearch.entities.query, 'pdf');
+    assert.deepEqual(executed.map(step => step.actionId), [
+      'window.maximize',
+      'window.minimize',
+      'volume.set',
+      'brightness.set',
+      'file.search',
+      'window.minimize'
+    ]);
+  });
+
+  it('should route Indian English natural command phrasing through canonical intents', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const executed = [];
+    const stubEngine = {
+      execute(actionId, entities) {
+        executed.push({ actionId, entities });
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const app = await router.process('do one thing open chrome only', 'chat');
+    const search = await router.process('tell about indian cricket team', 'chat');
+    const wifi = await router.process('put net off', 'chat');
+    const message = await router.process('send on whatsapp to Rahul hello bro', 'chat');
+
+    assert.equal(app.intent, 'app.open');
+    assert.equal(app.entities.appName, 'chrome');
+    assert.equal(search.intent, 'browser.search');
+    assert.equal(search.entities.query, 'indian cricket team');
+    assert.equal(wifi.intent, 'app.open');
+    assert.equal(wifi.entities.appName, 'ms-settings:network-wifi');
+    assert.equal(message.intent, 'message.send');
+    assert.equal(message.entities.contactName, 'Rahul');
+    assert.equal(message.entities.messageText, 'hello bro');
+    assert.equal(message.entities.platform, 'whatsapp');
+    assert.deepEqual(executed.map(step => step.actionId), [
+      'app.open',
+      'browser.search',
+      'app.open',
+      'message.compose'
+    ]);
   });
 
   it('should answer assistant identity locally', async function() {

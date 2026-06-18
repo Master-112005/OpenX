@@ -3,7 +3,6 @@ const { execSync, spawn, spawnSync } = require('child_process');
 const Logger = require('../../shared/index').Logger;
 
 const DEFAULT_TTS_VOLUME = 100;
-const MIN_AUDIBLE_TTS_VOLUME = 85;
 const DEFAULT_PREFERRED_VOICES = [
   'Microsoft Zira Desktop',
   'Microsoft Aria Online',
@@ -175,8 +174,7 @@ class TextToSpeech extends EventEmitter {
       return DEFAULT_TTS_VOLUME;
     }
 
-    const clamped = Math.max(0, Math.min(DEFAULT_TTS_VOLUME, Math.round(number)));
-    return clamped === 0 ? DEFAULT_TTS_VOLUME : Math.max(MIN_AUDIBLE_TTS_VOLUME, clamped);
+    return Math.max(0, Math.min(DEFAULT_TTS_VOLUME, Math.round(number)));
   }
 
   _normalizeRate(value) {

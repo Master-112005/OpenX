@@ -115,6 +115,7 @@ describe('App Controller', function() {
       startMenuQueried = true;
       return null;
     };
+    controller.windowSession.closeWindow = () => ({ success: false, error: 'No matching window' });
     controller._getRunningProcessDetails = () => (
       state === 'closed'
         ? []

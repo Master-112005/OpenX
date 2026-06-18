@@ -142,6 +142,8 @@ class ActiveLearningStore {
   constructor(config = {}) {
     this.enabled = config?.activeLearning?.enabled !== false;
     this.askForFeedback = config?.activeLearning?.askForFeedback !== false;
+    this.saveDelayMs = Number(config?.activeLearning?.saveDelayMs || 250);
+    this.pendingSaveTimer = null;
     const dataDir = config?.app?.dataDir || path.join(os.homedir(), '.jarvis');
     this.storePath = config?.activeLearning?.storePath || path.join(dataDir, 'learning.json');
     this.data = this._sanitize(this._load());
@@ -202,13 +204,16 @@ class ActiveLearningStore {
     if (exact) {
       exact.uses = Number(exact.uses || 0) + 1;
       exact.updatedAt = new Date().toISOString();
-      this._save();
-      return {
-        input: exact.input,
-        correction: exact.correction,
-        confidence: exact.confidence || 1,
-        source: exact.source
-      };
+      this._save({ defer: true });
+      return this._formatCorrection(exact);
+    }
+
+    const closest = this._findClosestCorrection(normalized);
+    if (closest) {
+      closest.rule.uses = Number(closest.rule.uses || 0) + 1;
+      closest.rule.updatedAt = new Date().toISOString();
+      this._save({ defer: true });
+      return this._formatCorrection(closest.rule, closest.match.similarity, 'learned-fuzzy');
     }
 
     return null;
@@ -264,7 +269,7 @@ class ActiveLearningStore {
     return record;
   }
 
-getUserFact(kind) {
+  getUserFact(kind) {
     if (!this.enabled || !kind) {
       return null;
     }
@@ -368,7 +373,7 @@ getUserFact(kind) {
     if (record && record.sequence && record.sequence.length >= 2) {
       record.uses = (record.uses || 0) + 1;
       record.lastUsed = new Date().toISOString();
-      this._save();
+      this._save({ defer: true });
       return record;
     }
 
@@ -384,7 +389,7 @@ getUserFact(kind) {
           if (matchCount >= Math.floor(tokens.length * 0.7)) {
             record.uses = (record.uses || 0) + 1;
             record.lastUsed = new Date().toISOString();
-            this._save();
+            this._save({ defer: true });
             return record;
           }
         }
@@ -854,7 +859,7 @@ getUserFact(kind) {
         const fact = this.rememberUserFact('profession', profession, {
           source: /^remember\b/i.test(text) ? 'explicit-memory' : 'user-stated-fact'
         });
-if (fact) {
+        if (fact) {
           return {
             type: 'user-fact',
             response: `Noted, sir. I will remember that you are a ${fact.value}.`
@@ -952,7 +957,7 @@ if (fact) {
       }
     }
 
-const workAtMatch = personalText.match(/^(?:i\s+)?work\s+(?:at|in|for)\s+(.+)$/i);
+    const workAtMatch = personalText.match(/^(?:i\s+)?work\s+(?:at|in|for)\s+(.+)$/i);
     if (workAtMatch?.[1]) {
       const workplace = workAtMatch[1].replace(/[.!?]+$/g, '').trim();
       if (workplace && workplace.length > 1 && workplace.length < 100) {
@@ -1059,12 +1064,86 @@ const workAtMatch = personalText.match(/^(?:i\s+)?work\s+(?:at|in|for)\s+(.+)$/i
     }
   }
 
-  _save() {
+  flush() {
+    if (this.pendingSaveTimer) {
+      clearTimeout(this.pendingSaveTimer);
+      this.pendingSaveTimer = null;
+    }
+    this._writeNow();
+  }
+
+  _formatCorrection(rule, confidenceOverride = null, sourceOverride = '') {
+    return {
+      input: rule.input,
+      correction: rule.correction,
+      confidence: confidenceOverride ?? rule.confidence ?? 1,
+      source: sourceOverride || rule.source
+    };
+  }
+
+  _findClosestCorrection(normalized) {
+    const rules = Array.isArray(this.data.commandRewrites) ? this.data.commandRewrites : [];
+    const candidates = rules
+      .map(rule => rule?.normalizedInput)
+      .filter(value => value && Math.abs(value.length - normalized.length) <= Math.max(2, Math.ceil(normalized.length * 0.18)));
+    if (candidates.length === 0) {
+      return null;
+    }
+
+    const match = Normalizer.findClosestOption(normalized, candidates, {
+      minSimilarity: normalized.length >= 12 ? 0.86 : 0.9,
+      maxDistance: Math.max(1, Math.ceil(normalized.length * 0.18))
+    });
+    if (!match) {
+      return null;
+    }
+
+    const rule = rules.find(candidate => candidate.normalizedInput === match.match);
+    return rule ? { rule, match } : null;
+  }
+
+  _save(options = {}) {
+    if (options.defer) {
+      this._scheduleSave();
+      return;
+    }
+    this.flush();
+  }
+
+  _scheduleSave() {
+    if (this.pendingSaveTimer) {
+      return;
+    }
+
+    this.pendingSaveTimer = setTimeout(() => {
+      this.pendingSaveTimer = null;
+      this._writeNow();
+    }, Math.max(1, this.saveDelayMs));
+
+    if (typeof this.pendingSaveTimer.unref === 'function') {
+      this.pendingSaveTimer.unref();
+    }
+  }
+
+  _writeNow() {
     const directory = path.dirname(this.storePath);
     if (!fs.existsSync(directory)) {
       fs.mkdirSync(directory, { recursive: true });
     }
-    fs.writeFileSync(this.storePath, JSON.stringify(this.data, null, 2), 'utf8');
+    const tempPath = `${this.storePath}.${process.pid}.${Date.now()}.tmp`;
+    try {
+      fs.writeFileSync(tempPath, JSON.stringify(this.data, null, 2), 'utf8');
+      fs.renameSync(tempPath, this.storePath);
+    } catch (error) {
+      try {
+        if (fs.existsSync(tempPath)) {
+          fs.unlinkSync(tempPath);
+        }
+      } catch (_) {
+        // Ignore cleanup failures; the original write error is more useful.
+      }
+      throw error;
+    }
   }
 
   _sanitize(input) {

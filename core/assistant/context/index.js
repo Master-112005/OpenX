@@ -23,6 +23,8 @@ class ContextManager {
       intent: result?.intent || null,
       confidence: result?.confidence || 0,
       success: result?.success || false,
+      requiresConfirmation: Boolean(result?.requiresConfirmation),
+      needsClarification: Boolean(result?.needsClarification),
       entities: result?.entities || {},
       response: result?.response || '',
       data: result?.data || null,

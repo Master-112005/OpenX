@@ -1,7 +1,7 @@
 {
   "name": "jarvis-assistant",
   "version": "1.0.0",
-  "description": "Intelligent Windows Desktop Assistant Platform - Offline, voice-controlled, deterministic automation engine",
+  "description": "Intelligent Windows Desktop Assistant Platform - Offline chat-driven deterministic automation engine",
   "main": "apps/desktop/electron/main.js",
   "scripts": {
     "start": "electron .",
@@ -9,7 +9,6 @@
     "test": "mocha tests/**/*.test.js --recursive",
     "test:core": "mocha tests/core/**/*.test.js --recursive",
     "test:automation": "mocha tests/automation/**/*.test.js --recursive",
-    "test:voice": "mocha tests/voice/**/*.test.js --recursive",
     "lint": "eslint .",
     "package": "electron-builder --win"
   },
@@ -17,7 +16,7 @@
     "assistant",
     "windows",
     "automation",
-    "voice-control",
+    "chat-control",
     "desktop",
     "offline"
   ],

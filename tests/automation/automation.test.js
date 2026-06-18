@@ -44,6 +44,21 @@ describe('Automation Engine', function() {
     assert.ok(actions.includes('thanks'));
   });
 
+  it('should parse alarm times that include today', function() {
+    const SchedulerController = require('../../core/automation/scheduler/index');
+    const scheduler = new SchedulerController({});
+
+    const timeThenToday = scheduler._parseTimeExpression('2:43 pm today');
+    const todayThenTime = scheduler._parseTimeExpression('today at 2:43 pm');
+
+    assert.ok(timeThenToday instanceof Date);
+    assert.ok(todayThenTime instanceof Date);
+    assert.equal(timeThenToday.getHours(), 14);
+    assert.equal(timeThenToday.getMinutes(), 43);
+    assert.equal(todayThenTime.getHours(), 14);
+    assert.equal(todayThenTime.getMinutes(), 43);
+  });
+
   it('should fill extracted form fields from saved personal context', async function() {
     const engine = new AutomationEngine({});
     const result = await engine.execute('form.fill', {
@@ -339,6 +354,29 @@ describe('Automation Engine', function() {
     engine.windows.listWindows = () => [];
     engine.apps._resolveProcessCandidates = () => ['chrome'];
     engine.apps._findRunningProcesses = () => [];
+
+    const result = await engine.verifier.verify('app.close', { appName: 'chrome' }, {
+      success: true,
+      data: { app: 'chrome', closeMethod: 'window' }
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(result.verification.status, 'passed');
+    assert.equal(result.verification.check, 'app-closed');
+  });
+
+  it('should not fail browser close verification for background processes after windows close', async function() {
+    const engine = new AutomationEngine({});
+    engine.windows.listWindows = () => [];
+    engine.apps._resolveProcessCandidates = () => ['chrome'];
+    engine.apps._findRunningProcesses = () => [
+      {
+        Id: 201,
+        ProcessName: 'chrome',
+        MainWindowTitle: '',
+        MainWindowHandle: 0
+      }
+    ];
 
     const result = await engine.verifier.verify('app.close', { appName: 'chrome' }, {
       success: true,

@@ -560,6 +560,14 @@ class EntityExtractor {
 
     const patterns = [
       {
+        regex: /^(?:send|message|text|msg)\s+(?:on|in|via|using)\s+(.+?)\s+to\s+("[^"]+"|'[^']+'|[^\s]+)\s+(?:saying\s+|that\s+)?(.+)$/i,
+        map: match => ({
+          platform: match[1],
+          contactName: match[2],
+          messageText: match[3]
+        })
+      },
+      {
         regex: /^(?:send|share)\s+(.+?\.(?:pdf|txt|docx?|xlsx?|pptx?|csv|json|xml|html?|js|ts|py|java|png|jpe?g|gif|webp|mp[34]|mkv|wav|zip|rar))(?:\s+file)?\s+to\s+(.+?)(?:\s+(?:on|via|using)\s+(.+))?$/i,
         map: match => ({
           messageText: `file ${cleanEntityName(match[1], { stripTypeWords: true })}`,
@@ -745,10 +753,15 @@ class EntityExtractor {
 
   _extractTimeExpression(text, raw) {
     const source = String(raw || '');
+    const normalizeClock = value => String(value || '')
+      .trim()
+      .replace(/^(\d{1,2})\s+(\d{2})(\s*(?:am|pm)?(?:\s+(?:today|tomorrow))?)$/i, '$1:$2$3')
+      .replace(/\s+/g, ' ')
+      .trim();
 
     const reminderMatch = source.match(/\bremind(?: me)?\s+(?:at|for|in)\s+(.+?)(?:\s+to\s+.+)?$/i);
     if (reminderMatch && reminderMatch[1]) {
-      return reminderMatch[1].trim();
+      return normalizeClock(reminderMatch[1]);
     }
 
     const relativeReminderMatch = source.match(/\bremind(?: me)?\s+(.+?)\s+to\s+.+$/i);
@@ -761,23 +774,28 @@ class EntityExtractor {
         const afterTo = source.split(/\bto\b/i).slice(1).join(' to ');
         const nestedTimeMatch = afterTo.match(/\bat\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\b/i);
         const nestedTime = nestedTimeMatch?.[1] ? nestedTimeMatch[1].replace(/\s+/g, '') : '';
-        return nestedTime ? `${candidate} ${nestedTime}` : candidate;
+        return nestedTime ? normalizeClock(`${candidate} ${nestedTime}`) : normalizeClock(candidate);
       }
+    }
+
+    const setReminderTimeMatch = source.match(/\bset\s+(?:a\s+)?reminder\s+(?:at|for|in)\s+(\d{1,2}(?:(?::|\s+)\d{2})?\s*(?:am|pm)?(?:\s+(?:today|tomorrow))?)\b/i);
+    if (setReminderTimeMatch && setReminderTimeMatch[1]) {
+      return normalizeClock(setReminderTimeMatch[1]);
     }
 
     const alarmMatch = source.match(/\b(?:set alarm for|alarm for|wake me at|set alarm at|set a alarm at|set me alarm at)\s+(.+)$/i);
     if (alarmMatch && alarmMatch[1]) {
-      return alarmMatch[1].trim();
+      return normalizeClock(alarmMatch[1]);
     }
 
     const timerAtMatch = source.match(/\b(?:set\s+(?:a\s+)?timer\s+(?:at|for)|timer\s+at|set\s+me\s+timer\s+at|set\s+a\s+timer\s+at|start\s+(?:a\s+)?timer\s+at|create\s+(?:a\s+)?timer\s+at)\s+(.+?)(?:\s+to\s+.+)?$/i);
     if (timerAtMatch && timerAtMatch[1]) {
-      return timerAtMatch[1].trim();
+      return normalizeClock(timerAtMatch[1]);
     }
 
-    const simpleTimeAtMatch = source.match(/\bat\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\b/i);
+    const simpleTimeAtMatch = source.match(/\bat\s+(\d{1,2}(?:(?::|\s+)\d{2})?\s*(?:am|pm)?(?:\s+(?:today|tomorrow))?)\b/i);
     if (simpleTimeAtMatch && simpleTimeAtMatch[1]) {
-      return simpleTimeAtMatch[1].replace(/\s+/g, '').trim();
+      return normalizeClock(simpleTimeAtMatch[1]);
     }
 
     const morningEveningMatch = source.match(/\bin\s+(?:the\s+)?(morning|afternoon|evening|night)\s+(?:at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)?\b/i);
@@ -835,6 +853,9 @@ class EntityExtractor {
     const forMatch = source.match(/\bset\s+(?:a\s+)?reminder\s+(?:for|at|in)\s+.+?\s+(.+)$/i);
     if (forMatch && forMatch[1]) {
       const cleaned = forMatch[1].trim();
+      if (/^[\d:\s]+(?:am|pm)?(?:\s+(?:today|tomorrow))?$/i.test(cleaned)) {
+        return null;
+      }
       if (cleaned && !/^(?:me|myself)$/i.test(cleaned)) {
         return cleaned;
       }

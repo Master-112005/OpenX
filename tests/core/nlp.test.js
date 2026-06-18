@@ -74,4 +74,25 @@ describe('NLP Processor', function() {
       'what is your name'
     );
   });
+
+  it('should normalize Indian English command phrasing without corrupting targets', function() {
+    const nlp = new NlpProcessor(new IntentRegistry());
+
+    assert.equal(
+      nlp.prepare('do one thing open chrome only').correctedText,
+      'open chrome only'
+    );
+    assert.equal(
+      nlp.prepare('tell about indian cricket team').correctedText,
+      'search for indian cricket team'
+    );
+    assert.equal(
+      nlp.prepare('put net off').correctedText,
+      'turn off wifi'
+    );
+    assert.equal(
+      nlp.prepare('put net on').correctedText,
+      'turn on wifi'
+    );
+  });
 });

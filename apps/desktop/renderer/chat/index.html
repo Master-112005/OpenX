@@ -588,6 +588,26 @@
       padding: 9px 10px;
     }
 
+    .range-row {
+      align-items: center;
+      display: grid;
+      gap: 10px;
+      grid-template-columns: 1fr auto;
+    }
+
+    .range-input {
+      accent-color: var(--accent-color);
+      width: 100%;
+    }
+
+    .range-value {
+      color: rgba(255, 255, 255, 0.78);
+      font-size: 11px;
+      font-weight: 700;
+      min-width: 48px;
+      text-align: right;
+    }
+
     .field-textarea {
       min-height: 72px;
       padding: 9px 10px;
@@ -951,7 +971,7 @@
           <div class="settings-nav">
             <button class="settings-nav-chip" data-section-target="identity" type="button">
               <span class="nav-label">Identity</span>
-              <span class="nav-hint">Assistant name, title, honorific, and activation shortcut.</span>
+              <span class="nav-hint">Assistant name, title, honorific, and chat shortcut.</span>
             </button>
             <button class="settings-nav-chip" data-section-target="profile" type="button">
               <span class="nav-label">Profile</span>
@@ -998,11 +1018,27 @@
                 </select>
               </label>
               <label class="field-wrap">
-                <span class="field-label">Activation Shortcut</span>
+                <span class="field-label">Chat Shortcut</span>
                 <input class="field" id="assistant-activation-shortcut" type="text" placeholder="Alt+Space">
               </label>
             </div>
-            <div class="section-note">Use an Electron-style shortcut such as <code>Alt+Space</code> or <code>Control+Shift+J</code>. The assistant starts listening when that shortcut is pressed.</div>
+            <div class="section-note">Use an Electron-style shortcut such as <code>Alt+Space</code> or <code>Control+Shift+J</code>. The chat window opens when that shortcut is pressed.</div>
+            <div class="field-grid">
+              <label class="field-wrap">
+                <span class="field-label">Assistant Volume</span>
+                <span class="range-row">
+                  <input class="range-input" id="assistant-tts-volume" type="range" min="0" max="100" step="1">
+                  <span class="range-value" id="assistant-tts-volume-value">100%</span>
+                </span>
+              </label>
+              <label class="field-wrap">
+                <span class="field-label">Talking Speed</span>
+                <span class="range-row">
+                  <input class="range-input" id="assistant-tts-rate" type="range" min="-10" max="10" step="1">
+                  <span class="range-value" id="assistant-tts-rate-value">2</span>
+                </span>
+              </label>
+            </div>
           </section>
 
           <section class="settings-section" data-settings-section="profile" id="settings-section-profile">
@@ -1229,6 +1265,8 @@
       assistantTitle: 'assistant-title',
       assistantHonorific: 'assistant-honorific',
       assistantActivationShortcut: 'assistant-activation-shortcut',
+      assistantTtsVolume: 'assistant-tts-volume',
+      assistantTtsRate: 'assistant-tts-rate',
       profileFullName: 'profile-full-name',
       profileEmail: 'profile-email',
       profilePhone: 'profile-phone',
@@ -1258,7 +1296,7 @@
     }
 
     function getActivationShortcut() {
-      return settingsSnapshot?.settings?.voice?.activationShortcut || 'Alt+Space';
+      return settingsSnapshot?.settings?.chat?.activationShortcut || 'Alt+Space';
     }
 
     function assistantMeta(label = 'just now') {
@@ -1302,6 +1340,14 @@
         'system',
         `${getAssistantDisplayName()} - confirmation required`
       );
+      speakAssistantResponse(result.response || `Please confirm this action, ${getHonorific()}.`);
+    }
+
+    function speakAssistantResponse(text) {
+      const spokenText = String(text || '').trim();
+      if (spokenText && window.jarvis?.speak) {
+        window.jarvis.speak(spokenText);
+      }
     }
 
     async function sendCommand(text) {
@@ -1321,7 +1367,9 @@
           if (result.requiresConfirmation) {
             addConfirmationPrompt(result);
           } else {
-            addMessage(result.response || `Operation completed, ${getHonorific()}.`, 'assistant', assistantMeta());
+            const response = result.response || `Operation completed, ${getHonorific()}.`;
+            addMessage(response, 'assistant', assistantMeta());
+            speakAssistantResponse(response);
           }
         } catch (err) {
           hideTyping();
@@ -1347,7 +1395,9 @@
           return;
         }
 
-        addMessage(result.response || `Operation completed, ${getHonorific()}.`, 'assistant', assistantMeta());
+        const response = result.response || `Operation completed, ${getHonorific()}.`;
+        addMessage(response, 'assistant', assistantMeta());
+        speakAssistantResponse(response);
       } catch (err) {
         hideTyping();
         addMessage(`An error occurred, ${getHonorific()}.`, 'system', assistantMeta('error'));
@@ -1437,6 +1487,22 @@
       }
     }
 
+    function updateTtsSliderLabels() {
+      const volumeEl = document.getElementById(fieldIds.assistantTtsVolume);
+      const rateEl = document.getElementById(fieldIds.assistantTtsRate);
+      const volumeValueEl = document.getElementById('assistant-tts-volume-value');
+      const rateValueEl = document.getElementById('assistant-tts-rate-value');
+
+      if (volumeEl && volumeValueEl) {
+        volumeValueEl.textContent = `${volumeEl.value || 100}%`;
+      }
+
+      if (rateEl && rateValueEl) {
+        const rate = Number(rateEl.value || 0);
+        rateValueEl.textContent = rate > 0 ? `+${rate}` : String(rate);
+      }
+    }
+
     function populateSettingsForm() {
       const settings = settingsSnapshot?.settings;
       if (!settings) {
@@ -1446,7 +1512,10 @@
       setFieldValue(fieldIds.assistantDisplayName, settings.assistant.displayName);
       setFieldValue(fieldIds.assistantTitle, settings.assistant.title);
       setFieldValue(fieldIds.assistantHonorific, settings.assistant.honorific);
-      setFieldValue(fieldIds.assistantActivationShortcut, settings.voice.activationShortcut);
+      setFieldValue(fieldIds.assistantActivationShortcut, settings.chat.activationShortcut);
+      setFieldValue(fieldIds.assistantTtsVolume, String(settings.voice?.tts?.volume ?? 100));
+      setFieldValue(fieldIds.assistantTtsRate, String(settings.voice?.tts?.rate ?? 2));
+      updateTtsSliderLabels();
       setFieldValue(fieldIds.profileFullName, settings.userProfile.fullName);
       setFieldValue(fieldIds.profileEmail, settings.userProfile.email);
       setFieldValue(fieldIds.profilePhone, settings.userProfile.phone);
@@ -1788,6 +1857,14 @@
           honorific: document.getElementById(fieldIds.assistantHonorific).value
         },
         voice: {
+          tts: {
+            volume: Number(document.getElementById(fieldIds.assistantTtsVolume).value || 100),
+            rate: Number(document.getElementById(fieldIds.assistantTtsRate).value || 2)
+          }
+        },
+        chat: {
+          themeId: selectedThemeId,
+          maxHistory: Number(document.getElementById(fieldIds.chatMaxHistory).value || 500),
           activationShortcut: document.getElementById(fieldIds.assistantActivationShortcut).value.trim()
         },
         userProfile: {
@@ -1801,10 +1878,6 @@
           country: document.getElementById(fieldIds.profileCountry).value.trim(),
           company: document.getElementById(fieldIds.profileCompany).value.trim(),
           role: document.getElementById(fieldIds.profileRole).value.trim()
-        },
-        chat: {
-          themeId: selectedThemeId,
-          maxHistory: Number(document.getElementById(fieldIds.chatMaxHistory).value || 500)
         },
         system: {
           permissionLevel: document.getElementById(fieldIds.systemPermissionLevel).value
@@ -1840,7 +1913,7 @@
       const contactCount = settingsSnapshot?.contacts?.length || 0;
 
       document.getElementById('settings-hero-name').textContent = assistantName;
-      document.getElementById('settings-hero-title').textContent = `${assistantTitle} configured for local automation, hotkey voice activation (${getActivationShortcut()}), profile storage, and contact-aware actions.`;
+      document.getElementById('settings-hero-title').textContent = `${assistantTitle} configured for local automation, chat hotkey (${getActivationShortcut()}), profile storage, and contact-aware actions.`;
       document.getElementById('settings-hero-honorific').textContent = settingsSnapshot?.settings?.assistant?.honorific || 'sir';
       document.getElementById('settings-hero-theme').textContent = theme?.label || 'Theme';
       document.getElementById('settings-hero-contacts').textContent = `${contactCount} / ${CONTACT_LIMIT}`;
@@ -1853,7 +1926,7 @@
       }
 
       addMessage(
-        `At your service, ${getHonorific()}. Press ${getActivationShortcut()} to speak, or type a command here.`,
+        `At your service, ${getHonorific()}. Press ${getActivationShortcut()} to open chat, or type a command here.`,
         'assistant',
         assistantMeta('ready')
       );
@@ -1969,6 +2042,9 @@
       }
     });
 
+    document.getElementById(fieldIds.assistantTtsVolume).addEventListener('input', updateTtsSliderLabels);
+    document.getElementById(fieldIds.assistantTtsRate).addEventListener('input', updateTtsSliderLabels);
+
     sendBtn.addEventListener('click', handleSend);
     quickBtns.forEach(button => {
       button.addEventListener('click', () => {
@@ -2016,31 +2092,6 @@
     });
 
     if (window.jarvis) {
-      window.jarvis.onVoiceResult((data) => {
-        if (data && data.text) {
-          inputBox.value = data.text;
-        }
-      });
-
-      window.jarvis.onVoiceProcessed((payload) => {
-        if (!payload?.transcript || !payload?.result) {
-          return;
-        }
-
-        addMessage(payload.transcript, 'user', 'Voice - just now');
-
-        if (payload.result.requiresConfirmation) {
-          addConfirmationPrompt(payload.result);
-          return;
-        }
-
-        addMessage(
-          payload.result.response || `Operation completed, ${getHonorific()}.`,
-          payload.result.success === false ? 'system' : 'assistant',
-          assistantMeta(payload.result.cancelled ? 'cancelled' : 'voice')
-        );
-      });
-
       window.jarvis.onSettingsChanged((snapshot) => {
         applySnapshot(snapshot);
       });

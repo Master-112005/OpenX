@@ -25,20 +25,16 @@ describe('Settings Service', function() {
         userProfile: {}
       },
       voice: {
-        activationShortcut: 'Alt+Space',
         tts: {
-          rate: 0,
+          rate: 2,
           volume: 100
         }
-      },
-      orb: {
-        defaultSize: 64,
-        defaultOpacity: 0.85
       },
       system: {
         volumeStep: 5
       },
       chat: {
+        activationShortcut: 'Alt+Space',
         activeTheme: 'midnight',
         maxHistory: 500
       }
@@ -70,7 +66,10 @@ describe('Settings Service', function() {
         honorific: 'commander'
       },
       voice: {
-        activationShortcut: 'control + shift + j'
+        tts: {
+          rate: 4,
+          volume: 72
+        }
       },
       userProfile: {
         fullName: 'Rakesh',
@@ -78,6 +77,7 @@ describe('Settings Service', function() {
         phone: '+91 98765 43210'
       },
       chat: {
+        activationShortcut: 'control + shift + j',
         themeId: 'forest',
         maxHistory: 900
       },
@@ -103,7 +103,9 @@ describe('Settings Service', function() {
 
     assert.equal(saved.assistant.displayName, 'Athena');
     assert.equal(saved.assistant.honorific, 'commander');
-    assert.equal(saved.voice.activationShortcut, 'Control+Shift+J');
+    assert.equal(saved.chat.activationShortcut, 'Control+Shift+J');
+    assert.equal(saved.voice.tts.rate, 4);
+    assert.equal(saved.voice.tts.volume, 72);
     assert.equal(saved.userProfile.fullName, 'Rakesh');
     assert.equal(saved.userProfile.phone, '+919876543210');
     assert.equal(saved.chat.themeId, 'forest');
@@ -126,7 +128,9 @@ describe('Settings Service', function() {
 
     const runtimeConfig = service.buildRuntimeConfig();
     assert.equal(runtimeConfig.assistant.displayName, 'Athena');
-    assert.equal(runtimeConfig.voice.activationShortcut, 'Control+Shift+J');
+    assert.equal(runtimeConfig.chat.activationShortcut, 'Control+Shift+J');
+    assert.equal(runtimeConfig.voice.tts.rate, 4);
+    assert.equal(runtimeConfig.voice.tts.volume, 72);
     assert.equal(runtimeConfig.assistant.userProfile.email, 'rakesh@example.com');
     assert.equal(runtimeConfig.chat.activeTheme, 'forest');
     assert.equal(runtimeConfig.system.permissionLevel, 'critical');
@@ -163,12 +167,27 @@ describe('Settings Service', function() {
   it('should fall back to the default shortcut when the activation shortcut is invalid', function() {
     const { service } = createService();
     const saved = service.saveSettings({
-      voice: {
+      chat: {
         activationShortcut: 'space'
       }
     });
 
-    assert.equal(saved.voice.activationShortcut, 'Alt+Space');
+    assert.equal(saved.chat.activationShortcut, 'Alt+Space');
+  });
+
+  it('should migrate the old slow default TTS rate to the faster default', function() {
+    const { service } = createService();
+    const saved = service.saveSettings({
+      voice: {
+        tts: {
+          rate: -1,
+          volume: 64
+        }
+      }
+    });
+
+    assert.equal(saved.voice.tts.rate, 2);
+    assert.equal(saved.voice.tts.volume, 64);
   });
 
   it('should create, list, and delete contacts through the service', function() {

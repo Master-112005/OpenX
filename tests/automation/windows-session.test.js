@@ -77,4 +77,18 @@ describe('Windows Session Controller', function() {
     assert.equal(missing, null);
     assert.equal(found.handle, 200);
   });
+
+  it('should minimize all windows without requiring a title match', function() {
+    const controller = new WindowsSessionController({});
+    let script = '';
+    controller._runScript = value => {
+      script = value;
+    };
+
+    const result = controller.minimizeAllWindows();
+
+    assert.equal(result.success, true);
+    assert.equal(result.data.action, 'minimizeAll');
+    assert.match(script, /MinimizeAll/);
+  });
 });

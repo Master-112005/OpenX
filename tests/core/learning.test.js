@@ -46,6 +46,23 @@ describe('Active Learning Store', function() {
     assert.equal(store.getSnapshot().preferences.searchOpenMode.value, 'browser');
   });
 
+  it('should reuse learned corrections for close typos without blocking persistence', function() {
+    const { tempDir, store } = createStore();
+
+    store.rememberCorrection('open college photos', 'open google photos');
+    const correction = store.findCorrection('open collge photos');
+    store.flush();
+
+    const reloaded = new ActiveLearningStore({
+      app: { dataDir: tempDir },
+      activeLearning: { enabled: true }
+    });
+
+    assert.equal(correction.correction, 'open google photos');
+    assert.equal(correction.source, 'learned-fuzzy');
+    assert.equal(reloaded.getSnapshot().commandRewrites[0].uses, 1);
+  });
+
   it('should apply browser and media preferences to routed entities', function() {
     const { store } = createStore();
 

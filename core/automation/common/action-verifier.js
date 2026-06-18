@@ -280,7 +280,7 @@ class ActionVerifier {
 
   _verifyAppClose(entities, result) {
     const appName = Normalizer.normalizeText(result.data?.app || entities.appName || '');
-    const found = this._findAppWindowOrProcess(appName);
+    const found = this._findAppWindowOrProcess(appName, { visibleOnly: true });
     return found
       ? fail('app-closed', {
           app: appName,
@@ -337,7 +337,7 @@ class ActionVerifier {
     return warn('communication-postcondition', { blocking: false });
   }
 
-  _findAppWindowOrProcess(appName) {
+  _findAppWindowOrProcess(appName, options = {}) {
     if (!appName) {
       return null;
     }
@@ -351,6 +351,10 @@ class ActionVerifier {
     });
     if (windowMatch) {
       return windowMatch;
+    }
+
+    if (options.visibleOnly) {
+      return null;
     }
 
     const apps = this.controllers.apps;

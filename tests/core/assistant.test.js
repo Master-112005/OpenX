@@ -338,6 +338,58 @@ describe('Assistant Confirmation Flow', function() {
     assert.match(followUp.response, /no/i);
   });
 
+  it('should not let failed close confirmations poison later app open recovery', async function() {
+    const routedInputs = [];
+    const router = {
+      process: async input => {
+        routedInputs.push(input);
+        if (/^close\b/i.test(input)) {
+          return {
+            commandId: 'cmd-close',
+            success: true,
+            requiresConfirmation: true,
+            intent: 'app.close',
+            entities: { appName: 'chrome' },
+            response: 'Please confirm close chrome.'
+          };
+        }
+        return {
+          commandId: 'cmd-open',
+          success: false,
+          intent: 'app.open',
+          entities: { appName: 'chrome' },
+          error: 'Could not open: chrome',
+          response: 'Could not open chrome.'
+        };
+      },
+      confirmAndExecute: async (commandId, intentId, entities) => ({
+        commandId,
+        success: false,
+        intent: intentId,
+        entities,
+        error: 'chrome still appears to be open',
+        response: 'chrome still appears to be open'
+      })
+    };
+
+    const assistant = new Assistant({}, {
+      router,
+      learning: { enabled: false },
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    await assistant.processCommand('close chrome', 'chat');
+    const closeResult = await assistant.processCommand('yes', 'chat');
+    const openResult = await assistant.processCommand('open chrome', 'chat');
+
+    assert.equal(closeResult.success, false);
+    assert.equal(openResult.success, false);
+    assert.match(openResult.response, /could not open chrome/i);
+    assert.doesNotMatch(openResult.response, /closed chrome/i);
+    assert.deepEqual(routedInputs, ['close chrome', 'open chrome']);
+  });
+
   it('should resolve question follow-ups after file search context', async function() {
     const routedInputs = [];
     const router = {
@@ -905,6 +957,61 @@ describe('Assistant Confirmation Flow', function() {
     assert.equal(fixed.learned, true);
     assert.deepEqual(routedInputs, ['can please close that', 'close instagram']);
     assert.deepEqual(learnedRules, [{ input: 'can please close that', correction: 'close instagram' }]);
+  });
+
+  it('should learn corrective phrasing after an unknown command with no intent', async function() {
+    const learnedRules = [];
+    const routedInputs = [];
+    const learning = {
+      enabled: true,
+      askForFeedback: false,
+      findCorrection: () => null,
+      learnFromText: () => null,
+      rememberCorrection: (input, correction) => {
+        learnedRules.push({ input, correction });
+        return { input, correction };
+      },
+      recordFeedback: () => {}
+    };
+    const router = {
+      process: async input => {
+        routedInputs.push(input);
+        if (input === 'do the magic thing') {
+          return {
+            commandId: 'cmd-unknown',
+            success: false,
+            intent: null,
+            confidence: 0,
+            entities: {},
+            languageUnderstanding: { status: 'failed', reason: 'no-intent' },
+            response: 'I could not understand that command.'
+          };
+        }
+        return {
+          commandId: 'cmd-open-chrome',
+          success: true,
+          intent: 'app.open',
+          confidence: 1,
+          entities: { appName: 'chrome' },
+          response: 'Opened chrome.'
+        };
+      }
+    };
+
+    const assistant = new Assistant({}, {
+      router,
+      learning,
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    await assistant.processCommand('do the magic thing');
+    const fixed = await assistant.processCommand('i meant open chrome');
+
+    assert.equal(fixed.success, true);
+    assert.equal(fixed.learned, true);
+    assert.deepEqual(routedInputs, ['do the magic thing', 'open chrome']);
+    assert.deepEqual(learnedRules, [{ input: 'do the magic thing', correction: 'open chrome' }]);
   });
 
   it('should not ask for feedback repeatedly after the same confident action', async function() {

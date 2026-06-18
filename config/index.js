@@ -8,98 +8,9 @@ const CONFIG = {
     dataDir: path.join(os.homedir(), '.jarvis')
   },
 
-  orb: {
-    defaultSize: 64,
-    minSize: 32,
-    maxSize: 128,
-    defaultOpacity: 0.85,
-    minOpacity: 0.2,
-    maxOpacity: 1.0,
-    position: { x: -1, y: -1 },
-    animation: {
-      idle: { duration: 3000 },
-      listening: { duration: 1500 },
-      processing: { duration: 800 },
-      success: { duration: 1000 },
-      error: { duration: 1500 }
-    },
-    colors: {
-      idle: { r: 100, g: 100, b: 100 },
-      listening: { r: 0, g: 120, b: 255 },
-      processing: { r: 255, g: 165, b: 0 },
-      success: { r: 0, g: 200, b: 80 },
-      error: { r: 255, g: 50, b: 50 }
-    }
-  },
-
   voice: {
-    activationMode: 'hotkey',
-    activationShortcut: 'Alt+Space',
-    activationFallbackShortcuts: ['Control+Alt+Space', 'Control+Space'],
-    allowManualActivation: true,
-    enabled: true,
-    inactivityTimeoutMs: 20000,
-    conversationSilenceTimeoutMs: 20000,
-    conversationIgnoredSpeechLimit: 1,
-    confirmationListenTimeoutMs: 10000,
-    speakerLock: {
-      enabled: true,
-      similarityThreshold: 0.68
-    },
-    activationAcknowledgement: '',
-    speakActivationAcknowledgement: false,
-    silenceTimeout: 700,
-    frameDurationMs: 20,
-    preRollDurationMs: 400,
-    maxUtteranceMs: 12000,
-    vadThreshold: 0.015,
-    recognition: {
-      provider: 'whisper-stream',
-      language: 'en',
-      backend: 'node'
-    },
-    stt: {
-      provider: 'whisper-stream',
-      language: 'en',
-      maxDurationMs: 20000,
-      startSpeechTimeoutMs: 3500,
-      minConfidence: 0.55,
-      commandRecoveryMinConfidence: 0.25,
-      confirmationMinConfidence: 0.45,
-      maxNoSpeechProbability: 0.55,
-      maxCompressionRatio: 2.4
-    },
-    whisper: {
-      executablePath: 'bin/whisper/whisper-stream.exe',
-      modelPath: 'models/whisper/ggml-small.en.bin',
-      threads: 8,
-      captureDeviceId: -1,
-      stepMs: 1000,
-      lengthMs: 12000,
-      keepMs: 1200,
-      maxTokens: 32,
-      audioContext: 0,
-      vadThreshold: 0.45,
-      freqThreshold: 100,
-      keepContext: false,
-      noFallback: true,
-      saveAudio: false,
-      language: 'en',
-      finalDebounceMs: 1600,
-      incompleteUtteranceDebounceMs: 5000,
-      logRawOutput: true,
-      maxRestarts: 3
-    },
-    recovery: {
-      enabled: true,
-      minConfidence: 0.8
-    },
-    confidence: {
-      autoExecuteThreshold: 0.85,
-      confirmationThreshold: 0.6
-    },
     tts: {
-      rate: -1,
+      rate: 2,
       volume: 100,
       voiceName: '',
       naturalize: true
@@ -143,6 +54,8 @@ const CONFIG = {
   },
 
   chat: {
+    activationShortcut: 'Alt+Space',
+    activationFallbackShortcuts: ['Control+Alt+Space', 'Control+Space'],
     maxHistory: 500,
     maxDisplayMessages: 100,
     fontSize: 14,

@@ -45,6 +45,9 @@ class WindowsController {
   }
 
   minimizeWindow(windowName) {
+    if (/^(?:all\s+windows?|all|everything)$/i.test(String(windowName || '').trim())) {
+      return this.session.minimizeAllWindows();
+    }
     return this.session.minimizeWindow(windowName);
   }
 

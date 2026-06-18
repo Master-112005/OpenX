@@ -109,17 +109,27 @@ class NlpProcessor {
     const text = String(correctedText || '').trim().toLowerCase();
     const raw = String(rawText || '').trim().toLowerCase();
     const action = this._findNoisyAction(safeTokens);
+    const value = Normalizer.extractNumber(text);
     const questionWord = safeTokens.find(token => ['what', 'who', 'when', 'where', 'why', 'how', 'which'].includes(token)) || null;
     const targetText = action
       ? this._extractTargetTextAfterAction(text, action.verb)
       : this._extractQuestionTargetText(text, questionWord);
+    const normalizedTargetText = this._normalizeTargetText(targetText, action?.verb || null);
     const localScope = this._findLocalScope(text, raw);
-    const webTarget = normalizeWebTarget(targetText || text);
+    const webTarget = normalizeWebTarget(normalizedTargetText || text);
+    const domain = this._inferDomain({
+      actionVerb: action?.verb || null,
+      correctedText: text,
+      targetText: normalizedTargetText,
+      localScope,
+      webTarget,
+      value
+    });
     const targetType = this._classifyTargetType({
       actionVerb: action?.verb || null,
       correctedText: text,
       rawText: raw,
-      targetText,
+      targetText: normalizedTargetText,
       webTarget,
       localScope
     });
@@ -127,9 +137,11 @@ class NlpProcessor {
     return {
       actionVerb: action?.verb || null,
       questionWord,
-      targetText,
+      targetText: normalizedTargetText,
       targetType,
       webTarget,
+      domain,
+      value,
       localScope,
       requiresWeb: targetType === 'web' || targetType === 'knowledge',
       isLocal: targetType === 'local-file' || targetType === 'local-app'
@@ -140,6 +152,9 @@ class NlpProcessor {
     const pattern = new RegExp(`^(?:search\\s+for|look\\s+up|go\\s+to|show\\s+me|${actionVerb}|launch|start|run|show|google|find)\\s+`, 'i');
     return String(text || '')
       .replace(pattern, '')
+      .replace(/^(?:make|put|keep|change|adjust|configure)\s+/, '')
+      .replace(/\b(?:bigger|larger|smaller|hidden|hide|minimized|maximized|fullscreen|full\s+screen)\b/gi, ' ')
+      .replace(/\b(?:level|percent|percentage)\b/gi, ' ')
       .replace(/\s+(?:in|on)\s+(?:chrome|browser|edge|firefox)\s*$/i, '')
       .replace(/\s+(?:on|in)\s+(?:my\s+)?(?:laptop|pc|computer|system|device|windows)\s*$/i, '')
       .trim();
@@ -163,6 +178,52 @@ class NlpProcessor {
     return location || null;
   }
 
+  _normalizeTargetText(value, actionVerb = null) {
+    let target = String(value || '').trim();
+    if (!target) {
+      return '';
+    }
+
+    target = target
+      .replace(/^(?:the|a|an|my|this|that|current)\s+/i, '')
+      .replace(/\b(?:app|application|program|window|tab|level|percent|percentage|only|itself)\b/gi, ' ')
+      .replace(/\b(?:to|at|as|on)\s+\d{1,3}\s*$/i, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    if (['increase', 'decrease', 'mute', 'unmute', 'set'].includes(actionVerb) &&
+      /\b(?:volume|sound|audio|brightness|screen)\b/i.test(target)) {
+      const utility = this._findKnownUtilityTarget(Normalizer.tokenize(target));
+      return utility || target;
+    }
+
+    return target;
+  }
+
+  _inferDomain({ actionVerb, correctedText, targetText, localScope, webTarget, value }) {
+    const combined = `${correctedText || ''} ${targetText || ''}`.toLowerCase();
+    if (/\b(?:volume|sound|audio)\b/.test(combined)) {
+      return 'volume';
+    }
+    if (/\b(?:brightness|screen)\b/.test(combined) && Number.isFinite(value)) {
+      return 'brightness';
+    }
+    if (/\b(?:window|fullscreen|maximize|minimize|bigger|larger|smaller|hide|hidden)\b/.test(combined) ||
+      ['maximize', 'minimize'].includes(actionVerb)) {
+      return 'window';
+    }
+    if (/\b(?:file|files|folder|folders|directory|directories|desktop|downloads|documents|pictures|pdf|pdfs|image|images|photo|photos)\b/.test(combined) || localScope) {
+      return 'local-file';
+    }
+    if (webTarget || /\b(?:website|site|web|internet|online)\b/.test(combined)) {
+      return 'web';
+    }
+    if (['open', 'close', 'switch', 'focus', 'launch', 'start', 'run'].includes(actionVerb) && targetText) {
+      return 'app';
+    }
+    return 'unknown';
+  }
+
   _classifyTargetType({ actionVerb, correctedText, rawText, targetText, webTarget, localScope }) {
     const combined = `${correctedText || ''} ${rawText || ''}`.toLowerCase();
     const target = String(targetText || '').toLowerCase();
@@ -172,6 +233,10 @@ class NlpProcessor {
     }
 
     if (localScope) {
+      return 'local-app';
+    }
+
+    if (['maximize', 'minimize'].includes(actionVerb)) {
       return 'local-app';
     }
 
@@ -285,6 +350,15 @@ class NlpProcessor {
       }
     }
 
+    if (['maximize', 'minimize'].includes(action.verb)) {
+      const target = this._findKnownPlaceOrApp(tokens, action.index) || this._buildCommandTail(tokens, action.index, action.verb)
+        .replace(new RegExp(`^${action.verb}\\s+`, 'i'), '')
+        .trim();
+      if (target) {
+        return `${action.verb} ${target}`;
+      }
+    }
+
     if (['increase', 'decrease', 'mute', 'unmute'].includes(action.verb)) {
       const target = this._findKnownUtilityTarget(tokens);
       if (target) {
@@ -330,7 +404,7 @@ class NlpProcessor {
       { verb: 'resume', words: ['resume', 'continue', 'unpause', 'proceed', 'carry', 'carryon'] },
       { verb: 'stop', words: ['stop', 'end', 'terminate', 'cease'] },
       { verb: 'set', words: ['set', 'change', 'adjust', 'configure'] },
-      { verb: 'remind', words: ['remind', 'alert', 'notify', 'tell'] },
+      { verb: 'remind', words: ['remind', 'alert', 'notify'] },
       { verb: 'delete', words: ['delete', 'remove', 'trash', 'discard', 'erase', 'eliminate'] },
       { verb: 'create', words: ['create', 'make', 'new', 'add', 'generate', 'build'] },
       { verb: 'send', words: ['send', 'share', 'deliver', 'dispatch', 'mail', 'post'] },
@@ -347,11 +421,14 @@ class NlpProcessor {
       if (protectedQueryTokens.has(token)) {
         continue;
       }
+
       for (const group of groups) {
         if (group.words.includes(token)) {
           return { verb: group.verb, index };
         }
+      }
 
+      for (const group of groups) {
         if (!token || token.length <= 2) {
           continue;
         }

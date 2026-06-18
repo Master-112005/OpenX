@@ -154,6 +154,36 @@ class SchedulerController {
       return dueAt;
     }
 
+    const timeWithTodayMatch = value.match(/^(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)\s+today$/i);
+    if (timeWithTodayMatch) {
+      const timeParts = this._parseClockParts(timeWithTodayMatch[1]);
+      if (!timeParts) {
+        return null;
+      }
+      const dueAt = new Date();
+      dueAt.setSeconds(0, 0);
+      dueAt.setHours(timeParts.hours, timeParts.minutes, 0, 0);
+      if (dueAt.getTime() <= Date.now()) {
+        dueAt.setDate(dueAt.getDate() + 1);
+      }
+      return dueAt;
+    }
+
+    const todayWithTimeMatch = value.match(/^today\s+(?:at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)$/i);
+    if (todayWithTimeMatch) {
+      const timeParts = this._parseClockParts(todayWithTimeMatch[1]);
+      if (!timeParts) {
+        return null;
+      }
+      const dueAt = new Date();
+      dueAt.setSeconds(0, 0);
+      dueAt.setHours(timeParts.hours, timeParts.minutes, 0, 0);
+      if (dueAt.getTime() <= Date.now()) {
+        dueAt.setDate(dueAt.getDate() + 1);
+      }
+      return dueAt;
+    }
+
     const simpleAtTimeMatch = value.match(/^at\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?)$/i);
     if (simpleAtTimeMatch && simpleAtTimeMatch[1]) {
       const parsed = this._parseClockParts(simpleAtTimeMatch[1]);

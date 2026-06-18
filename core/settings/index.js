@@ -253,6 +253,15 @@ function sanitizeModes(value) {
   return modes;
 }
 
+function normalizeTtsRate(value, fallback) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number === -1) {
+    return fallback;
+  }
+
+  return clampNumber(number, -10, 10, fallback);
+}
+
 class SettingsService {
   constructor(baseConfig) {
     this.baseConfig = deepClone(baseConfig || {});
@@ -280,18 +289,12 @@ class SettingsService {
         role: String(baseConfig?.assistant?.userProfile?.role || '').trim()
       },
       voice: {
-        activationShortcut: normalizeActivationShortcut(baseConfig?.voice?.activationShortcut, 'Alt+Space'),
         tts: {
           rate: clampNumber(baseConfig?.voice?.tts?.rate, -10, 10, 0),
           volume: clampNumber(baseConfig?.voice?.tts?.volume, 0, 100, 100),
           voiceName: String(baseConfig?.voice?.tts?.voiceName || '').trim(),
           naturalize: baseConfig?.voice?.tts?.naturalize !== false
         }
-      },
-      orb: {
-        defaultSize: clampNumber(baseConfig?.orb?.defaultSize, 32, 128, 64),
-        defaultOpacity: clampNumber(baseConfig?.orb?.defaultOpacity, 0.2, 1, 0.85),
-        alwaysOnTop: true
       },
       system: {
         volumeStep: clampNumber(baseConfig?.system?.volumeStep, 1, 20, 5),
@@ -302,6 +305,7 @@ class SettingsService {
         askForFeedback: baseConfig?.activeLearning?.askForFeedback !== false
       },
       chat: {
+        activationShortcut: normalizeActivationShortcut(baseConfig?.chat?.activationShortcut, 'Alt+Space'),
         themeId: String(baseConfig?.chat?.activeTheme || 'midnight').trim(),
         maxHistory: clampNumber(baseConfig?.chat?.maxHistory, 50, 2000, 500)
       },
@@ -383,19 +387,11 @@ class SettingsService {
     runtimeConfig.assistant.userProfile = deepClone(settings.userProfile);
 
     runtimeConfig.voice = runtimeConfig.voice || {};
-    runtimeConfig.voice.activationMode = 'hotkey';
-    runtimeConfig.voice.activationShortcut = settings.voice.activationShortcut;
-    runtimeConfig.voice.allowManualActivation = true;
     runtimeConfig.voice.tts = runtimeConfig.voice.tts || {};
     runtimeConfig.voice.tts.rate = settings.voice.tts.rate;
     runtimeConfig.voice.tts.volume = settings.voice.tts.volume;
     runtimeConfig.voice.tts.voiceName = settings.voice.tts.voiceName;
     runtimeConfig.voice.tts.naturalize = settings.voice.tts.naturalize;
-
-    runtimeConfig.orb = runtimeConfig.orb || {};
-    runtimeConfig.orb.defaultSize = settings.orb.defaultSize;
-    runtimeConfig.orb.defaultOpacity = settings.orb.defaultOpacity;
-    runtimeConfig.orb.alwaysOnTop = settings.orb.alwaysOnTop;
 
     runtimeConfig.system = runtimeConfig.system || {};
     runtimeConfig.system.volumeStep = settings.system.volumeStep;
@@ -406,6 +402,8 @@ class SettingsService {
     runtimeConfig.activeLearning.askForFeedback = settings.activeLearning.askForFeedback;
 
     runtimeConfig.chat = runtimeConfig.chat || {};
+    runtimeConfig.chat.activationShortcut = settings.chat.activationShortcut;
+    runtimeConfig.chat.activationFallbackShortcuts = this.baseConfig?.chat?.activationFallbackShortcuts || [];
     runtimeConfig.chat.maxHistory = settings.chat.maxHistory;
     runtimeConfig.chat.activeTheme = settings.chat.themeId;
     runtimeConfig.modes = deepClone(settings.modes);
@@ -439,21 +437,12 @@ class SettingsService {
         role: String(source.userProfile?.role || '').trim()
       },
       voice: {
-        activationShortcut: normalizeActivationShortcut(
-          source.voice?.activationShortcut,
-          this.defaults.voice.activationShortcut
-        ),
         tts: {
-          rate: clampNumber(source.voice?.tts?.rate, -10, 10, this.defaults.voice.tts.rate),
+          rate: normalizeTtsRate(source.voice?.tts?.rate, this.defaults.voice.tts.rate),
           volume: clampNumber(source.voice?.tts?.volume, 0, 100, this.defaults.voice.tts.volume),
           voiceName: String(source.voice?.tts?.voiceName || '').trim(),
           naturalize: source.voice?.tts?.naturalize !== false
         }
-      },
-      orb: {
-        defaultSize: clampNumber(source.orb?.defaultSize, 32, 128, this.defaults.orb.defaultSize),
-        defaultOpacity: clampNumber(source.orb?.defaultOpacity, 0.2, 1, this.defaults.orb.defaultOpacity),
-        alwaysOnTop: source.orb?.alwaysOnTop !== false
       },
       system: {
         volumeStep: clampNumber(source.system?.volumeStep, 1, 20, this.defaults.system.volumeStep),
@@ -466,6 +455,10 @@ class SettingsService {
         askForFeedback: source.activeLearning?.askForFeedback !== false
       },
       chat: {
+        activationShortcut: normalizeActivationShortcut(
+          source.chat?.activationShortcut || source.voice?.activationShortcut,
+          this.defaults.chat.activationShortcut
+        ),
         themeId,
         maxHistory: clampNumber(source.chat?.maxHistory, 50, 2000, this.defaults.chat.maxHistory)
       },

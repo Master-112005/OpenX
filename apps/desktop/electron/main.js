@@ -1,25 +1,22 @@
-const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, screen, globalShortcut } = require('electron');
+const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, globalShortcut } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
 const BASE_CONFIG = require('../../../config/index');
 const Assistant = require('../../../core/assistant/index');
-const VoiceManager = require('../../../core/voice/index');
-const UIStateManager = require('../../../core/ui/state/index');
+const TextToSpeech = require('../../../core/voice/tts/index');
 const { SettingsService } = require('../../../core/settings/index');
-const { AssistantEventBus, EVENTS } = require('../../../core/shared/index');
+const { AssistantEventBus } = require('../../../core/shared/index');
 
-let mainWindow = null;
 let chatWindow = null;
 let settingsWindow = null;
 let tray = null;
 let assistant = null;
-let voiceManager = null;
+let textToSpeech = null;
 let settingsService = null;
 let runtimeConfig = null;
 let eventBus = null;
-let uiState = null;
-let registeredActivationShortcuts = [];
+let registeredChatShortcuts = [];
 
 function ensureDataDir() {
   const dirs = [
@@ -33,43 +30,9 @@ function ensureDataDir() {
   });
 }
 
-function createOrbWindow() {
-  const display = screen.getPrimaryDisplay();
-  const { width } = display.workAreaSize;
-  const orbConfig = runtimeConfig?.orb || BASE_CONFIG.orb;
-
-  mainWindow = new BrowserWindow({
-    width: orbConfig.defaultSize,
-    height: orbConfig.defaultSize,
-    x: orbConfig.position?.x !== -1 ? orbConfig.position.x : width - 120,
-    y: orbConfig.position?.y !== -1 ? orbConfig.position.y : 100,
-    transparent: true,
-    frame: false,
-    resizable: false,
-    skipTaskbar: true,
-    alwaysOnTop: orbConfig.alwaysOnTop !== false,
-    hasShadow: false,
-    webPreferences: {
-      preload: path.join(__dirname, '..', 'preload', 'index.js'),
-      nodeIntegration: false,
-      contextIsolation: true
-    }
-  });
-
-  mainWindow.loadFile(path.join(__dirname, '..', 'renderer', 'orb', 'index.html'));
-  mainWindow.setIgnoreMouseEvents(false, { forward: true });
-
-  mainWindow.on('closed', () => {
-    mainWindow = null;
-  });
-
-  if (process.argv.includes('--dev')) {
-    mainWindow.webContents.openDevTools({ mode: 'detach' });
-  }
-}
-
 function createChatWindow() {
   if (chatWindow) {
+    chatWindow.show();
     chatWindow.focus();
     return;
   }
@@ -134,17 +97,7 @@ function createTray() {
   tray.setToolTip(`${runtimeConfig?.assistant?.displayName || 'JARVIS'} Assistant`);
 
   const contextMenu = Menu.buildFromTemplate([
-    { label: 'Open Assistant', click: () => { if (mainWindow) mainWindow.show(); } },
-    {
-      label: 'Start Listening',
-      click: () => {
-        console.log('Tray voice activation requested');
-        if (voiceManager) {
-          voiceManager.manualActivate({ trigger: 'tray' });
-        }
-      }
-    },
-    { label: 'Chat', click: () => createChatWindow() },
+    { label: 'Open Chat', click: () => createChatWindow() },
     { label: 'Settings', click: () => createSettingsWindow() },
     { type: 'separator' },
     { label: 'Quit', click: () => app.quit() }
@@ -170,33 +123,11 @@ function setupIPC() {
     return { ready: true, ...assistant.getStatus() };
   });
 
-  ipcMain.handle('voice:speak', async (event, { text }) => {
-    if (voiceManager) voiceManager.speak(text);
+  ipcMain.handle('tts:speak', async (event, { text }) => {
+    if (textToSpeech) {
+      textToSpeech.speak(text);
+    }
     return { success: true };
-  });
-
-  ipcMain.handle('voice:activate', async () => {
-    if (voiceManager && voiceManager.manualActivate({ trigger: 'ui' })) {
-      return { success: true };
-    }
-
-    return {
-      success: false,
-      error: 'Voice activation is unavailable right now.'
-    };
-  });
-
-  ipcMain.handle('orb:move', async (event, { x, y }) => {
-    if (mainWindow) {
-      const [wx, wy] = mainWindow.getPosition();
-      mainWindow.setPosition(Math.round(wx + x), Math.round(wy + y));
-    }
-  });
-
-  ipcMain.handle('orb:setState', async (event, { state }) => {
-    if (mainWindow && mainWindow.webContents) {
-      mainWindow.webContents.send('orb:stateChange', state);
-    }
   });
 
   ipcMain.handle('window:openChat', async () => {
@@ -244,148 +175,52 @@ function setupIPC() {
   ipcMain.handle('app:quit', async () => {
     app.quit();
   });
-
-  ipcMain.handle('orb:getPosition', async () => {
-    if (mainWindow) return mainWindow.getPosition();
-    return [0, 0];
-  });
-
-  ipcMain.handle('orb:setPosition', async (event, { x, y }) => {
-    if (mainWindow) mainWindow.setPosition(x, y);
-  });
 }
 
-function broadcastOrbState(state) {
-  if (mainWindow && mainWindow.webContents) {
-    mainWindow.webContents.send('orb:stateChange', state);
-  }
-}
-
-function bindUiState() {
-  if (!uiState) {
+function unregisterChatShortcut() {
+  if (registeredChatShortcuts.length === 0) {
     return;
   }
 
-  uiState.removeAllListeners('orb:state');
-  uiState.on('orb:state', (state) => {
-    broadcastOrbState(state);
-  });
-}
-
-function bindEventPipeline() {
-  if (!eventBus || !uiState) {
-    return;
-  }
-
-  const stateToOrb = {
-    IDLE: 'idle',
-    ACTIVATING: 'listening',
-    LISTENING: 'listening',
-    HEARING_SPEECH: 'listening',
-    TRANSCRIBING: 'processing',
-    THINKING: 'processing',
-    RESPONDING: 'processing',
-    ERROR: 'error'
-  };
-
-  eventBus.subscribe(EVENTS.VOICE_STATE_CHANGED, ({ payload }) => {
-    const orbState = stateToOrb[payload.currentState];
-    if (orbState) {
-      uiState.setOrbState(orbState);
-    }
-
-    const currentState = payload.currentState;
-    uiState.update('voice', {
-      active: currentState !== 'IDLE',
-      listening: currentState === 'LISTENING' || currentState === 'HEARING_SPEECH',
-      speaking: currentState === 'RESPONDING'
-    });
-  });
-
-  eventBus.subscribe(EVENTS.COMMAND_EXECUTED, ({ payload }) => {
-    if (payload.source === 'voice') {
-      uiState.setOrbState(payload.success ? 'success' : 'error');
-    }
-  });
-
-  eventBus.subscribe(EVENTS.RESPONSE_STARTED, () => {
-    uiState.setSpeaking(true);
-  });
-
-  eventBus.subscribe(EVENTS.RESPONSE_COMPLETED, () => {
-    uiState.setSpeaking(false);
-    setTimeout(() => {
-      if (!voiceManager?.getStatus?.().listening) {
-        uiState.setOrbState('idle');
-      }
-    }, 900);
-  });
-
-  eventBus.subscribe(EVENTS.VOICE_ERROR, () => {
-    uiState.setOrbState('error');
-  });
-}
-
-function unregisterActivationShortcut() {
-  if (registeredActivationShortcuts.length === 0) {
-    return;
-  }
-
-  for (const shortcut of registeredActivationShortcuts) {
+  for (const shortcut of registeredChatShortcuts) {
     try {
       globalShortcut.unregister(shortcut);
     } catch (error) {
-      console.error(`Failed to unregister activation shortcut ${shortcut}:`, error.message);
+      console.error(`Failed to unregister chat shortcut ${shortcut}:`, error.message);
     }
   }
-  registeredActivationShortcuts = [];
+  registeredChatShortcuts = [];
 }
 
-function getActivationShortcuts() {
-  const primary = runtimeConfig?.voice?.activationShortcut || BASE_CONFIG.voice.activationShortcut || 'Alt+Space';
-  const fallbacks = runtimeConfig?.voice?.activationFallbackShortcuts
-    || BASE_CONFIG.voice.activationFallbackShortcuts
+function getChatShortcuts() {
+  const primary = runtimeConfig?.chat?.activationShortcut || BASE_CONFIG.chat.activationShortcut || 'Alt+Space';
+  const fallbacks = runtimeConfig?.chat?.activationFallbackShortcuts
+    || BASE_CONFIG.chat.activationFallbackShortcuts
     || ['Control+Alt+Space', 'Control+Space'];
 
   return [...new Set([primary, ...fallbacks].filter(Boolean))];
 }
 
-function registerActivationShortcut() {
-  unregisterActivationShortcut();
+function registerChatShortcut() {
+  unregisterChatShortcut();
 
-  const shortcuts = getActivationShortcuts();
-  if (shortcuts.length === 0) {
-    return;
-  }
-
-  for (const shortcut of shortcuts) {
+  for (const shortcut of getChatShortcuts()) {
     try {
       const registered = globalShortcut.register(shortcut, () => {
-        console.log(`Activation shortcut pressed: ${shortcut}`);
-        if (voiceManager) {
-          const activated = voiceManager.manualActivate({ trigger: shortcut });
-          if (!activated) {
-            console.log('Voice activation ignored', voiceManager.getStatus?.() || {});
-          }
-        }
+        console.log(`Chat shortcut pressed: ${shortcut}`);
+        createChatWindow();
       });
 
       if (!registered) {
-        console.error(`Failed to register activation shortcut: ${shortcut}`);
+        console.error(`Failed to register chat shortcut: ${shortcut}`);
         continue;
       }
 
-      registeredActivationShortcuts.push(shortcut);
-      console.log(`Registered activation shortcut: ${shortcut}`);
+      registeredChatShortcuts.push(shortcut);
+      console.log(`Registered chat shortcut: ${shortcut}`);
     } catch (error) {
-      console.error(`Invalid activation shortcut ${shortcut}:`, error.message);
+      console.error(`Invalid chat shortcut ${shortcut}:`, error.message);
     }
-  }
-
-  if (registeredActivationShortcuts.length > 0) {
-    console.log(`Voice activation ready. Press ${registeredActivationShortcuts.join(' or ')} to start listening, or use tray > Start Listening.`);
-  } else {
-    console.error('No voice activation shortcuts were registered. Use tray > Start Listening or the orb voice control.');
   }
 }
 
@@ -396,115 +231,28 @@ async function initializeAssistant() {
   assistant.router.permissionValidator.setUserLevel(
     settingsService.getSettings().system.permissionLevel
   );
-  voiceManager = new VoiceManager(runtimeConfig, { eventBus });
 
+  textToSpeech = new TextToSpeech(runtimeConfig);
   try {
-    await voiceManager.initialize();
+    await textToSpeech.initialize();
   } catch (err) {
-    console.error('Voice initialization failed (non-fatal):', err.message);
-  }
-  if (voiceManager?.workerReady) {
-    registerActivationShortcut();
-  } else {
-    unregisterActivationShortcut();
+    console.error('TTS initialization failed (non-fatal):', err.message);
   }
 
-  voiceManager.on('activated', () => {
-    uiState.update('voice', { active: true, listening: false });
-    if (mainWindow && mainWindow.webContents) {
-      mainWindow.webContents.send('voice:activated');
-    }
-  });
-
-  voiceManager.on('listening', () => {
-    uiState.update('voice', { active: true, listening: true });
-    if (mainWindow && mainWindow.webContents) {
-      mainWindow.webContents.send('voice:listening');
-    }
-  });
-
-  voiceManager.on('listeningTimeout', (data) => {
-    if (data?.mode !== 'confirmation' || !assistant?.getStatus().awaitingConfirmation) {
-      return;
-    }
-
-    const result = assistant.expirePendingConfirmation('timeout', 'voice');
-    if (!result?.response) {
-      return;
-    }
-
-    if (chatWindow && chatWindow.webContents) {
-      chatWindow.webContents.send('voice:processed', {
-        transcript: '',
-        result
-      });
-    }
-
-    voiceManager.speak(result.response);
-  });
-
-  voiceManager.on('speechResult', async (data) => {
-    if (chatWindow && chatWindow.webContents) {
-      chatWindow.webContents.send('voice:result', data);
-    }
-    if (assistant && data.text) {
-      let result;
-      try {
-        result = await assistant.processVoiceInput(data.text);
-      } catch (error) {
-        const message = error?.message || String(error || 'Unknown voice processing error');
-        console.error('Voice command processing failed:', message);
-        result = {
-          success: false,
-          response: "I heard you, but I couldn't process that command.",
-          error: message
-        };
-      }
-      if (chatWindow && chatWindow.webContents) {
-        chatWindow.webContents.send('voice:processed', {
-          transcript: data.text,
-          result
-        });
-      }
-      if (result.requiresConfirmation) {
-        const timeoutMs = runtimeConfig?.voice?.conversationSilenceTimeoutMs
-          || runtimeConfig?.voice?.confirmationListenTimeoutMs
-          || 20000;
-        voiceManager.queueFollowUpListening({
-          mode: 'confirmation',
-          startSpeechTimeoutMs: timeoutMs,
-          maxDurationMs: timeoutMs
-        });
-      } else if (voiceManager.shouldContinueConversation()) {
-        voiceManager.queueFollowUpListening(voiceManager.getConversationListenOptions());
-      }
-      if (voiceManager && result.response) {
-        voiceManager.speak(result.response);
-      }
-    }
-  });
-
+  registerChatShortcut();
   console.log(`${runtimeConfig?.assistant?.displayName || 'JARVIS'} Assistant initialized`);
 }
 
 async function reloadRuntimeServices() {
   runtimeConfig = settingsService.buildRuntimeConfig();
 
-  if (voiceManager) {
-    voiceManager.destroy();
-    voiceManager = null;
+  if (textToSpeech) {
+    textToSpeech.destroy();
+    textToSpeech = null;
   }
 
   assistant = null;
   await initializeAssistant();
-
-  if (mainWindow) {
-    const orbConfig = runtimeConfig.orb || {};
-    mainWindow.setAlwaysOnTop(orbConfig.alwaysOnTop !== false);
-    if (orbConfig.defaultSize) {
-      mainWindow.setSize(orbConfig.defaultSize, orbConfig.defaultSize);
-    }
-  }
 
   if (tray) {
     tray.setToolTip(`${runtimeConfig?.assistant?.displayName || 'JARVIS'} Assistant`);
@@ -523,11 +271,7 @@ app.whenReady().then(async () => {
   settingsService = new SettingsService(BASE_CONFIG);
   runtimeConfig = settingsService.buildRuntimeConfig();
   eventBus = new AssistantEventBus();
-  uiState = new UIStateManager(eventBus);
-  bindUiState();
-  bindEventPipeline();
   setupIPC();
-  createOrbWindow();
   createTray();
   await initializeAssistant();
 
@@ -539,16 +283,16 @@ app.whenReady().then(async () => {
 });
 
 app.on('window-all-closed', () => {
-  // Keep running in tray
+  // Keep running in tray so Alt+Space can reopen chat.
 });
 
 app.on('activate', () => {
-  if (!mainWindow) createOrbWindow();
+  createChatWindow();
 });
 
 app.on('before-quit', () => {
-  unregisterActivationShortcut();
+  unregisterChatShortcut();
   globalShortcut.unregisterAll();
-  if (voiceManager) voiceManager.destroy();
+  if (textToSpeech) textToSpeech.destroy();
   if (tray) tray.destroy();
 });

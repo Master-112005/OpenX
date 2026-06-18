@@ -62,6 +62,27 @@ class WindowsSessionController {
     return this._applyWindowAction('minimize', windowName, options);
   }
 
+  minimizeAllWindows() {
+    const script = `
+$ErrorActionPreference = 'Stop'
+$shell = New-Object -ComObject Shell.Application
+$shell.MinimizeAll()
+`;
+
+    try {
+      this._runScript(script, 6000);
+      return {
+        success: true,
+        data: {
+          action: 'minimizeAll',
+          matchedWindow: 'all windows'
+        }
+      };
+    } catch (err) {
+      return { success: false, error: 'Unable to minimize all windows' };
+    }
+  }
+
   maximizeWindow(windowName, options = {}) {
     return this._applyWindowAction('maximize', windowName, options);
   }

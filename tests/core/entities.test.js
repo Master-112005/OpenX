@@ -206,6 +206,21 @@ describe('Entity Extractor', function() {
     assert.equal(entities.platform, 'whatsapp');
   });
 
+  it('should extract platform-first Indian English WhatsApp messages', function() {
+    const extractor = new EntityExtractor({});
+    const intent = {
+      entities: [
+        { name: 'contactName', type: 'string', required: true },
+        { name: 'messageText', type: 'string', required: true },
+        { name: 'platform', type: 'string', required: false }
+      ]
+    };
+    const entities = extractor.extract(intent, 'send on whatsapp to Rahul hello bro');
+    assert.equal(entities.contactName, 'Rahul');
+    assert.equal(entities.messageText, 'hello bro');
+    assert.equal(entities.platform, 'whatsapp');
+  });
+
   it('should extract file-send message details cleanly', function() {
     const extractor = new EntityExtractor({});
     const intent = {

@@ -178,6 +178,7 @@ class ActionRouter {
       this._resolveSmartFileIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitFileIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitFolderMoveIntent(rawCommandText, preparedInput) ||
+      this._resolveExplicitAlarmIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitTimerIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitMediaControlIntent(rawCommandText, preparedInput) ||
       this._resolveMediaUnderstandingIntent(rawCommandText, source) ||
@@ -201,8 +202,166 @@ class ActionRouter {
       this._resolveExplicitSearchIntent(rawCommandText, preparedInput) ||
       this._resolveBareKnowledgeSearchIntent(rawCommandText, preparedInput) ||
       this._resolveGeneralQuestionSearchIntent(rawCommandText, preparedInput) ||
+      this._resolveSemanticFrameIntent(rawCommandText, preparedInput) ||
       this._matchIntent(preparedInput)
     );
+  }
+
+  _resolveSemanticFrameIntent(rawText, preparedInput = {}) {
+    const frame = preparedInput.semanticFrame || {};
+    const corrected = String(preparedInput.correctedText || rawText || '').trim().toLowerCase();
+    const raw = String(rawText || corrected || '').trim();
+    const action = frame.actionVerb || '';
+    const domain = frame.domain || 'unknown';
+    const targetText = String(frame.targetText || '').trim();
+    const value = Number.isFinite(Number(frame.value)) ? Math.max(0, Math.min(100, Number(frame.value))) : null;
+
+    if (!corrected || frame.questionWord) {
+      return null;
+    }
+
+    const utility = this._resolveSemanticUtilityIntent(action, domain, value);
+    if (utility) {
+      return utility;
+    }
+
+    const window = this._resolveSemanticWindowIntent(action, domain, targetText, raw, corrected);
+    if (window) {
+      return window;
+    }
+
+    const local = this._resolveSemanticLocalFileIntent(action, domain, raw, corrected, preparedInput);
+    if (local) {
+      return local;
+    }
+
+    const app = this._resolveSemanticAppIntent(action, domain, targetText, raw);
+    if (app) {
+      return app;
+    }
+
+    return null;
+  }
+
+  _resolveSemanticUtilityIntent(action, domain, value) {
+    const isVolume = domain === 'volume';
+    const isBrightness = domain === 'brightness';
+    if (!isVolume && !isBrightness) {
+      return null;
+    }
+
+    const prefix = isVolume ? 'volume' : 'brightness';
+    let intentId = '';
+    if (action === 'set' && value !== null) {
+      intentId = `${prefix}.set`;
+    } else if (['increase', 'raise'].includes(action)) {
+      intentId = `${prefix}.up`;
+    } else if (['decrease', 'lower'].includes(action)) {
+      intentId = `${prefix}.down`;
+    } else if (isVolume && action === 'mute') {
+      intentId = 'volume.mute';
+    } else if (isVolume && action === 'unmute') {
+      intentId = 'volume.unmute';
+    }
+
+    const intent = intentId ? this.intentRegistry.get(intentId) : null;
+    if (!intent) {
+      return null;
+    }
+
+    return value !== null && intentId.endsWith('.set')
+      ? { intent, confidence: 0.94, entities: { value } }
+      : { intent, confidence: 0.9 };
+  }
+
+  _resolveSemanticWindowIntent(action, domain, targetText, rawText, correctedText) {
+    if (domain !== 'window' && !['maximize', 'minimize'].includes(action)) {
+      return null;
+    }
+
+    const wantsMaximize = action === 'maximize' || /\b(?:fullscreen|maximize|bigger|larger)\b/.test(correctedText);
+    const wantsMinimize = action === 'minimize' || /\b(?:minimize|smaller|hide|hidden)\b/.test(correctedText);
+    const intentId = wantsMaximize ? 'window.maximize' : wantsMinimize ? 'window.minimize' : '';
+    const intent = intentId ? this.intentRegistry.get(intentId) : null;
+    if (!intent) {
+      return null;
+    }
+
+    const extracted = this.entityExtractor.extract(intent, rawText);
+    const correctedEntities = this.entityExtractor.extract(intent, correctedText);
+    const windowName = extracted.windowName || correctedEntities.windowName || targetText;
+    return {
+      intent,
+      confidence: 0.94,
+      entities: windowName ? { windowName } : {}
+    };
+  }
+
+  _resolveSemanticLocalFileIntent(action, domain, rawText, correctedText, preparedInput = {}) {
+    if (domain !== 'local-file') {
+      return null;
+    }
+
+    const input = `${correctedText} ${rawText}`.toLowerCase();
+    if (!/\b(?:file|files|folder|folders|directory|directories|desktop|downloads|documents|pictures|pdf|pdfs|image|images|photo|photos)\b/.test(input)) {
+      return null;
+    }
+
+    const isList = /^(?:show|list|tell|display)\b/.test(correctedText) ||
+      /\b(?:what|which)\b.*\b(?:files|folders|items|contents)\b/.test(input);
+    const isSearch = ['search', 'find'].includes(action) || /\b(?:look|find|search|locate)\b/.test(correctedText);
+    const intentId = isList ? 'file.list' : isSearch ? 'file.search' : '';
+    const intent = intentId ? this.intentRegistry.get(intentId) : null;
+    if (!intent) {
+      return null;
+    }
+
+    if (intentId === 'file.list') {
+      const path = preparedInput.query?.localLocation || this._extractLocalListLocation(rawText, correctedText);
+      return { intent, confidence: 0.92, entities: path ? { path } : {} };
+    }
+
+    const extractedQuery = this._extractLocalFileSearchQuery(rawText, correctedText);
+    const requestedType = preparedInput.query?.requestedFileType || '';
+    const noisyLocalQuery = /^(?:look|search|find)\b|\b(?:inside|in|on|from|downloads?|documents?|desktop|pictures?|folders?)\b/.test(extractedQuery);
+    const query = requestedType && (!extractedQuery || noisyLocalQuery)
+      ? requestedType
+      : extractedQuery;
+    return query
+      ? { intent, confidence: 0.92, entities: { query } }
+      : null;
+  }
+
+  _resolveSemanticAppIntent(action, domain, targetText, rawText) {
+    if (domain !== 'app' || !targetText) {
+      return null;
+    }
+
+    const intentMap = {
+      open: 'app.open',
+      launch: 'app.open',
+      start: 'app.open',
+      run: 'app.open',
+      close: 'app.close',
+      switch: 'app.switch',
+      focus: 'app.switch'
+    };
+    const intentId = intentMap[action];
+    const intent = intentId ? this.intentRegistry.get(intentId) : null;
+    if (!intent) {
+      return null;
+    }
+
+    const extracted = this.entityExtractor.extract(intent, rawText);
+    if (!extracted.appName) {
+      return null;
+    }
+
+    return {
+      intent,
+      confidence: 0.9,
+      entities: { appName: extracted.appName }
+    };
   }
 
   _isIncompleteCommand(rawCommandText, preparedInput = {}) {
@@ -984,14 +1143,31 @@ class ActionRouter {
     if (/\bminimize\b/.test(correctedText)) {
       const intent = this.intentRegistry.get('window.minimize');
       if (intent) {
-        return { intent, confidence: 1 };
+        if (/\b(?:all|everything)\s+(?:windows?|apps?|applications?)\b|\b(?:windows?|apps?|applications?)\s+(?:all|everything)\b/.test(correctedText)) {
+          return {
+            intent,
+            confidence: 1,
+            entities: { windowName: 'all windows', allWindows: true }
+          };
+        }
+        const target = preparedInput?.semanticFrame?.targetText || '';
+        return {
+          intent,
+          confidence: 1,
+          entities: target ? { windowName: target } : undefined
+        };
       }
     }
 
     if (/\b(?:maximize|fullscreen)\b/.test(correctedText)) {
       const intent = this.intentRegistry.get('window.maximize');
       if (intent) {
-        return { intent, confidence: 1 };
+        const target = preparedInput?.semanticFrame?.targetText || '';
+        return {
+          intent,
+          confidence: 1,
+          entities: target ? { windowName: target } : undefined
+        };
       }
     }
 
@@ -2044,7 +2220,7 @@ class ActionRouter {
 
   _resolveExplicitReminderIntent(rawText, preparedInput) {
     const input = String(preparedInput?.correctedText || rawText || '').trim();
-    if (!/^remind\b/i.test(input)) {
+    if (!/^(?:remind|set\s+(?:a\s+)?reminder|create\s+(?:a\s+)?reminder|add\s+(?:a\s+)?reminder)\b/i.test(input)) {
       return null;
     }
 
@@ -2054,25 +2230,68 @@ class ActionRouter {
     }
 
     const entities = this.entityExtractor.extract(intent, rawText);
+    const correctedEntities = this.entityExtractor.extract(intent, input);
+    if (!entities.timeExpression && correctedEntities.timeExpression) {
+      entities.timeExpression = correctedEntities.timeExpression;
+    }
+    if (!entities.duration && correctedEntities.duration) {
+      entities.duration = correctedEntities.duration;
+    }
+    if (!entities.reminderText && correctedEntities.reminderText) {
+      entities.reminderText = correctedEntities.reminderText;
+    }
     if (!entities.reminderText) {
       const fallbackText = input
-        .replace(/^remind(?:\s+me)?\s+(?:to\s+)?/i, '')
+        .replace(/^(?:remind(?:\s+me)?|set\s+(?:a\s+)?reminder|create\s+(?:a\s+)?reminder|add\s+(?:a\s+)?reminder)\s+(?:to\s+)?/i, '')
+        .replace(/^(?:at|for|in)\s+\d{1,2}(?:(?::|\s+)\d{2})?\s*(?:am|pm)?(?:\s+(?:today|tomorrow))?\s*/i, '')
         .trim();
-      if (fallbackText && !/^(?:me|myself)$/i.test(fallbackText)) {
+      if (fallbackText && !/^(?:me|myself|today|tomorrow|am|pm)$/i.test(fallbackText)) {
         entities.reminderText = fallbackText;
       }
     }
 
-    return entities.reminderText
-      ? { intent, confidence: 1, entities }
-      : null;
+    if (entities.reminderText || entities.timeExpression || entities.duration) {
+      return { intent, confidence: 1, entities };
+    }
+
+    return null;
+  }
+
+  _resolveExplicitAlarmIntent(rawText, preparedInput) {
+    const corrected = String(preparedInput?.correctedText || rawText || '').trim();
+    const raw = String(rawText || corrected || '').trim();
+    const combined = `${raw} ${corrected}`.toLowerCase().replace(/\s+/g, ' ').trim();
+    if (!/\b(?:set|start|create|run)\b.*\balarm\b|\balarm\b.*\b(?:for|at)\s+\d|\bwake\s+me\b/.test(combined)) {
+      return null;
+    }
+
+    const intent = this.intentRegistry.get('alarm.set');
+    if (!intent) {
+      return null;
+    }
+
+    const entities = this.entityExtractor.extract(intent, raw);
+    if (entities.timeExpression) {
+      return { intent, confidence: 1, entities };
+    }
+
+    const timeExprMatch = raw.match(/\bat\s+(\d{1,2}(?::\d{2})?\s*(?:am|pm)?(?:\s+(?:today|tomorrow))?)\b/i);
+    if (timeExprMatch?.[1]) {
+      return {
+        intent,
+        confidence: 0.95,
+        entities: { timeExpression: timeExprMatch[1].replace(/\s+/g, ' ').trim() }
+      };
+    }
+
+    return null;
   }
 
 _resolveExplicitTimerIntent(rawText, preparedInput) {
     const corrected = String(preparedInput?.correctedText || rawText || '').trim();
     const raw = String(rawText || corrected || '').trim();
     const combined = `${raw} ${corrected}`.toLowerCase().replace(/\s+/g, ' ').trim();
-    if (!/\b(?:set|start|create|run)\b.*\btimers?\b|\btimers?\b.*\b(?:for|of|at)\s+\d|\b(?:set|start|create|run)\b.*\balarm\b|\balarm\b.*\b(?:for|at)\s+\d/.test(combined)) {
+    if (!/\b(?:set|start|create|run)\b.*\btimers?\b|\btimers?\b.*\b(?:for|of|at)\s+\d/.test(combined)) {
       return null;
     }
 
@@ -2585,7 +2804,7 @@ _resolveExplicitTimerIntent(rawText, preparedInput) {
       return '';
     }
 
-    const match = text.match(/^(?:could\s+you\s+please\s+|can\s+you\s+please\s+|please\s+)?(?:search\s+for|search\s+the\s+web\s+for|search\s+web\s+for|search\s+web|search|google|look\s+up|find\s+on\s+web)\s+(.+)$/i);
+    const match = text.match(/^(?:could\s+you\s+please\s+|can\s+you\s+please\s+|please\s+)?(?:search\s+for|search\s+the\s+web\s+for|search\s+web\s+for|search\s+web|search|google|look\s+up|find\s+on\s+web|tell\s+(?:me\s+)?about|give\s+me\s+details\s+(?:about|of))\s+(.+)$/i);
     if (!match?.[1]) {
       return '';
     }

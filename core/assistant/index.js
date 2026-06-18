@@ -157,6 +157,7 @@ class Assistant extends EventEmitter {
           commandId: result.commandId,
           intentId: result.intent,
           entities: { ...(result.entities || {}) },
+          originalInput: input,
           source
         };
       } else if (result.needsClarification) {
@@ -461,7 +462,7 @@ class Assistant extends EventEmitter {
 
     if (intent === 'app.close' && appName) {
       const recentOpen = this.context.findRecent(
-        entry => entry?.success && entry?.intent === 'app.open' && entry?.entities?.appName?.toLowerCase() === appName.toLowerCase(),
+        entry => entry?.success && !entry?.requiresConfirmation && entry?.intent === 'app.open' && entry?.entities?.appName?.toLowerCase() === appName.toLowerCase(),
         10
       );
       if (recentOpen) {
@@ -475,18 +476,6 @@ class Assistant extends EventEmitter {
       if (loweredError.includes('could not close')) {
         return this.personality.applyToResponse(
           `I could not close ${appName}, sir. It may not be running, or Windows rejected the request. Would you like me to try opening it first?`
-        );
-      }
-    }
-
-    if (intent === 'app.open' && appName) {
-      const recentClose = this.context.findRecent(
-        entry => entry?.success && entry?.intent === 'app.close' && entry?.entities?.appName?.toLowerCase() === appName.toLowerCase(),
-        10
-      );
-      if (recentClose) {
-        return this.personality.applyToResponse(
-          `I closed ${appName} for you a moment ago, sir. I can open it again if you like.`
         );
       }
     }
@@ -806,7 +795,7 @@ class Assistant extends EventEmitter {
     return this.context.getHistory(8)
       .slice()
       .reverse()
-      .find(entry => entry && entry.success === false && entry.input && entry.intent);
+      .find(entry => entry && entry.success === false && entry.input);
   }
 
   _getLastActionableLearningTarget() {
@@ -846,6 +835,7 @@ class Assistant extends EventEmitter {
         pending.entities
       );
       const response = this.personality.applyToResponse(result.response || '');
+      this.context.record(pending.originalInput || input, result.entities || {}, result);
       return {
         ...result,
         response,
@@ -1235,6 +1225,9 @@ class Assistant extends EventEmitter {
     ];
 
     for (const entry of history) {
+      if (entry?.requiresConfirmation || entry?.needsClarification) {
+        continue;
+      }
       const entities = entry?.entities || {};
       for (const key of keys) {
         const value = String(entities[key] || '').trim();
