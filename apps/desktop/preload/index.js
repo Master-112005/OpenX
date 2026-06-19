@@ -44,6 +44,9 @@ contextBridge.exposeInMainWorld('jarvis', {
     ipcRenderer.invoke('app:quit'),
 
   onSettingsChanged: (callback) => {
+    if (typeof callback !== 'function') {
+      throw new TypeError('Settings listener must be a function');
+    }
     const handler = (_event, data) => callback(data);
     ipcRenderer.on('settings:changed', handler);
     return () => ipcRenderer.removeListener('settings:changed', handler);

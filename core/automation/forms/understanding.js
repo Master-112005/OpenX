@@ -32,7 +32,7 @@ const FIELD_TYPE_PATTERNS = {
 
 class FormUnderstanding {
   constructor(config = {}) {
-    this.logger = new Logger({ level: config?.logging?.level || 'info' });
+    this.logger = new Logger(config?.logging || { level: 'info' });
     this.config = config;
   }
 

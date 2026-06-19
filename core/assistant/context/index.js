@@ -3,6 +3,8 @@ const Logger = require('../../shared/index').Logger;
 const MAX_HISTORY = 100;
 const MAX_CONTEXT_AGE_MS = 2 * 60 * 60 * 1000;
 const MAX_TOPIC_MEMORY = 40;
+const MAX_USER_PREFERENCES = 50;
+const MAX_USER_FACTS = 100;
 const TOPIC_STOP_WORDS = new Set([
   'a', 'an', 'and', 'are', 'as', 'at', 'be', 'but', 'by', 'can', 'could',
   'did', 'do', 'does', 'for', 'from', 'give', 'go', 'had', 'has', 'have',
@@ -40,12 +42,14 @@ function compactSentence(value, maxLength = 160) {
 
 class ContextManager {
   constructor(config) {
-    this.logger = new Logger({ level: config?.logging?.level || 'info' });
+    this.logger = new Logger(config?.logging || { level: 'info' });
     this.history = [];
     this.sessionData = new Map();
     this.maxHistory = config?.chat?.maxHistory || MAX_HISTORY;
     this.maxContextAgeMs = Number(config?.chat?.maxContextAgeMs || MAX_CONTEXT_AGE_MS);
     this.maxTopicMemory = Number(config?.chat?.maxTopicMemory || MAX_TOPIC_MEMORY);
+    this.maxUserPreferences = Number(config?.chat?.maxUserPreferences || MAX_USER_PREFERENCES);
+    this.maxUserFacts = Number(config?.chat?.maxUserFacts || MAX_USER_FACTS);
     this.lastInteraction = null;
     this.userPreferences = new Map();
     this.userFacts = new Map();
@@ -125,6 +129,7 @@ class ContextManager {
       timestamp: Date.now(),
       count: (this.userPreferences.get(key)?.count || 0) + 1
     });
+    this._trimMapByTimestamp(this.userPreferences, this.maxUserPreferences);
   }
 
   getUserPreference(key) {
@@ -142,6 +147,7 @@ class ContextManager {
       value,
       timestamp: Date.now()
     });
+    this._trimMapByTimestamp(this.userFacts, this.maxUserFacts);
   }
 
   getUserFact(key) {
@@ -197,6 +203,16 @@ class ContextManager {
 
   clearSession() {
     this.sessionData.clear();
+  }
+
+  destroy() {
+    this.history = [];
+    this.sessionData.clear();
+    this.userPreferences.clear();
+    this.userFacts.clear();
+    this.pendingTasks = [];
+    this.topicMemory.clear();
+    this.lastInteraction = null;
   }
 
   getLastInteractionTime() {
@@ -388,7 +404,26 @@ class ContextManager {
         this.topicMemory.delete(key);
       }
     }
+    this._trimMapByTimestamp(this.userPreferences, this.maxUserPreferences);
+    this._trimMapByTimestamp(this.userFacts, this.maxUserFacts);
     this._trimTopicMemory();
+  }
+
+  _trimMapByTimestamp(map, maxSize) {
+    if (!(map instanceof Map) || !Number.isFinite(maxSize) || maxSize <= 0 || map.size <= maxSize) {
+      return;
+    }
+
+    const keep = new Set(Array.from(map.entries())
+      .sort((a, b) => Number(b[1]?.timestamp || 0) - Number(a[1]?.timestamp || 0))
+      .slice(0, maxSize)
+      .map(([key]) => key));
+
+    for (const key of map.keys()) {
+      if (!keep.has(key)) {
+        map.delete(key);
+      }
+    }
   }
 
   _updateTopicMemory(entry) {

@@ -1,26 +1,54 @@
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const { AssistantEventBus, EVENTS } = require('./events');
+const { buildDataPaths } = require('./data-root');
+
+const DEFAULT_MAX_LOG_SIZE = 10 * 1024 * 1024;
+const DEFAULT_MAX_LOG_FILES = 5;
+const SENSITIVE_KEY_PATTERN = /(?:password|passcode|token|secret|authorization|cookie|credential|api[_-]?key)/i;
+
+function dateStamp(date = new Date()) {
+  return date.toISOString().slice(0, 10);
+}
+
+function ensureDirectory(dir) {
+  if (!dir || fs.existsSync(dir)) return;
+  fs.mkdirSync(dir, { recursive: true });
+}
 
 class Logger {
   constructor(config) {
     this.level = config?.level || 'info';
     this.levels = { error: 0, warn: 1, info: 2, debug: 3 };
+    const configuredDirectory = config?.directory || config?.logsDir || process.env.OPENX_LOG_DIR;
+    this.directory = configuredDirectory || buildDataPaths(config).logsDir;
+    this.maxFileSize = Number(config?.maxFileSize || DEFAULT_MAX_LOG_SIZE);
+    this.maxFiles = Number(config?.maxFiles || DEFAULT_MAX_LOG_FILES);
+    this.console = config?.console !== false;
+    this.file = config?.file === true || (config?.file !== false && Boolean(configuredDirectory));
+    this.lastCleanupByType = new Map();
+    this.rotationSequence = 0;
   }
 
   _log(level, message, data) {
     if (this.levels[level] > this.levels[this.level]) return;
-    const suffix = this._formatData(data);
+    const redactedData = this._redact(data || null);
+    const suffix = this._formatData(redactedData);
     const entry = {
       timestamp: new Date().toISOString(),
       level,
       message,
-      data: data || null
+      data: redactedData
     };
-    if (level === 'error') {
-      console.error(`[${entry.timestamp}] [${level.toUpperCase()}] ${message}${suffix}`);
-    } else {
-      console.log(`[${entry.timestamp}] [${level.toUpperCase()}] ${message}${suffix}`);
+    if (this.console) {
+      if (level === 'error') {
+        console.error(`[${entry.timestamp}] [${level.toUpperCase()}] ${message}${suffix}`);
+      } else {
+        console.log(`[${entry.timestamp}] [${level.toUpperCase()}] ${message}${suffix}`);
+      }
     }
+    this._writeEntry(level === 'error' ? 'error' : 'app', entry);
   }
 
   _formatData(data) {
@@ -40,6 +68,113 @@ class Logger {
       return ` ${compact.length > 400 ? `${compact.slice(0, 397)}...` : compact}`;
     } catch (error) {
       return ` ${String(data)}`;
+    }
+  }
+
+  _redact(value, depth = 0) {
+    if (value === null || value === undefined) return value;
+    if (depth > 6) return '[MaxDepth]';
+    if (value instanceof Error) {
+      return {
+        name: value.name,
+        message: value.message,
+        stack: typeof value.stack === 'string' ? value.stack.slice(0, 4000) : null
+      };
+    }
+    if (Array.isArray(value)) {
+      return value.slice(0, 50).map(item => this._redact(item, depth + 1));
+    }
+    if (typeof value === 'object') {
+      const output = {};
+      for (const [key, child] of Object.entries(value)) {
+        output[key] = SENSITIVE_KEY_PATTERN.test(key)
+          ? '[REDACTED]'
+          : this._redact(child, depth + 1);
+      }
+      return output;
+    }
+    if (typeof value === 'string' && value.length > 2000) {
+      return `${value.slice(0, 2000)}...[truncated]`;
+    }
+    return value;
+  }
+
+  _writeEntry(type, entry) {
+    if (!this.file || !this.directory) return;
+    try {
+      ensureDirectory(this.directory);
+      const logPath = path.join(this.directory, `${type}-${dateStamp()}.log`);
+      const rotated = this._rotateIfNeeded(logPath, type);
+      fs.appendFileSync(logPath, `${JSON.stringify(entry)}\n`, 'utf8');
+      this._cleanupOldLogs(type, rotated);
+    } catch (_) {
+      // Logging must never break assistant execution.
+    }
+  }
+
+  _rotateIfNeeded(logPath, type) {
+    if (!fs.existsSync(logPath)) return false;
+    const maxFileSize = Number.isFinite(this.maxFileSize) && this.maxFileSize > 0
+      ? this.maxFileSize
+      : DEFAULT_MAX_LOG_SIZE;
+    const stats = fs.statSync(logPath);
+    if (stats.size < maxFileSize) return false;
+
+    let rotatedPath;
+    do {
+      rotatedPath = path.join(
+        this.directory,
+        `${type}-${dateStamp()}-${Date.now()}-${this.rotationSequence++}.log`
+      );
+    } while (fs.existsSync(rotatedPath));
+    fs.renameSync(logPath, rotatedPath);
+    return true;
+  }
+
+  _cleanupOldLogs(type, force = false) {
+    const today = dateStamp();
+    if (!force && this.lastCleanupByType.get(type) === today) return;
+    this.lastCleanupByType.set(type, today);
+
+    const maxFiles = Number.isFinite(this.maxFiles) && this.maxFiles > 0
+      ? this.maxFiles
+      : DEFAULT_MAX_LOG_FILES;
+    const prefix = `${type}-`;
+    const files = fs.readdirSync(this.directory)
+      .filter(name => name.startsWith(prefix) && name.endsWith('.log'))
+      .map(name => {
+        const filePath = path.join(this.directory, name);
+        const stats = fs.statSync(filePath);
+        return { filePath, mtimeMs: stats.mtimeMs };
+      })
+      .sort((left, right) => right.mtimeMs - left.mtimeMs);
+
+    for (const stale of files.slice(maxFiles)) {
+      try {
+        fs.unlinkSync(stale.filePath);
+      } catch (_) {
+        // Ignore locked files; the next cleanup pass can retry.
+      }
+    }
+  }
+
+  static writeCrashSync(error, context = {}, config = {}) {
+    const logger = new Logger({ ...config, console: false });
+    try {
+      ensureDirectory(logger.directory);
+      const payload = {
+        timestamp: new Date().toISOString(),
+        level: 'crash',
+        message: error?.message || String(error || 'Unknown crash'),
+        stack: error?.stack || null,
+        context: logger._redact(context)
+      };
+      const logPath = path.join(logger.directory, `crash-${dateStamp()}.log`);
+      const rotated = logger._rotateIfNeeded(logPath, 'crash');
+      fs.appendFileSync(logPath, `${JSON.stringify(payload)}\n`, 'utf8');
+      logger._cleanupOldLogs('crash', rotated);
+    } catch (_) {
+      // Last-resort crash logging cannot throw.
     }
   }
 

@@ -138,7 +138,7 @@ function parseBoolean(output) {
 
 class VolumeController {
   constructor(config) {
-    this.logger = new Logger({ level: config?.logging?.level || 'info' });
+    this.logger = new Logger(config?.logging || { level: 'info' });
     this.step = config?.system?.volumeStep || 5;
     this.lastKnownVolume = 50;
     this.lastSetAt = 0;

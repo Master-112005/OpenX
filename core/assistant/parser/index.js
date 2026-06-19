@@ -4,7 +4,7 @@ const { stripLeadIns } = require('../nlp/preprocessor');
 
 class InputParser {
   constructor(config) {
-    this.logger = new Logger({ level: config?.logging?.level || 'info' });
+    this.logger = new Logger(config?.logging || { level: 'info' });
   }
 
   parse(text) {

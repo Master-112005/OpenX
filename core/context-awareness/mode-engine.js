@@ -155,7 +155,7 @@ const DEFAULT_SCORES = Object.freeze({
 
 class ModeEngine {
   constructor(options = {}) {
-    this.logger = options.logger || new Logger({ level: options.logging?.level || 'info' });
+    this.logger = options.logger || new Logger(options.logging || { level: 'info' });
     this.signals = options.signals || signals;
     this.contextEngine = options.contextEngine || contextEngineModule.createEngine(options);
     this.now = options.now || (() => Date.now());

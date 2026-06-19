@@ -190,6 +190,13 @@ const RESPONSE_BUILDERS = {
     },
     'app.open': context => {
       const name = valueFromContext(context, 'appName');
+      const launchMethod = valueFromContext(context, 'launchMethod');
+      const matchedWindow = valueFromContext(context, 'matchedWindow');
+      if (launchMethod === 'focus-existing') {
+        return matchedWindow
+          ? `${matchedWindow} was already open, so I brought it to the foreground.`
+          : `${name} was already open, so I brought it to the foreground.`;
+      }
       return chooseVariant(`app.open:${name}`, [
         `Opening ${name} for you now.`,
         `${name} will launch shortly.`,
@@ -198,6 +205,10 @@ const RESPONSE_BUILDERS = {
     },
     'app.close': context => {
       const name = valueFromContext(context, 'appName');
+      const closedCount = Number(valueFromContext(context, 'closedCount', 0));
+      if (closedCount > 1) {
+        return `Closed ${closedCount} ${name} windows as requested.`;
+      }
       return chooseVariant(`app.close:${name}`, [
         `${name} has been closed as requested.`,
         `Closing ${name} now.`,

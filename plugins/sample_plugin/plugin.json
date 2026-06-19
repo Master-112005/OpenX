@@ -4,13 +4,14 @@
   "version": "1.0.0",
   "description": "Example plugin showing the JARVIS plugin API",
   "author": "",
+  "trusted": true,
   "permissions": ["low"],
   "intents": [
     {
-      "id": "sample.hello",
+      "id": "plugin.sample_plugin.hello",
       "patterns": ["say hello", "hello plugin", "plugin test"],
       "permissionLevel": "low",
-      "action": "sample.hello",
+      "action": "plugin.sample_plugin.hello",
       "entities": []
     }
   ]

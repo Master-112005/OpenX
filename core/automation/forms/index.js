@@ -60,7 +60,7 @@ const TYPE_TO_FACT_KEY = {
 
 class FormAutomation {
   constructor(config = {}, dependencies = {}) {
-    this.logger = new Logger({ level: config?.logging?.level || 'info' });
+    this.logger = new Logger(config?.logging || { level: 'info' });
     this.config = config;
     this.formUnderstanding = new FormUnderstanding(config);
     this.learningStore = dependencies.learning || null;

@@ -277,24 +277,31 @@ describe('Automation Engine', function() {
 
   it('should attach validation and verification evidence to file actions', async function() {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-verify-'));
+    const originalUserProfile = process.env.USERPROFILE;
+    process.env.USERPROFILE = tmpDir;
     const engine = new AutomationEngine({});
 
-    const result = await engine.execute('file.create', {
-      filename: 'verified.txt',
-      path: tmpDir
-    });
+    try {
+      const result = await engine.execute('file.create', {
+        filename: 'verified.txt',
+        path: tmpDir
+      });
 
-    assert.equal(result.success, true);
-    assert.equal(result.validation.status, 'passed');
-    assert.equal(result.verification.status, 'passed');
-    assert.equal(result.verification.check, 'file-exists');
-    assert.equal(fs.existsSync(path.join(tmpDir, 'verified.txt')), true);
-
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+      assert.equal(result.success, true);
+      assert.equal(result.validation.status, 'passed');
+      assert.equal(result.verification.status, 'passed');
+      assert.equal(result.verification.check, 'file-exists');
+      assert.equal(fs.existsSync(path.join(tmpDir, 'verified.txt')), true);
+    } finally {
+      process.env.USERPROFILE = originalUserProfile;
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 
   it('should execute smart file discovery by type, recency, and size', async function() {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-smart-find-'));
+    const originalUserProfile = process.env.USERPROFILE;
+    process.env.USERPROFILE = tempDir;
     const oldFile = path.join(tempDir, 'old-notes.txt');
     const pdfFile = path.join(tempDir, 'resume.pdf');
     const largeFile = path.join(tempDir, 'large.bin');
@@ -304,30 +311,33 @@ describe('Automation Engine', function() {
     const oldDate = new Date(Date.now() - 220 * 24 * 60 * 60 * 1000);
     fs.utimesSync(oldFile, oldDate, oldDate);
 
-    const engine = new AutomationEngine({});
-    const pdf = await engine.execute('file.smartFind', {
-      location: tempDir,
-      fileType: 'pdf',
-      sortBy: 'modifiedDesc'
-    });
-    const large = await engine.execute('file.smartFind', {
-      location: tempDir,
-      sortBy: 'sizeDesc'
-    });
-    const stale = await engine.execute('file.smartFind', {
-      location: tempDir,
-      timeFilter: 'olderThan6MonthsAccess',
-      sortBy: 'accessedAsc'
-    });
+    try {
+      const engine = new AutomationEngine({});
+      const pdf = await engine.execute('file.smartFind', {
+        location: tempDir,
+        fileType: 'pdf',
+        sortBy: 'modifiedDesc'
+      });
+      const large = await engine.execute('file.smartFind', {
+        location: tempDir,
+        sortBy: 'sizeDesc'
+      });
+      const stale = await engine.execute('file.smartFind', {
+        location: tempDir,
+        timeFilter: 'olderThan6MonthsAccess',
+        sortBy: 'accessedAsc'
+      });
 
-    assert.equal(pdf.success, true);
-    assert.equal(pdf.data.entries[0].name, 'resume.pdf');
-    assert.equal(large.success, true);
-    assert.equal(large.data.entries[0].name, 'large.bin');
-    assert.equal(stale.success, true);
-    assert.equal(stale.data.entries[0].name, 'old-notes.txt');
-
-    fs.rmSync(tempDir, { recursive: true, force: true });
+      assert.equal(pdf.success, true);
+      assert.equal(pdf.data.entries[0].name, 'resume.pdf');
+      assert.equal(large.success, true);
+      assert.equal(large.data.entries[0].name, 'large.bin');
+      assert.equal(stale.success, true);
+      assert.equal(stale.data.entries[0].name, 'old-notes.txt');
+    } finally {
+      process.env.USERPROFILE = originalUserProfile;
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
   });
 
   it('should fail a successful action result when postcondition verification fails', async function() {
@@ -351,9 +361,7 @@ describe('Automation Engine', function() {
 
   it('should verify app close results against visible windows', async function() {
     const engine = new AutomationEngine({});
-    engine.windows.listWindows = () => [];
-    engine.apps._resolveProcessCandidates = () => ['chrome'];
-    engine.apps._findRunningProcesses = () => [];
+    engine.apps.waitForAppClosed = appName => appName === 'chrome';
 
     const result = await engine.verifier.verify('app.close', { appName: 'chrome' }, {
       success: true,
@@ -367,16 +375,7 @@ describe('Automation Engine', function() {
 
   it('should not fail browser close verification for background processes after windows close', async function() {
     const engine = new AutomationEngine({});
-    engine.windows.listWindows = () => [];
-    engine.apps._resolveProcessCandidates = () => ['chrome'];
-    engine.apps._findRunningProcesses = () => [
-      {
-        Id: 201,
-        ProcessName: 'chrome',
-        MainWindowTitle: '',
-        MainWindowHandle: 0
-      }
-    ];
+    engine.apps.waitForAppClosed = () => true;
 
     const result = await engine.verifier.verify('app.close', { appName: 'chrome' }, {
       success: true,
@@ -386,6 +385,37 @@ describe('Automation Engine', function() {
     assert.equal(result.success, true);
     assert.equal(result.verification.status, 'passed');
     assert.equal(result.verification.check, 'app-closed');
+  });
+
+  it('should fail app close verification while a matching visible app remains', async function() {
+    const engine = new AutomationEngine({});
+    engine.apps.waitForAppClosed = () => false;
+
+    const result = await engine.verifier.verify('app.close', { appName: 'instagram' }, {
+      success: true,
+      data: { app: 'instagram', closeMethod: 'window' }
+    });
+
+    assert.equal(result.success, false);
+    assert.equal(result.verification.status, 'failed');
+    assert.match(result.error, /instagram still appears to be open/);
+  });
+
+  it('should verify app launch after a matching window appears', async function() {
+    const engine = new AutomationEngine({});
+    engine.apps.waitForVisibleApp = appName => ({
+      ProcessName: appName,
+      MainWindowTitle: 'Instagram'
+    });
+
+    const result = await engine.verifier.verify('app.open', { appName: 'instagram' }, {
+      success: true,
+      data: { app: 'instagram', launchMethod: 'start-menu' }
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(result.verification.status, 'passed');
+    assert.equal(result.verification.check, 'app-open');
   });
 
   it('should execute expanded local calculation forms', async function() {

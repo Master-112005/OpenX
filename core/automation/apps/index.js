@@ -69,19 +69,35 @@ const SPECIAL_LAUNCHERS = {
 
 const BROWSER_APP_NAMES = new Set(['chrome', 'msedge', 'edge', 'firefox']);
 const COMMAND_FIRST_APPS = new Set(['chrome', 'msedge', 'edge', 'firefox']);
-const PROTECTED_BROWSER_TITLE_TOKENS = [
-  'youtube',
-  'spotify',
-  'soundcloud',
-  'gaana',
-  'jiosaavn',
-  'amazon music',
-  'apple music'
-];
+
+const APP_ALIASES = new Map([
+  ['google chrome', 'chrome'],
+  ['chrome browser', 'chrome'],
+  ['microsoft edge', 'edge'],
+  ['edge browser', 'edge'],
+  ['mozilla firefox', 'firefox'],
+  ['firefox browser', 'firefox'],
+  ['visual studio code', 'code'],
+  ['vs code', 'code'],
+  ['vscode', 'code'],
+  ['calculator', 'calc'],
+  ['paint', 'mspaint'],
+  ['instagram app', 'instagram'],
+  ['instgram', 'instagram']
+]);
+
+const PROTECTED_HOST_PROCESSES = new Set([
+  'applicationframehost',
+  'dwm',
+  'explorer',
+  'shellexperiencehost',
+  'startmenuexperiencehost'
+]);
 
 class AppController {
   constructor(config) {
-    this.logger = new Logger({ level: config?.logging?.level || 'info' });
+    this.config = config || {};
+    this.logger = new Logger(config?.logging || { level: 'info' });
     this.windowSession = new WindowsSessionController(config);
     this._startAppsCache = null;
     this._startAppsCacheExpiresAt = 0;
@@ -92,21 +108,27 @@ class AppController {
       return { success: false, error: 'No application name provided' };
     }
 
-    const name = appName.toLowerCase().trim();
+    const name = this._normalizeAppName(appName);
     const app = KNOWN_APPS[name];
 
     try {
       if (!options.forceNewWindow && !options.skipAlreadyOpenCheck) {
-        const alreadyOpen = this._buildAlreadyOpenClarification(name);
-        if (alreadyOpen) {
-          return alreadyOpen;
+        const existingTarget = this.findVisibleApp(name, { allowWindowFallback: false });
+        if (existingTarget) {
+          const focused = this._focusExistingApp(name, existingTarget);
+          if (focused) {
+            return focused;
+          }
         }
       }
 
       if (app && app.path) {
         if (require('fs').existsSync(app.path)) {
           launchTarget(app.path);
-          return { success: true, data: { app: name } };
+          return {
+            success: true,
+            data: { app: name, launchMethod: 'executable', target: app.path }
+          };
         }
       }
 
@@ -128,7 +150,8 @@ class AppController {
           data: {
             app: name,
             resolvedName: startApp.name,
-            appId: startApp.appId
+            appId: startApp.appId,
+            launchMethod: 'start-menu'
           }
         };
       }
@@ -150,7 +173,7 @@ class AppController {
       return { success: false, error: 'No application name provided' };
     }
 
-    const name = appName.toLowerCase().trim();
+    const name = this._normalizeAppName(appName);
     const app = KNOWN_APPS[name];
     try {
       const selectedClose = this._closeSelectedProcess(name, options);
@@ -158,7 +181,8 @@ class AppController {
         return selectedClose;
       }
 
-      if (app?.closeStrategy === 'window') {
+      const browserClose = this._isBrowserAppName(name);
+      if (app?.closeStrategy === 'window' && !browserClose) {
         const windowClose = this._closeAppWindow(name, app);
         if (windowClose.success) {
           return windowClose;
@@ -166,18 +190,12 @@ class AppController {
       }
 
       const processNames = this._resolveProcessCandidates(name);
-      const browserClose = this._isBrowserAppName(name);
       let runningProcesses = this._filterCloseTargets(
         name,
         this._findRunningProcesses(name, processNames)
       );
 
       if (runningProcesses.length > 0) {
-        const ambiguity = this._buildCloseAmbiguity(name, runningProcesses);
-        if (ambiguity) {
-          return ambiguity;
-        }
-
         const requestedCloseCount = runningProcesses.length;
         this._closeProcessesGracefully(runningProcesses);
         this._sleep(900);
@@ -187,14 +205,23 @@ class AppController {
         );
 
         if (browserClose) {
-          return {
-            success: true,
-            data: {
-              app: name,
-              closedCount: requestedCloseCount,
-              closeMethod: 'window'
-            }
-          };
+          if (runningProcesses.length > 0 && this.waitForAppClosed(name, {
+            attempts: 3,
+            intervalMs: 300
+          })) {
+            runningProcesses = [];
+          }
+          if (runningProcesses.length === 0) {
+            return {
+              success: true,
+              data: {
+                app: name,
+                closedCount: requestedCloseCount,
+                closeMethod: 'window'
+              }
+            };
+          }
+          return { success: false, error: `Could not close every ${name} browser window` };
         }
 
         if (!browserClose && runningProcesses.length > 0) {
@@ -219,7 +246,7 @@ class AppController {
       }
 
       const windowClose = this._closeAppWindow(name, app, {
-        excludeTitleTokens: browserClose ? PROTECTED_BROWSER_TITLE_TOKENS : []
+        requireBrowserIdentity: browserClose
       });
       if (windowClose.success) {
         return windowClose;
@@ -233,25 +260,11 @@ class AppController {
 
   _closeAppWindow(name, app = KNOWN_APPS[name], options = {}) {
     const windowQuery = app?.windowQuery || name;
-    const preferredTitleTokens = Array.from(new Set(
-      [name, ...(Array.isArray(app?.preferredTitleTokens) ? app.preferredTitleTokens : [])]
-        .map(value => String(value || '').trim().toLowerCase())
-        .filter(Boolean)
-    ));
-    const preferredProcessNames = Array.from(new Set(
-      [
-        app?.processName,
-        app?.cmd,
-        ...(Array.isArray(app?.preferredProcessNames) ? app.preferredProcessNames : [])
-      ]
-        .map(value => String(value || '').trim())
-        .filter(Boolean)
-    ));
+    const matchOptions = this._windowMatchOptions(name, app);
 
     const closeResult = this.windowSession.closeWindow(windowQuery, {
-      preferredTitleTokens,
-      preferredProcessNames,
-      excludeTitleTokens: options.excludeTitleTokens || []
+      ...matchOptions,
+      requireTitleTokenMatch: Boolean(options.requireBrowserIdentity) || matchOptions.requireTitleTokenMatch
     });
 
     if (!closeResult.success) {
@@ -375,6 +388,7 @@ class AppController {
         }
       };
     } catch (err) {
+      this.logger.error(`Failed to launch special app: ${name}`, err);
       return { success: false, error: `Could not open: ${name}` };
     }
   }
@@ -397,6 +411,7 @@ class AppController {
   }
 
   _resolveProcessCandidates(name) {
+    name = this._normalizeAppName(name);
     const candidates = new Set();
     const app = KNOWN_APPS[name];
 
@@ -430,6 +445,7 @@ class AppController {
   }
 
   _findRunningProcesses(name, processCandidates = []) {
+    name = this._normalizeAppName(name);
     const processes = this._getRunningProcessDetails();
     if (!Array.isArray(processes) || processes.length === 0) {
       return [];
@@ -479,12 +495,11 @@ class AppController {
     return processes.filter(process => {
       const windowTitle = String(process?.MainWindowTitle || '').trim().toLowerCase();
       const mainWindowHandle = Number(process?.MainWindowHandle || 0);
-
-      if (PROTECTED_BROWSER_TITLE_TOKENS.some(token => windowTitle.includes(token))) {
-        return false;
-      }
-
-      return mainWindowHandle !== 0 || windowTitle.length > 0;
+      const browserIdentity = name === 'firefox'
+        ? 'firefox'
+        : (name === 'edge' || name === 'msedge' ? 'edge' : 'chrome');
+      return (mainWindowHandle !== 0 || windowTitle.length > 0) &&
+        windowTitle.includes(browserIdentity);
     });
   }
 
@@ -581,6 +596,7 @@ class AppController {
   }
 
   _buildAlreadyOpenClarification(name) {
+    name = this._normalizeAppName(name);
     const app = KNOWN_APPS[name];
     const processNames = this._resolveProcessCandidates(name);
     const visibleTargets = this._visibleCloseTargets(
@@ -589,8 +605,7 @@ class AppController {
 
     if (visibleTargets.length === 0 && app?.closeStrategy === 'window') {
       const existingWindow = this.windowSession.findWindow(app.windowQuery || name, {
-        preferredTitleTokens: app.preferredTitleTokens || [name],
-        preferredProcessNames: app.preferredProcessNames || []
+        ...this._windowMatchOptions(name, app)
       });
       if (existingWindow) {
         visibleTargets.push({
@@ -628,7 +643,93 @@ class AppController {
   }
 
   _isBrowserAppName(name) {
-    return BROWSER_APP_NAMES.has(String(name || '').trim().toLowerCase());
+    return BROWSER_APP_NAMES.has(this._normalizeAppName(name));
+  }
+
+  _normalizeAppName(appName) {
+    const normalized = Normalizer.normalizeText(appName);
+    return APP_ALIASES.get(normalized) || normalized;
+  }
+
+  _windowMatchOptions(name, app = KNOWN_APPS[name]) {
+    const browserApp = this._isBrowserAppName(name);
+    return {
+      preferredTitleTokens: browserApp
+        ? [name === 'msedge' ? 'edge' : name]
+        : (app?.preferredTitleTokens || [name]),
+      preferredProcessNames: app?.preferredProcessNames || [app?.processName, app?.cmd]
+        .filter(Boolean),
+      excludeTitleTokens: [],
+      requireTitleTokenMatch: browserApp
+    };
+  }
+
+  findVisibleApp(appName, options = {}) {
+    const name = this._normalizeAppName(appName);
+    if (!name) return null;
+    const processNames = this._resolveProcessCandidates(name);
+    const processTarget = this._visibleCloseTargets(
+      this._filterCloseTargets(name, this._findRunningProcesses(name, processNames))
+    )[0];
+    if (processTarget) {
+      return processTarget;
+    }
+
+    if (options.allowWindowFallback === false) return null;
+
+    const app = KNOWN_APPS[name];
+    const windowTarget = this.windowSession.findWindow(app?.windowQuery || name, {
+      ...this._windowMatchOptions(name, app)
+    });
+    if (!windowTarget) return null;
+    return {
+      Id: windowTarget.id,
+      ProcessName: windowTarget.processName,
+      MainWindowTitle: windowTarget.title,
+      MainWindowHandle: windowTarget.handle
+    };
+  }
+
+  waitForVisibleApp(appName, options = {}) {
+    const attempts = Math.max(1, Number(options.attempts) || 4);
+    const intervalMs = Math.max(0, Number(options.intervalMs) || 300);
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      const target = this.findVisibleApp(appName, {
+        allowWindowFallback: attempt === attempts - 1
+      });
+      if (target) return target;
+      if (attempt < attempts - 1) this._sleep(intervalMs);
+    }
+    return null;
+  }
+
+  waitForAppClosed(appName, options = {}) {
+    const attempts = Math.max(1, Number(options.attempts) || 4);
+    const intervalMs = Math.max(0, Number(options.intervalMs) || 250);
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      if (!this.findVisibleApp(appName)) return true;
+      if (attempt < attempts - 1) this._sleep(intervalMs);
+    }
+    return false;
+  }
+
+  _focusExistingApp(name, target) {
+    const app = KNOWN_APPS[name];
+    const title = String(target?.MainWindowTitle || '').trim();
+    const focusResult = this.windowSession.focusWindow(title || app?.windowQuery || name, {
+      ...this._windowMatchOptions(name, app)
+    });
+    if (!focusResult.success) return null;
+    return {
+      success: true,
+      data: {
+        app: name,
+        launchMethod: 'focus-existing',
+        matchedWindow: focusResult.data?.matchedWindow || title || null,
+        processName: focusResult.data?.processName || target?.ProcessName || null,
+        verified: true
+      }
+    };
   }
 
   _getRunningProcessDetails() {
@@ -690,8 +791,11 @@ class AppController {
   }
 
   _forceTerminateProcesses(processes) {
+    const terminableProcesses = processes.filter(process => !PROTECTED_HOST_PROCESSES.has(
+      Normalizer.normalizeText(process?.ProcessName).replace(/\s+/g, '')
+    ));
     const ids = Array.from(new Set(
-      processes
+      terminableProcesses
         .map(process => Number(process?.Id))
         .filter(id => Number.isFinite(id) && id > 0)
     ));
@@ -711,7 +815,7 @@ class AppController {
       } catch (err) {}
     }
 
-    for (const process of processes) {
+    for (const process of terminableProcesses) {
       const processId = Number(process?.Id);
       try {
         if (Number.isFinite(processId) && processId > 0) {

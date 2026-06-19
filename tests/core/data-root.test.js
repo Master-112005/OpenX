@@ -65,4 +65,31 @@ describe('Assistant Data Root', function() {
     assert.equal(second.migrated.length, 0);
     assert.match(fs.readFileSync(path.join(dataDir, 'settings.json'), 'utf8'), /Old/);
   });
+
+  it('should recover JSON files from backup when the primary file is corrupt', function() {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openx-json-recover-'));
+    const filePath = path.join(tempDir, 'settings.json');
+
+    dataRoot.writeJsonAtomic(filePath, { assistant: { displayName: 'Stable' } });
+    dataRoot.writeJsonAtomic(filePath, { assistant: { displayName: 'Current' } });
+    fs.writeFileSync(filePath, '{bad json', 'utf8');
+
+    const recovered = dataRoot.readJsonFile(filePath, {});
+
+    assert.equal(recovered.assistant.displayName, 'Stable');
+    assert.equal(JSON.parse(fs.readFileSync(filePath, 'utf8')).assistant.displayName, 'Stable');
+    assert.ok(fs.readdirSync(tempDir).some(name => /^settings\.json\.corrupt-/.test(name)));
+  });
+
+  it('should quarantine corrupt JSON and recreate a fallback when no backup can be used', function() {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openx-json-fallback-'));
+    const filePath = path.join(tempDir, 'contacts.json');
+
+    fs.writeFileSync(filePath, '{bad json', 'utf8');
+    const recovered = dataRoot.readJsonFile(filePath, { contacts: [] });
+
+    assert.deepEqual(recovered, { contacts: [] });
+    assert.deepEqual(JSON.parse(fs.readFileSync(filePath, 'utf8')), { contacts: [] });
+    assert.ok(fs.readdirSync(tempDir).some(name => /^contacts\.json\.corrupt-/.test(name)));
+  });
 });

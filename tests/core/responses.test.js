@@ -314,6 +314,22 @@ describe('Response Generator', function() {
     assert.ok(result.toLowerCase().includes('master'));
   });
 
+  it('should explain when an existing app window was focused', function() {
+    const gen = new ResponseGenerator();
+    const result = gen.generate('success', 'app.open', {
+      entities: { appName: 'chrome' },
+      result: {
+        data: {
+          launchMethod: 'focus-existing',
+          matchedWindow: 'Google Chrome'
+        }
+      }
+    });
+
+    assert.match(result, /Google Chrome was already open/);
+    assert.match(result, /foreground/);
+  });
+
   it('should mention the matched window in window responses', function() {
     const gen = new ResponseGenerator();
     const result = gen.generate('success', 'window.minimize', {

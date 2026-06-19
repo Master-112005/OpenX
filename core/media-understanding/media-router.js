@@ -7,7 +7,7 @@ const EXECUTABLE_CONFIDENCE = 0.58;
 
 class MediaUnderstandingRouter {
   constructor(options = {}) {
-    this.logger = options.logger || new Logger({ level: options.logging?.level || 'info' });
+    this.logger = options.logger || new Logger(options.logging || { level: 'info' });
     this.parser = options.parser || new MediaParser(options);
     this.contextProvider = options.contextProvider || null;
   }

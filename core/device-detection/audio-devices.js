@@ -151,7 +151,7 @@ function parseAudioDeviceList(output, activeDevice = null) {
 
 class AudioDeviceManager {
   constructor(options = {}) {
-    this.logger = options.logger || new Logger({ level: options.logging?.level || 'info' });
+    this.logger = options.logger || new Logger(options.logging || { level: 'info' });
     this.runner = options.runner || runPowerShell;
   }
 
@@ -165,8 +165,8 @@ class AudioDeviceManager {
     }
   }
 
-  async getAudioDevices() {
-    const activeDevice = await this.getCurrentAudioDevice();
+  async getAudioDevices(activeDevice = null) {
+    const resolvedActiveDevice = activeDevice || await this.getCurrentAudioDevice();
 
     try {
       const script = [
@@ -176,16 +176,16 @@ class AudioDeviceManager {
         '| ConvertTo-Json -Compress'
       ].join(' ');
       const output = await this.runner(script);
-      const devices = parseAudioDeviceList(output, activeDevice);
+      const devices = parseAudioDeviceList(output, resolvedActiveDevice);
 
-      if (activeDevice && !devices.some(device => device.id === activeDevice.id || device.name === activeDevice.name)) {
-        devices.unshift(activeDevice);
+      if (resolvedActiveDevice && !devices.some(device => device.id === resolvedActiveDevice.id || device.name === resolvedActiveDevice.name)) {
+        devices.unshift(resolvedActiveDevice);
       }
 
       return devices;
     } catch (err) {
       this.logger.warn('[Audio] Failed to enumerate audio devices', err.message);
-      return activeDevice ? [activeDevice] : [];
+      return resolvedActiveDevice ? [resolvedActiveDevice] : [];
     }
   }
 }

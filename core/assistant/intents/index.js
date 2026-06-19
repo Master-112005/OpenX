@@ -795,6 +795,7 @@ class IntentRegistry {
     this.logger = new Logger({ level: 'info' });
     this.intentRegistry = new Map();
     this.patternIndex = new Map();
+    this.revision = 0;
     this._initialize();
   }
 
@@ -809,6 +810,7 @@ class IntentRegistry {
         this.patternIndex.get(normalized).push(def.id);
       });
     });
+    this.revision += 1;
   }
 
   getAll() {
@@ -823,6 +825,10 @@ class IntentRegistry {
     return this.patternIndex;
   }
 
+  getRevision() {
+    return this.revision;
+  }
+
   registerCustom(intentDef) {
     if (!intentDef.id || !intentDef.patterns || !intentDef.action) {
       throw new Error('Custom intent must have id, patterns, and action');
@@ -835,6 +841,7 @@ class IntentRegistry {
       }
       this.patternIndex.get(normalized).push(intentDef.id);
     });
+    this.revision += 1;
     this.logger.info(`Registered custom intent: ${intentDef.id}`);
   }
 
@@ -851,6 +858,7 @@ class IntentRegistry {
         }
       });
       this.intentRegistry.delete(intentId);
+      this.revision += 1;
     }
   }
 }

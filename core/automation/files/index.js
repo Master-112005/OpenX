@@ -8,6 +8,7 @@ const {
   findEntryByName,
   getHomeDirectory,
   getSpecialFolders,
+  requireSafeUserPath,
   resolveDestinationPath,
   resolveDirectory,
   splitNameAndLocation
@@ -101,14 +102,14 @@ function hasSearchTimeRemaining(startedAt, maxElapsedMs) {
 
 class FileController {
   constructor(config) {
-    this.logger = new Logger({ level: config?.logging?.level || 'info' });
+    this.logger = new Logger(config?.logging || { level: 'info' });
   }
 
   _resolveFilePath(filename, targetPath = null) {
     if (!filename) return null;
 
     if (path.isAbsolute(filename) && fs.existsSync(filename) && fs.statSync(filename).isFile()) {
-      return path.resolve(filename);
+      return requireSafeUserPath(filename);
     }
 
     const source = splitNameAndLocation(filename);
@@ -155,10 +156,9 @@ class FileController {
       return { success: false, error: 'Invalid filename' };
     }
 
-    const dir = resolveDirectory(targetPath, { mustExist: false }) || getHomeDirectory();
-    const fullPath = path.join(dir, safeName);
-
     try {
+      const dir = requireSafeUserPath(resolveDirectory(targetPath, { mustExist: false }) || getHomeDirectory(), { allowRoot: true });
+      const fullPath = path.join(dir, safeName);
       fs.mkdirSync(path.dirname(fullPath), { recursive: true });
       if (fs.existsSync(fullPath)) {
         return { success: false, error: 'File already exists' };
@@ -180,8 +180,9 @@ class FileController {
     try {
       const selectedPath = targetPath?.selectedPath || targetPath?.targetPath;
       if (selectedPath && path.isAbsolute(selectedPath) && fs.existsSync(selectedPath) && fs.statSync(selectedPath).isFile()) {
-        launchTarget(selectedPath);
-        return { success: true, data: { path: selectedPath, filename: path.basename(selectedPath) } };
+        const safeSelectedPath = requireSafeUserPath(selectedPath);
+        launchTarget(safeSelectedPath);
+        return { success: true, data: { path: safeSelectedPath, filename: path.basename(safeSelectedPath) } };
       }
 
       const matches = this._findFileMatches(filename, targetPath);
@@ -210,6 +211,7 @@ class FileController {
       if (!fullPath) {
         return { success: false, error: 'File not found' };
       }
+      requireSafeUserPath(fullPath);
 
       launchTarget(fullPath);
       return { success: true, data: { path: fullPath, filename: path.basename(fullPath) } };
@@ -229,6 +231,7 @@ class FileController {
       if (!fullPath) {
         return { success: false, error: 'File not found' };
       }
+      requireSafeUserPath(fullPath);
 
       const stats = fs.statSync(fullPath);
       if (!stats.isFile()) {
@@ -258,8 +261,10 @@ class FileController {
       if (!oldPath) {
         return { success: false, error: 'File not found' };
       }
+      requireSafeUserPath(oldPath);
 
       const newPath = path.join(path.dirname(oldPath), safeNew);
+      requireSafeUserPath(newPath);
       fs.renameSync(oldPath, newPath);
       return { success: true, data: { oldPath, newPath } };
     } catch (err) {
@@ -278,11 +283,13 @@ class FileController {
       if (!srcPath) {
         return { success: false, error: 'Source not found' };
       }
+      requireSafeUserPath(srcPath);
 
       const finalPath = resolveDestinationPath(destination, srcPath, { type: 'file' });
       if (!finalPath) {
         return { success: false, error: 'Destination could not be resolved' };
       }
+      requireSafeUserPath(finalPath);
 
       fs.mkdirSync(path.dirname(finalPath), { recursive: true });
       fs.copyFileSync(srcPath, finalPath);
@@ -303,11 +310,13 @@ class FileController {
       if (!srcPath) {
         return { success: false, error: 'Source not found' };
       }
+      requireSafeUserPath(srcPath);
 
       const finalPath = resolveDestinationPath(destination, srcPath, { type: 'file' });
       if (!finalPath) {
         return { success: false, error: 'Destination could not be resolved' };
       }
+      requireSafeUserPath(finalPath);
 
       fs.mkdirSync(path.dirname(finalPath), { recursive: true });
 
@@ -428,7 +437,11 @@ class FileController {
     const results = sorted.slice(0, 20).map(file => this._fileEntry(file));
 
     if (openResult && sorted[0]) {
-      launchTarget(sorted[0].path);
+      try {
+        launchTarget(requireSafeUserPath(sorted[0].path));
+      } catch (err) {
+        return { success: false, error: err.message };
+      }
     }
 
     return {
@@ -456,6 +469,11 @@ class FileController {
     const dir = resolveDirectory(targetPath || 'home', { mustExist: true });
     if (!dir) {
       return { success: false, error: 'Folder not found' };
+    }
+    try {
+      requireSafeUserPath(dir, { allowRoot: true });
+    } catch (err) {
+      return { success: false, error: err.message };
     }
 
     try {
@@ -578,11 +596,11 @@ class FileController {
 
     const selectedPath = targetPath?.selectedPath || targetPath?.targetPath;
     if (selectedPath && path.isAbsolute(selectedPath) && fs.existsSync(selectedPath) && fs.statSync(selectedPath).isFile()) {
-      return [path.resolve(selectedPath)];
+      return [requireSafeUserPath(selectedPath)];
     }
 
     if (path.isAbsolute(filename) && fs.existsSync(filename) && fs.statSync(filename).isFile()) {
-      return [path.resolve(filename)];
+      return [requireSafeUserPath(filename)];
     }
 
     const source = splitNameAndLocation(filename);

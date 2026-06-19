@@ -24,6 +24,9 @@ The platform is designed around a layered architecture with intent routing, enti
 * Multi-window Electron desktop interface
 * 80+ built-in intents
 * Local-only processing for privacy and performance
+* Hardened Electron renderer sandbox with trusted-origin IPC validation
+* Bounded renderer/main-process crash recovery with restart-loop suppression
+* Structured, redacted, size-rotated logs under `OpenX_Data/logs`
 * **Form auto-fill with personal context learning**
 * **Multi-command natural language processing (",", "and", "then", "also", "plus")**
 * **40+ verb action vocabulary with advanced fuzzy matching**
@@ -172,7 +175,7 @@ OpenX/
 * Action Router
 * Context Manager
 * Response Generator
-* **Learning Engine** — active learning, personal facts, preferences, command corrections, password storage
+* **Learning Engine** — active learning, personal facts, preferences, and command corrections; credential-like facts are rejected and purged
 * **Natural Language Understanding** — command-frame parsing, multi-command splitting, semantic routing, and typo/noise repair
 * **Response Style Engine** — formal servant tone, honorific application, context-aware responses
 
@@ -227,7 +230,8 @@ OpenX_Data/
 |-- learning.json
 |-- logs/
 |-- runtime/
-|   `-- chrome-media-profile/
+|   |-- chrome-media-profile/
+|   `-- crash-recovery.json
 `-- cache/
 ```
 
@@ -249,6 +253,7 @@ OpenX_Data/
 * Volume control
 * Brightness control
 * App launching
+* Verified app open/focus/close lifecycle with Store-app discovery and browser-PWA isolation
 * File management
 * Folder operations
 * Browser automation
@@ -296,7 +301,7 @@ The assistant learns and remembers personal information through natural conversa
 * **Preferences** — favorite food, color, movie, music, sport
 * **Possessions** — "I have a X"
 * **Contact info** — email, phone number
-* **Passwords** — learns credentials for 15+ services (Gmail, Outlook, LinkedIn, GitHub, Instagram, Facebook, Twitter, Amazon, Netflix, Spotify, WhatsApp, Zoom, Discord, Steam, Skype)
+* **Credential safety** — passwords, passcodes, tokens, and secrets are not stored in assistant learning memory
 * **Command corrections** — learns from user feedback to improve future responses
 * **Sequence learning** — remembers common command patterns
 
@@ -575,11 +580,27 @@ The project includes dedicated test suites covering:
 * Settings
 * Event system
 * Windows session operations
+* Electron IPC sender and payload validation
+* BrowserWindow sandbox preferences
+* Crash-loop recovery policy
+* Structured log redaction, rotation, and retention
 
 Frameworks used:
 
 * Mocha
 * Chai
+
+Latest complete verification: `465 passing` and repository-wide ESLint passing.
+
+---
+
+# Desktop Security And Recovery
+
+* Browser windows use `contextIsolation`, Chromium sandboxing, web security, and disabled Node/webview integration.
+* IPC calls are accepted only from local renderer files and validated with channel-specific size and shape limits.
+* Renderer crashes are recorded and recovered with a bounded three-restart-per-minute policy.
+* Fatal main-process errors write crash records, attempt lifecycle cleanup, and relaunch only within a persisted crash budget.
+* Application, error, and crash logs are JSON Lines files with sensitive-field redaction, 10 MB rotation, and five-file retention.
 
 ---
 

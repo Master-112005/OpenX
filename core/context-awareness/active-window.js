@@ -31,7 +31,7 @@ function windowsAreEqual(left, right) {
 class ActiveWindowMonitor {
   constructor(options = {}) {
     this.intervalMs = ACTIVE_WINDOW_POLL_MS;
-    this.logger = options.logger || new Logger({ level: options.logging?.level || 'info' });
+    this.logger = options.logger || new Logger(options.logging || { level: 'info' });
     this.signals = options.signals || signals;
     this.activeWin = options.activeWin || null;
     this.timer = null;

@@ -7,7 +7,7 @@ const IdGenerator = require('../../shared/index').IdGenerator;
 
 class SchedulerController {
   constructor(config) {
-    this.logger = new Logger({ level: config?.logging?.level || 'info' });
+    this.logger = new Logger(config?.logging || { level: 'info' });
   }
 
   setTimer(durationMinutes) {

@@ -10,7 +10,7 @@ function escapePowerShell(value) {
 
 class ScreenshotController {
   constructor(config) {
-    this.logger = new Logger({ level: config?.logging?.level || 'info' });
+    this.logger = new Logger(config?.logging || { level: 'info' });
     this.outputDirectory = config?.screenshots?.directory || path.join(os.homedir(), 'Pictures', 'Screenshots');
   }
 

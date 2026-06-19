@@ -92,7 +92,7 @@ function restoreKnownTitleCompounds(entityText, normalizedText) {
 
 class MediaParser {
   constructor(options = {}) {
-    this.logger = options.logger || new Logger({ level: options.logging?.level || 'info' });
+    this.logger = options.logger || new Logger(options.logging || { level: 'info' });
     this.platformMapper = options.platformMapper || new PlatformMapper(options);
   }
 

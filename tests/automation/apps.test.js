@@ -31,6 +31,7 @@ describe('App Controller', function() {
   it('should prefer Start menu apps over command fallback when opening apps', function() {
     const controller = new AppController({});
     let launched = null;
+    controller.findVisibleApp = () => null;
 
     controller._resolveStartApp = (name) => {
       assert.equal(name, 'discord');
@@ -52,6 +53,7 @@ describe('App Controller', function() {
   it('should open special Windows shell apps', function() {
     const controller = new AppController({});
     let launched = null;
+    controller.findVisibleApp = () => null;
 
     controller._resolveStartApp = () => null;
     controller._launchSpecialApp = (name) => {
@@ -68,6 +70,7 @@ describe('App Controller', function() {
 
   it('should fail clearly when an app cannot be found', function() {
     const controller = new AppController({});
+    controller.findVisibleApp = () => null;
 
     controller._resolveStartApp = () => null;
     controller._launchSpecialApp = () => ({ success: false });
@@ -282,7 +285,7 @@ describe('App Controller', function() {
     assert.equal(forcedTerminationUsed, false);
   });
 
-  it('should report browser close success after sending a visible-window close request', function() {
+  it('should not report browser close success while the visible window remains', function() {
     const controller = new AppController({});
     let forcedTerminationUsed = false;
 
@@ -308,16 +311,17 @@ describe('App Controller', function() {
 
     const result = controller.close('chrome');
 
-    assert.equal(result.success, true);
-    assert.equal(result.data.closeMethod, 'window');
+    assert.equal(result.success, false);
+    assert.match(result.error, /Could not close every chrome browser window/);
     assert.equal(forcedTerminationUsed, false);
   });
 
-  it('should ask before closing when multiple matching app windows are open', function() {
+  it('should close all matching browser windows after confirmation', function() {
     const controller = new AppController({});
     let closeAttempted = false;
+    let closed = false;
 
-    controller._getRunningProcessDetails = () => ([
+    controller._getRunningProcessDetails = () => closed ? [] : ([
       {
         Id: 200,
         ProcessName: 'chrome',
@@ -335,19 +339,19 @@ describe('App Controller', function() {
     ]);
     controller._closeProcessesGracefully = () => {
       closeAttempted = true;
+      closed = true;
       return true;
     };
     controller._sleep = () => {};
 
     const result = controller.close('chrome');
 
-    assert.equal(result.success, false);
-    assert.equal(result.needsClarification, true);
-    assert.equal(result.data.matchCount, 2);
-    assert.equal(closeAttempted, false);
+    assert.equal(result.success, true);
+    assert.equal(result.data.closedCount, 2);
+    assert.equal(closeAttempted, true);
   });
 
-  it('should ask before opening another window when the app is already open', function() {
+  it('should focus an existing app instead of asking to open a duplicate', function() {
     const controller = new AppController({});
 
     controller._getRunningProcessDetails = () => ([{
@@ -361,12 +365,16 @@ describe('App Controller', function() {
     controller._resolveStartApp = () => null;
     controller._commandExists = () => true;
     controller._sleep = () => {};
+    controller.windowSession.focusWindow = () => ({
+      success: true,
+      data: { matchedWindow: 'Sample App', processName: 'SampleApp' }
+    });
 
     const result = controller.open('sample app');
 
-    assert.equal(result.success, false);
-    assert.equal(result.needsClarification, true);
-    assert.equal(result.data.confirmEntities.forceNewWindow, true);
+    assert.equal(result.success, true);
+    assert.equal(result.data.launchMethod, 'focus-existing');
+    assert.equal(result.data.verified, true);
   });
 
   it('should prefer known command launchers before Start menu entries for known apps', function() {
@@ -473,6 +481,59 @@ describe('App Controller', function() {
     assert.equal(launched.appId, 'Sample.App');
   });
 
+  it('should not treat a YouTube Chrome PWA as an open Chrome browser', function() {
+    const controller = new AppController({});
+    let fallbackOptions = null;
+
+    controller._getRunningProcessDetails = () => ([{
+      Id: 901,
+      ProcessName: 'chrome',
+      MainWindowTitle: 'Music - YouTube',
+      MainWindowHandle: 456,
+      Path: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
+    }]);
+    controller.windowSession.findWindow = (_query, options) => {
+      fallbackOptions = options;
+      return null;
+    };
+
+    assert.equal(controller.findVisibleApp('google chrome'), null);
+    assert.equal(fallbackOptions.requireTitleTokenMatch, true);
+    assert.deepEqual(fallbackOptions.preferredTitleTokens, ['chrome']);
+  });
+
+  it('should resolve and launch installed Store apps such as Instagram', function() {
+    const controller = new AppController({});
+    let launched = null;
+
+    controller.findVisibleApp = () => null;
+    controller._launchSpecialApp = () => ({ success: false });
+    controller._resolveStartApp = name => {
+      assert.equal(name, 'instagram');
+      return { name: 'Instagram', appId: 'Facebook.InstagramBeta_8xx8rvfyw5nnt!App' };
+    };
+    controller._launchStartApp = startApp => {
+      launched = startApp;
+    };
+
+    const result = controller.open('instgram');
+
+    assert.equal(result.success, true);
+    assert.equal(result.data.launchMethod, 'start-menu');
+    assert.equal(launched.name, 'Instagram');
+  });
+
+  it('should never force terminate shared Windows host processes', function() {
+    const controller = new AppController({});
+    const terminated = controller._forceTerminateProcesses([{
+      Id: 400,
+      ProcessName: 'ApplicationFrameHost',
+      MainWindowTitle: 'Instagram'
+    }]);
+
+    assert.equal(terminated, false);
+  });
+
   it('should exclude YouTube windows from Chrome window fallback', function() {
     const controller = new AppController({});
     let fallbackOptions = null;
@@ -487,6 +548,21 @@ describe('App Controller', function() {
     const result = controller.close('chrome');
 
     assert.equal(result.success, false);
-    assert.ok(fallbackOptions.excludeTitleTokens.includes('youtube'));
+    assert.equal(fallbackOptions.requireTitleTokenMatch, true);
+    assert.deepEqual(fallbackOptions.preferredTitleTokens, ['chrome']);
+  });
+
+  it('should treat a regular YouTube tab as part of Chrome, not as a PWA', function() {
+    const controller = new AppController({});
+    controller._getRunningProcessDetails = () => ([{
+      Id: 902,
+      ProcessName: 'chrome',
+      MainWindowTitle: 'YouTube - Google Chrome',
+      MainWindowHandle: 457,
+      Path: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
+    }]);
+
+    const target = controller.findVisibleApp('chrome', { allowWindowFallback: false });
+    assert.equal(target.Id, 902);
   });
 });

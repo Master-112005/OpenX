@@ -149,7 +149,7 @@ const APP_ENTITY_BLOCKED_PREFIXES = new Set([
 
 class EntityExtractor {
   constructor(config) {
-    this.logger = new Logger({ level: config?.logging?.level || 'info' });
+    this.logger = new Logger(config?.logging || { level: 'info' });
   }
 
   extract(intent, text) {

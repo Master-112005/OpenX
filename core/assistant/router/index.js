@@ -50,7 +50,7 @@ const WEBSITE_URL_MAP = {
 
 class ActionRouter {
   constructor(config, automationEngine) {
-    this.logger = new Logger({ level: config?.logging?.level || 'info' });
+    this.logger = new Logger(config?.logging || { level: 'info' });
     this.config = config;
     this.intentRegistry = new IntentRegistry();
     this.parser = new InputParser(config);
@@ -1288,7 +1288,7 @@ class ActionRouter {
     });
   }
 
-  async confirmAndExecute(commandId, intentId, entities) {
+  async confirmAndExecute(commandId, intentId, entities, options = {}) {
     const intent = this.intentRegistry.get(intentId);
     if (!intent) {
       return {
@@ -1299,13 +1299,36 @@ class ActionRouter {
       };
     }
 
-    return this._execute(commandId, { intent, confidence: 1.0 }, entities, '', 'confirmation');
+    const permissionCheck = this.permissionValidator.validate(intent, entities, options.source || 'confirmation');
+    if (!permissionCheck.allowed) {
+      return {
+        commandId,
+        success: false,
+        error: 'Permission denied',
+        response: permissionCheck.response || this._buildResponse('error', 'permissionDenied'),
+        intent: intent.id,
+        confidence: 1,
+        entities,
+        requiresConfirmation: false,
+        permissionLevel: intent.permissionLevel
+      };
+    }
+
+    return this._execute(commandId, { intent, confidence: 1.0 }, entities, '', options.source || 'confirmation');
   }
 
   async _execute(commandId, intentResult, entities, rawCommandText = '', source = 'chat', languageUnderstanding = null) {
     try {
       const result = await this.automationEngine.execute(intentResult.intent.action, entities);
-      this.logger.info(`Execution result: ${commandId}`, { success: result.success });
+      this.logger.info(`Execution result: ${commandId}`, {
+        success: result.success,
+        error: result.error || null,
+        needsClarification: Boolean(result.needsClarification),
+        validation: result.validation?.status || result.data?.validation?.status || null,
+        verification: result.verification?.status || result.data?.verification?.status || null,
+        launchMethod: result.data?.launchMethod || null,
+        matchedWindow: result.data?.matchedWindow || null
+      });
       this._recordRoutingEvidence({
         input: rawCommandText,
         source,
@@ -1400,23 +1423,19 @@ class ActionRouter {
       return bestExactMatch;
     }
 
-    const rankedMatches = [];
-    for (const intent of this.intentRegistry.getAll()) {
-      for (const pattern of intent.patterns) {
-        rankedMatches.push({
-          intent,
-          pattern,
-          confidence: this.nlp.scorePattern(preparedInput, pattern)
-        });
-      }
-    }
+    const rankedMatches = this.nlp.getPreparedIntentPatterns().map(candidate => ({
+      intent: candidate.intent,
+      pattern: candidate.pattern,
+      patternLength: candidate.length,
+      confidence: this.nlp.scorePattern(preparedInput, candidate.prepared)
+    }));
 
     rankedMatches.sort((left, right) => {
       if (right.confidence !== left.confidence) {
         return right.confidence - left.confidence;
       }
 
-      return right.pattern.length - left.pattern.length;
+      return right.patternLength - left.patternLength;
     });
 
     const bestMatch = rankedMatches[0] || null;
@@ -3623,13 +3642,11 @@ _resolveExplicitTimerIntent(rawText, preparedInput) {
   _suggestAlternatives(preparedInput) {
     const rankedPatterns = [];
 
-    for (const intent of this.intentRegistry.getAll()) {
-      for (const pattern of intent.patterns) {
-        rankedPatterns.push({
-          pattern,
-          confidence: this.nlp.scorePattern(preparedInput, pattern)
-        });
-      }
+    for (const candidate of this.nlp.getPreparedIntentPatterns()) {
+      rankedPatterns.push({
+        pattern: candidate.pattern,
+        confidence: this.nlp.scorePattern(preparedInput, candidate.prepared)
+      });
     }
 
     return rankedPatterns

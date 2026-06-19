@@ -21,6 +21,18 @@ const DEFAULT_EXCLUDED_SEARCH_DIRECTORIES = new Set([
   'windows'
 ]);
 
+const PROTECTED_PATH_SEGMENTS = new Set([
+  '$recycle.bin',
+  'appdata',
+  'application data',
+  'local settings',
+  'program files',
+  'program files (x86)',
+  'programdata',
+  'system volume information',
+  'windows'
+]);
+
 function cleanEntityName(value, options = {}) {
   const { stripTypeWords = false } = options;
   if (!value || typeof value !== 'string') return null;
@@ -73,6 +85,79 @@ function dedupe(paths) {
   return Array.from(new Set(paths.filter(Boolean).map(candidate => path.resolve(candidate))));
 }
 
+function isUncPath(candidate) {
+  return /^\\\\[^\\]+\\[^\\]+/.test(String(candidate || ''));
+}
+
+function pathKey(candidate) {
+  return path.resolve(candidate).toLowerCase();
+}
+
+function isPathInside(parent, child) {
+  const parentKey = pathKey(parent);
+  const childKey = pathKey(child);
+  return childKey === parentKey || childKey.startsWith(`${parentKey}${path.sep}`);
+}
+
+function hasProtectedSegment(candidate, roots = []) {
+  const resolved = path.resolve(candidate);
+  const matchingRoot = roots.find(root => root && isPathInside(root, resolved));
+  const relative = matchingRoot ? path.relative(matchingRoot, resolved) : resolved;
+  const segments = relative
+    .split(/[\\/]+/)
+    .map(segment => segment.trim().toLowerCase())
+    .filter(Boolean);
+  return segments.some(segment => PROTECTED_PATH_SEGMENTS.has(segment));
+}
+
+function getSafeUserRoots() {
+  return dedupe([
+    getHomeDirectory(),
+    ...Object.values(getSpecialFolders())
+  ]);
+}
+
+function pathSafety(candidate, options = {}) {
+  if (!candidate || typeof candidate !== 'string') {
+    return { safe: false, reason: 'Path is empty' };
+  }
+
+  const resolved = path.resolve(candidate);
+  const parsed = path.parse(resolved);
+  const allowRoot = Boolean(options.allowRoot);
+  if (isUncPath(candidate)) {
+    return { safe: false, reason: 'Network paths are not allowed' };
+  }
+  if (!allowRoot && resolved.toLowerCase() === parsed.root.toLowerCase()) {
+    return { safe: false, reason: 'Drive roots are not allowed' };
+  }
+
+  const roots = options.roots && options.roots.length > 0
+    ? dedupe(options.roots)
+    : getSafeUserRoots();
+  const insideSafeRoot = roots.some(root => root && isPathInside(root, resolved));
+  if (!insideSafeRoot) {
+    return { safe: false, reason: 'Path is outside allowed user folders' };
+  }
+  if (hasProtectedSegment(resolved, roots)) {
+    return { safe: false, reason: 'Protected system paths are not allowed' };
+  }
+
+  return { safe: true, path: resolved };
+}
+
+function isSafeUserPath(candidate, options = {}) {
+  return pathSafety(candidate, options).safe;
+}
+
+function requireSafeUserPath(candidate, options = {}) {
+  const safety = pathSafety(candidate, options);
+  if (!safety.safe) {
+    throw new Error(safety.reason);
+  }
+  return safety.path;
+}
+
 function shouldDescendIntoSearchDirectory(name, options = {}) {
   const normalized = String(name || '').trim().toLowerCase();
   if (!normalized || normalized.startsWith('.')) {
@@ -120,7 +205,7 @@ function resolveDirectory(location, options = {}) {
     path.resolve(baseDir, raw),
     path.resolve(process.cwd(), raw),
     path.resolve(getHomeDirectory(), raw)
-  ]);
+  ]).filter(candidate => isSafeUserPath(candidate, { allowRoot: true }));
 
   for (const candidate of candidatePaths) {
     if (!mustExist) {
@@ -257,6 +342,7 @@ function resolveDestinationPath(destination, sourcePath, options = {}) {
   const looksLikeFilePath = type === 'file' && path.extname(raw) !== '';
 
   if (absolute) {
+    requireSafeUserPath(absolute);
     if (fs.existsSync(absolute) && fs.statSync(absolute).isDirectory()) {
       return path.join(absolute, path.basename(sourcePath));
     }
@@ -269,7 +355,7 @@ function resolveDestinationPath(destination, sourcePath, options = {}) {
   }
 
   if (looksLikeFilePath) {
-    return path.resolve(raw);
+    return requireSafeUserPath(path.resolve(raw));
   }
 
   const fallbackDirectory = resolveDirectory(raw, { mustExist: false });
@@ -286,8 +372,12 @@ module.exports = {
   findEntriesByName,
   findEntryByName,
   getHomeDirectory,
+  getSafeUserRoots,
   getSpecialFolders,
+  isSafeUserPath,
   normalizeLocation,
+  pathSafety,
+  requireSafeUserPath,
   resolveDestinationPath,
   resolveDirectory,
   shouldDescendIntoSearchDirectory,

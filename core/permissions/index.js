@@ -9,7 +9,7 @@ const LEVEL_HIERARCHY = {
 
 class PermissionValidator {
   constructor(config) {
-    this.logger = new Logger({ level: config?.logging?.level || 'info' });
+    this.logger = new Logger(config?.logging || { level: 'info' });
     this.config = config;
     this.settings = config?.permissions || {
       levels: {
@@ -22,7 +22,7 @@ class PermissionValidator {
     this.userLevel = config?.permissions?.userLevel || 'medium';
     this.failedAttempts = 0;
     this.maxFailedAttempts = config?.permissions?.maxFailedAttempts || 3;
-    this.isAuthenticated = true;
+    this.isAuthenticated = Boolean(config?.auth?.preAuthenticated);
   }
 
   validate(intent, entities, source) {
@@ -57,7 +57,7 @@ class PermissionValidator {
 
     return {
       allowed: true,
-      requiresConfirmation: this.userLevel === 'critical' ? false : levelConfig.requiresConfirmation,
+      requiresConfirmation: Boolean(levelConfig.requiresConfirmation),
       confirmationMessage
     };
   }
@@ -98,7 +98,7 @@ class PermissionValidator {
   }
 
   isActionAllowed(intentId, entities) {
-    return true;
+    return Boolean(intentId);
   }
 
   getLevels() {

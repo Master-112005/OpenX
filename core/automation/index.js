@@ -17,7 +17,7 @@ const ActionVerifier = require('./common/action-verifier');
 
 class AutomationEngine {
   constructor(config) {
-    this.logger = new Logger({ level: config?.logging?.level || 'info' });
+    this.logger = new Logger(config?.logging || { level: 'info' });
     this.config = config;
 
     this.volume = new VolumeController(config);
@@ -430,6 +430,38 @@ class AutomationEngine {
 
   getActions() {
     return Object.keys(this._actionMap);
+  }
+
+  async destroy() {
+    const controllers = [
+      this.volume,
+      this.brightness,
+      this.files,
+      this.folders,
+      this.apps,
+      this.browser,
+      this.media,
+      this.communications,
+      this.system,
+      this.windows,
+      this.scheduler,
+      this.screenshot,
+      this.forms
+    ];
+
+    for (const controller of controllers) {
+      if (!controller || typeof controller.destroy !== 'function') {
+        continue;
+      }
+
+      try {
+        await controller.destroy();
+      } catch (error) {
+        this.logger.warn('Controller cleanup failed', error.message);
+      }
+    }
+
+    this._actionMap = {};
   }
 
   async _startMode(modeName) {

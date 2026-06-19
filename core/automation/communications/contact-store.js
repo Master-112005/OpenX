@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { Logger, Normalizer } = require('../../shared/index');
-const { buildDataPaths } = require('../../shared/data-root');
+const { buildDataPaths, readJsonFile, writeJsonAtomic } = require('../../shared/data-root');
 
 const MAX_CONTACTS = 10;
 
@@ -23,7 +23,7 @@ function isPhoneLike(input) {
 class ContactStore {
   constructor(config) {
     this.config = config;
-    this.logger = new Logger({ level: config?.logging?.level || 'info' });
+    this.logger = new Logger(config?.logging || { level: 'info' });
     this.contactsPath = this._resolveContactsPath();
   }
 
@@ -43,18 +43,13 @@ class ContactStore {
     }
 
     if (!fs.existsSync(this.contactsPath)) {
-      fs.writeFileSync(this.contactsPath, '{}', 'utf8');
+      writeJsonAtomic(this.contactsPath, {}, { backup: false });
     }
   }
 
   _loadRawContacts() {
     this._ensureStoreExists();
-    const source = fs.readFileSync(this.contactsPath, 'utf8').trim();
-    if (!source) {
-      return {};
-    }
-
-    const parsed = JSON.parse(source);
+    const parsed = readJsonFile(this.contactsPath, {}, { createIfMissing: true });
     if (Array.isArray(parsed)) {
       return parsed;
     }
@@ -69,7 +64,7 @@ class ContactStore {
   _saveRawContacts(rawContacts) {
     this._ensureStoreExists();
     const payload = isPlainObject(rawContacts) ? rawContacts : {};
-    fs.writeFileSync(this.contactsPath, JSON.stringify(payload, null, 2), 'utf8');
+    writeJsonAtomic(this.contactsPath, payload);
   }
 
   _normalizeRecord(name, contact) {

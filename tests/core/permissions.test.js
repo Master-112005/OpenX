@@ -67,7 +67,7 @@ describe('Permission Validator', function() {
     assert.ok(result.confirmationMessage.includes('Delete file'));
   });
 
-  it('should skip confirmations when user chooses critical full access', function() {
+  it('should keep confirmations enabled when user chooses critical full access', function() {
     const validator = new PermissionValidator({
       permissions: {
         levels: {
@@ -82,6 +82,23 @@ describe('Permission Validator', function() {
     const result = validator.validate(intent, { appName: 'chrome' });
 
     assert.ok(result.allowed);
-    assert.equal(result.requiresConfirmation, false);
+    assert.equal(result.requiresConfirmation, true);
+  });
+
+  it('should require authentication for high-risk authenticated actions', function() {
+    const validator = new PermissionValidator({
+      permissions: {
+        levels: {
+          high: { requiresConfirmation: true, requiresAuth: true }
+        }
+      }
+    });
+    validator.setUserLevel('high');
+
+    const intent = { id: 'file.delete', permissionLevel: 'high', description: 'Delete file' };
+    const result = validator.validate(intent, { filename: 'secret.txt' });
+
+    assert.equal(result.allowed, false);
+    assert.equal(result.requiresAuth, true);
   });
 });

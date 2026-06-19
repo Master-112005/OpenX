@@ -4,7 +4,7 @@ const WindowsSessionController = require('../common/windows-session');
 
 class WindowsController {
   constructor(config) {
-    this.logger = new Logger({ level: config?.logging?.level || 'info' });
+    this.logger = new Logger(config?.logging || { level: 'info' });
     this.session = new WindowsSessionController(config);
   }
 

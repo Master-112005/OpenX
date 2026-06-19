@@ -324,6 +324,37 @@ describe('File Management Automation', function() {
     assert.equal(result.data.folderName, 'DLNLP Node Folder');
   });
 
+  it('should block deleting absolute files outside the user profile', function() {
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-outside-file-'));
+    const outsideFile = path.join(outsideDir, 'do-not-delete.txt');
+    fs.writeFileSync(outsideFile, 'keep', 'utf8');
+
+    try {
+      const result = engine.files.delete(outsideFile);
+
+      assert.equal(result.success, false);
+      assert.match(result.error, /outside allowed user folders|protected system paths|not allowed/i);
+      assert.equal(fs.existsSync(outsideFile), true);
+    } finally {
+      fs.rmSync(outsideDir, { recursive: true, force: true });
+    }
+  });
+
+  it('should block recursive folder deletion outside the user profile', function() {
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-outside-folder-'));
+    fs.writeFileSync(path.join(outsideDir, 'do-not-delete.txt'), 'keep', 'utf8');
+
+    try {
+      const result = engine.folders.delete(outsideDir);
+
+      assert.equal(result.success, false);
+      assert.match(result.error, /outside allowed user folders|protected system paths|not allowed/i);
+      assert.equal(fs.existsSync(outsideDir), true);
+    } finally {
+      fs.rmSync(outsideDir, { recursive: true, force: true });
+    }
+  });
+
   it('should ask which same-name file to open across subfolders', function() {
     const firstDir = path.join(tempProfile, 'Documents', 'Jobs');
     const secondDir = path.join(tempProfile, 'Downloads', 'Backup');

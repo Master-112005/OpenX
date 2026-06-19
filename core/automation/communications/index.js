@@ -8,7 +8,7 @@ const WhatsAppDesktopController = require('./whatsapp-desktop');
 class CommunicationsController {
   constructor(config) {
     this.config = config;
-    this.logger = new Logger({ level: config?.logging?.level || 'info' });
+    this.logger = new Logger(config?.logging || { level: 'info' });
     this.browser = new BrowserController(config);
     this.files = new FileController(config);
     this.contactStore = new ContactStore(config);
@@ -270,6 +270,10 @@ class CommunicationsController {
     }
 
     return this.whatsAppDesktop.startVoiceCall(contactName);
+  }
+
+  destroy() {
+    this.whatsAppDesktop?.destroy?.();
   }
 }
 

@@ -14,10 +14,41 @@ const {
 } = require('./scorer');
 const { normalizeWebTarget } = require('./web-targets');
 
+const PREPARE_CACHE_LIMIT = 256;
+const PATTERN_CACHE_LIMIT = 512;
+
 class NlpProcessor {
   constructor(intentRegistry) {
     this.intentRegistry = intentRegistry;
     this.vocabulary = this._buildVocabulary();
+    this.vocabularySet = new Set(this.vocabulary);
+    this.prepareCache = new Map();
+    this.patternCache = new Map();
+    this.preparedIntentPatterns = [];
+    this.preparedIntentRevision = null;
+  }
+
+  _rememberCacheEntry(cache, key, value, limit) {
+    if (cache.has(key)) {
+      cache.delete(key);
+    }
+    cache.set(key, value);
+    while (cache.size > limit) {
+      cache.delete(cache.keys().next().value);
+    }
+    return value;
+  }
+
+  _clonePrepared(prepared) {
+    return {
+      ...prepared,
+      query: prepared.query ? { ...prepared.query, clauses: [...(prepared.query.clauses || [])] } : prepared.query,
+      semanticFrame: prepared.semanticFrame ? { ...prepared.semanticFrame } : prepared.semanticFrame,
+      tokens: [...(prepared.tokens || [])],
+      intentTokens: [...(prepared.intentTokens || [])],
+      bigrams: [...(prepared.bigrams || [])],
+      intentBigrams: [...(prepared.intentBigrams || [])]
+    };
   }
 
   _buildVocabulary() {
@@ -69,6 +100,54 @@ class NlpProcessor {
   }
 
   prepare(text) {
+    const key = String(text || '');
+    const cached = this.prepareCache.get(key);
+    if (cached) {
+      this.prepareCache.delete(key);
+      this.prepareCache.set(key, cached);
+      return this._clonePrepared(cached);
+    }
+
+    const prepared = this._prepareUncached(key);
+    this._rememberCacheEntry(this.prepareCache, key, prepared, PREPARE_CACHE_LIMIT);
+    return this._clonePrepared(prepared);
+  }
+
+  preparePattern(pattern) {
+    const key = String(pattern || '');
+    const cached = this.patternCache.get(key);
+    if (cached) {
+      return cached;
+    }
+
+    const prepared = this._prepareUncached(key);
+    return this._rememberCacheEntry(this.patternCache, key, prepared, PATTERN_CACHE_LIMIT);
+  }
+
+  getPreparedIntentPatterns() {
+    const revision = this.intentRegistry?.getRevision?.() || 0;
+    if (this.preparedIntentRevision === revision && this.preparedIntentPatterns.length > 0) {
+      return this.preparedIntentPatterns;
+    }
+
+    this.preparedIntentPatterns = (this.intentRegistry?.getAll?.() || []).flatMap(intent => (
+      (intent.patterns || []).map(pattern => {
+        const prepared = this.preparePattern(pattern);
+        const normalized = (prepared.intentText || prepared.correctedText || '').trim();
+        return {
+          intent,
+          pattern,
+          prepared,
+          normalized,
+          length: String(pattern || '').length
+        };
+      })
+    ));
+    this.preparedIntentRevision = revision;
+    return this.preparedIntentPatterns;
+  }
+
+  _prepareUncached(text) {
     const preprocessed = preprocessCommand(text || '');
     const normalized = preprocessed.normalizedText;
     const normalizedTokens = preprocessed.tokens;
@@ -329,7 +408,7 @@ class NlpProcessor {
   }
 
   scorePattern(preparedInput, pattern) {
-    const patternPrepared = this.prepare(pattern);
+    const patternPrepared = typeof pattern === 'string' ? this.preparePattern(pattern) : pattern;
     return scorePreparedPattern(preparedInput, patternPrepared);
   }
 
@@ -561,7 +640,7 @@ class NlpProcessor {
       if (!token || FILLER_WORDS.has(token) || /^\d+$/.test(token)) {
         return false;
       }
-      if (this.vocabulary.includes(token)) {
+      if (this.vocabularySet.has(token)) {
         return false;
       }
       if (/\./.test(token)) {

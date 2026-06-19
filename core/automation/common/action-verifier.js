@@ -266,7 +266,10 @@ class ActionVerifier {
         : fail('folder-fallback-target', { path: result.data.path, message: 'Folder fallback target does not exist' });
     }
 
-    const found = this._findAppWindowOrProcess(appName);
+    const apps = this.controllers.apps;
+    const found = typeof apps?.waitForVisibleApp === 'function'
+      ? apps.waitForVisibleApp(appName)
+      : this._findAppWindowOrProcess(appName);
     if (found) {
       return ok('app-open', { app: appName, matchedWindow: found.title || found.MainWindowTitle || '', processName: found.processName || found.ProcessName || '' });
     }
@@ -280,6 +283,15 @@ class ActionVerifier {
 
   _verifyAppClose(entities, result) {
     const appName = Normalizer.normalizeText(result.data?.app || entities.appName || '');
+    const apps = this.controllers.apps;
+    if (typeof apps?.waitForAppClosed === 'function') {
+      return apps.waitForAppClosed(appName)
+        ? ok('app-closed', { app: appName })
+        : fail('app-closed', {
+            app: appName,
+            message: `${appName} still appears to be open`
+          });
+    }
     const found = this._findAppWindowOrProcess(appName, { visibleOnly: true });
     return found
       ? fail('app-closed', {

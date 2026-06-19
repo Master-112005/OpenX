@@ -5,6 +5,7 @@ class NotificationManager extends EventEmitter {
     super();
     this.notifications = [];
     this.maxNotifications = 50;
+    this.timers = new Map();
   }
 
   show(message, type = 'info', duration = 5000) {
@@ -20,17 +21,20 @@ class NotificationManager extends EventEmitter {
     this.emit('notification', notification);
 
     if (this.notifications.length > this.maxNotifications) {
-      this.notifications.shift();
+      const removed = this.notifications.shift();
+      this._clearTimer(removed?.id);
     }
 
     if (duration > 0) {
-      setTimeout(() => this.dismiss(notification.id), duration);
+      const timer = setTimeout(() => this.dismiss(notification.id), duration);
+      this.timers.set(notification.id, timer);
     }
 
     return notification.id;
   }
 
   dismiss(id) {
+    this._clearTimer(id);
     const idx = this.notifications.findIndex(n => n.id === id);
     if (idx !== -1) {
       this.notifications.splice(idx, 1);
@@ -55,12 +59,29 @@ class NotificationManager extends EventEmitter {
   }
 
   clear() {
+    for (const id of this.timers.keys()) {
+      this._clearTimer(id);
+    }
     this.notifications = [];
     this.emit('clear');
   }
 
   getAll() {
     return [...this.notifications];
+  }
+
+  destroy() {
+    this.clear();
+    this.removeAllListeners();
+  }
+
+  _clearTimer(id) {
+    if (!id || !this.timers.has(id)) {
+      return;
+    }
+
+    clearTimeout(this.timers.get(id));
+    this.timers.delete(id);
   }
 }
 

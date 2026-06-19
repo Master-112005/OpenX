@@ -72,7 +72,7 @@ const CONFIRM_PATTERNS = [
 class Assistant extends EventEmitter {
   constructor(config, dependencies = {}) {
     super();
-    this.logger = new Logger({ level: config?.logging?.level || 'info' });
+    this.logger = new Logger(config?.logging || { level: 'info' });
     this.config = config;
     this.eventBus = dependencies.eventBus || config?.eventBus || new AssistantEventBus();
     this.learning = dependencies.learning || new ActiveLearningStore(config);
@@ -256,10 +256,21 @@ class Assistant extends EventEmitter {
     const pending = this.pendingConfirmation && this.pendingConfirmation.commandId === commandId
       ? this.pendingConfirmation
       : null;
-    if (this.pendingConfirmation && this.pendingConfirmation.commandId === commandId) {
-      this.pendingConfirmation = null;
+    if (!pending || pending.intentId !== intentId) {
+      return {
+        success: false,
+        error: 'No matching confirmation is pending',
+        response: this.personality.applyToResponse('No matching confirmation is pending, sir.')
+      };
     }
-    const result = await this.router.confirmAndExecute(commandId, intentId, entities);
+
+    this.pendingConfirmation = null;
+    const result = await this.router.confirmAndExecute(
+      pending.commandId,
+      pending.intentId,
+      pending.entities,
+      { source: pending.source || 'confirmation' }
+    );
     if (result.success && pending?.multiCommand) {
       return this._continuePendingMultiCommand(pending, result, pending.source || 'chat');
     }
@@ -305,6 +316,34 @@ class Assistant extends EventEmitter {
       recentCommands: this.context.getRecentCommands(),
       conversation: this.context.getConversationSummary()
     };
+  }
+
+  async destroy() {
+    this.isProcessing = false;
+    this.pendingConfirmation = null;
+    this.pendingClarification = null;
+    this.pendingFeedback = null;
+    this.pendingLearningCorrection = null;
+
+    try {
+      this.learning?.flush?.();
+    } catch (error) {
+      this.logger.warn('Failed to flush learning store during shutdown', error.message);
+    }
+
+    try {
+      await this.automation?.destroy?.();
+    } catch (error) {
+      this.logger.warn('Failed to destroy automation engine', error.message);
+    }
+
+    try {
+      this.context?.destroy?.();
+    } catch (error) {
+      this.logger.warn('Failed to destroy context manager', error.message);
+    }
+
+    this.removeAllListeners();
   }
 
   _answerSessionContextQuestion(input, source) {
@@ -704,6 +743,15 @@ class Assistant extends EventEmitter {
 
     const explicitLearning = this.learning.learnFromText(raw);
     if (explicitLearning) {
+      if (explicitLearning.type === 'rejected-sensitive' || explicitLearning.sensitive) {
+        return {
+          success: false,
+          learned: false,
+          source,
+          data: explicitLearning,
+          response: this.personality.applyToResponse(explicitLearning.response)
+        };
+      }
       return {
         success: true,
         learned: true,
@@ -941,7 +989,8 @@ class Assistant extends EventEmitter {
       const result = await this.router.confirmAndExecute(
         pending.commandId,
         pending.intentId,
-        pending.entities
+        pending.entities,
+        { source }
       );
       if (pending.multiCommand) {
         return this._continuePendingMultiCommand(pending, result, source);
@@ -1128,7 +1177,8 @@ class Assistant extends EventEmitter {
         {
           ...pending.entities,
           ...pending.data.confirmEntities
-        }
+        },
+        { source }
       );
       const response = this.personality.applyToResponse(result.response || '');
       return {
@@ -1160,7 +1210,8 @@ class Assistant extends EventEmitter {
     const result = await this.router.confirmAndExecute(
       pending.commandId,
       pending.intentId,
-      this._buildClarifiedEntities(pending.entities, choice)
+      this._buildClarifiedEntities(pending.entities, choice),
+      { source }
     );
     const response = this.personality.applyToResponse(result.response || '');
     return {

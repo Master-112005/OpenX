@@ -70,7 +70,7 @@ const PLATFORM_REGISTRY = {
 class MediaController {
   constructor(config) {
     this.config = config || {};
-    this.logger = new Logger({ level: config?.logging?.level || 'info' });
+    this.logger = new Logger(config?.logging || { level: 'info' });
     this.browser = new BrowserController(config);
     this.windowSession = new WindowsSessionController(config);
     this.activeSession = null;
@@ -674,6 +674,15 @@ class MediaController {
         message: 'No active media session is known yet'
       }
     };
+  }
+
+  destroy() {
+    if (this.activeSession?.managedWindow) {
+      this._closeManagedSession();
+      return;
+    }
+
+    this.activeSession = null;
   }
 
   _sendPlayerShortcut(action, keys, detail = {}) {

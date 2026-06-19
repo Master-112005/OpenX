@@ -15,7 +15,7 @@ class DeviceEventsMonitor {
   constructor(options = {}) {
     this.intervalMs = Math.max(DEVICE_POLL_MS, Number(options.intervalMs) || DEVICE_POLL_MS);
     this.debounceMs = Math.max(100, Number(options.debounceMs) || DEVICE_DEBOUNCE_MS);
-    this.logger = options.logger || new Logger({ level: options.logging?.level || 'info' });
+    this.logger = options.logger || new Logger(options.logging || { level: 'info' });
     this.signals = options.signals || signals;
     this.audioManager = options.audioManager || audioDevices.createManager(options);
     this.timer = null;
@@ -27,7 +27,7 @@ class DeviceEventsMonitor {
 
   async _readState() {
     const currentDevice = await this.audioManager.getCurrentAudioDevice();
-    const devices = await this.audioManager.getAudioDevices();
+    const devices = await this.audioManager.getAudioDevices(currentDevice);
     const headphonesConnected = devices.some(device => headphones.isHeadphoneDevice(device));
     return { currentDevice, devices, headphonesConnected };
   }

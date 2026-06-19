@@ -185,6 +185,8 @@ This layer performs Windows automation. It contains controllers for:
 - Volume
 - Windows/session control
 
+Application lifecycle automation canonicalizes common app aliases, focuses legitimate existing windows, launches Win32 or Start-menu/UWP apps, and verifies bounded open/close postconditions. Browser matching requires the browser identity in the window title, preventing Chrome-hosted PWAs such as YouTube or Instagram from being mistaken for the Chrome browser itself.
+
 ### `core/context-awareness`
 
 This layer detects local Windows environment signals and converts them into contextual assistant state.
@@ -245,7 +247,8 @@ OpenX_Data/
 |-- learning.json
 |-- logs/
 |-- runtime/
-|   `-- chrome-media-profile/
+|   |-- chrome-media-profile/
+|   `-- crash-recovery.json
 `-- cache/
 ```
 
@@ -256,6 +259,8 @@ OpenX_Data/
 This contains the Electron desktop application:
 
 - `electron/main.js`: Electron main process entry point.
+- `electron/security.js`: trusted-renderer checks, hardened web preferences, and channel-specific IPC payload validation.
+- `electron/crash-recovery.js`: persisted bounded relaunch policy that prevents startup crash loops.
 - `preload/index.js`: preload bridge.
 - `renderer/chat/index.html`: chat window.
 - `renderer/settings/index.html`: settings UI.
@@ -267,6 +272,14 @@ This folder contains the plugin manager entry point and a sample plugin. Plugins
 ### `tests`
 
 The test suite covers assistant core logic, automation controllers, and voice behavior using Mocha and Chai.
+
+### Electron Security, Recovery, And Logging
+
+- Browser windows explicitly enable sandboxing, context isolation, and web security while disabling Node integration, subframe/worker Node integration, remote-module access, insecure content, and webviews.
+- Renderer navigation and popups are denied unless they remain on the expected local application view.
+- Every IPC channel validates both the sender origin and a bounded payload schema; forbidden object keys are rejected before settings or command handling.
+- Renderer crashes are recovered with a bounded restart budget. Fatal main-process failures write crash evidence, clean up services, and use a persisted crash-loop policy before relaunching.
+- `core/shared/index.js` writes redacted JSON Lines application/error/crash logs with 10 MB size rotation and five-file retention. File logging is enabled by the production logging configuration and remains off for unconfigured unit instances.
 
 ## 10. Event System
 
@@ -445,6 +458,9 @@ The project contains tests for:
 - Device detection
 - Mode scoring
 - Mode transition stability
+- Electron IPC and BrowserWindow security
+- Crash-loop recovery and corrupt recovery-state handling
+- Structured logger redaction, rotation, and retention
 
 Test command:
 
@@ -452,7 +468,7 @@ Test command:
 npm test
 ```
 
-Latest focused verification result: 193 passing.
+Latest complete verification result: 465 passing, with repository-wide ESLint passing.
 
 ## 17. Context Awareness And Device Detection
 
@@ -699,14 +715,20 @@ OpenX/
 |-- apps/
 |   `-- desktop/
 |       |-- electron/
-|       |   `-- main.js
+|       |   |-- crash-recovery.js
+|       |   |-- main.js
+|       |   `-- security.js
 |       |-- preload/
 |       |   `-- index.js
 |       `-- renderer/
 |           |-- chat/
-|           |   `-- index.html
+|           |   |-- index.css
+|           |   |-- index.html
+|           |   `-- index.js
 |           `-- settings/
-|               `-- index.html
+|               |-- index.css
+|               |-- index.html
+|               `-- index.js
 |-- bin/
 |   `-- whisper/
 |       |-- bench.exe
@@ -870,17 +892,22 @@ OpenX/
     |-- core/
     |   |-- assistant.test.js
     |   |-- command-corpus.test.js
+    |   |-- crash-recovery.test.js
     |   |-- data-root.test.js
+    |   |-- electron-security.test.js
     |   |-- entities.test.js
     |   |-- intents.test.js
     |   |-- learning.test.js
+    |   |-- logger.test.js
     |   |-- media-youtube-corpus.test.js
     |   |-- nlp.test.js
     |   |-- nlu.test.js
     |   |-- parser.test.js
     |   |-- permissions.test.js
     |   |-- responses.test.js
+    |   |-- renderer-security.test.js
     |   |-- router.test.js
+    |   |-- security-critical.test.js
     |   `-- settings.test.js
     |-- device-detection/
     |   `-- device-detection.test.js
@@ -893,6 +920,8 @@ OpenX/
 | File | Role |
 | --- | --- |
 | `apps/desktop/electron/main.js` | Electron application startup |
+| `apps/desktop/electron/security.js` | Trusted renderer boundary, hardened web preferences, and IPC schema validation |
+| `apps/desktop/electron/crash-recovery.js` | Persisted bounded restart and crash-loop suppression policy |
 | `apps/desktop/preload/index.js` | Renderer preload bridge |
 | `core/assistant/index.js` | Assistant module entry |
 | `core/assistant/router/index.js` | Command routing and execution coordination |

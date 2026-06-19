@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { ContactStore, normalizePhoneNumber } = require('../automation/communications/contact-store');
-const { ensureDataRoot, migrateLegacyData } = require('../shared/data-root');
+const { ensureDataRoot, migrateLegacyData, readJsonFile, writeJsonAtomic } = require('../shared/data-root');
 
 const CHAT_THEMES = {
   midnight: {
@@ -333,23 +333,14 @@ class SettingsService {
     }
 
     if (!fs.existsSync(this.settingsPath)) {
-      fs.writeFileSync(this.settingsPath, JSON.stringify(this.defaults, null, 2), 'utf8');
+      writeJsonAtomic(this.settingsPath, this.defaults, { backup: false });
     }
   }
 
   loadRaw() {
     this.ensureStoreExists();
-    const source = fs.readFileSync(this.settingsPath, 'utf8').trim();
-    if (!source) {
-      return {};
-    }
-
-    try {
-      const parsed = JSON.parse(source);
-      return isPlainObject(parsed) ? parsed : {};
-    } catch (err) {
-      return {};
-    }
+    const parsed = readJsonFile(this.settingsPath, {}, { createIfMissing: true });
+    return isPlainObject(parsed) ? parsed : {};
   }
 
   getSettings() {
@@ -360,14 +351,14 @@ class SettingsService {
     const current = this.getSettings();
     const next = this._sanitizeSettings(deepMerge(current, partialSettings || {}));
     this.ensureStoreExists();
-    fs.writeFileSync(this.settingsPath, JSON.stringify(next, null, 2), 'utf8');
+    writeJsonAtomic(this.settingsPath, next);
     return next;
   }
 
   resetSettings() {
     const next = this._sanitizeSettings(deepClone(this.defaults));
     this.ensureStoreExists();
-    fs.writeFileSync(this.settingsPath, JSON.stringify(next, null, 2), 'utf8');
+    writeJsonAtomic(this.settingsPath, next);
     return next;
   }
 

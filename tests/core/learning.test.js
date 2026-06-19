@@ -123,7 +123,7 @@ describe('Active Learning Store', function() {
     assert.equal(answer.response, 'Your name is rakes, sir.');
   });
 
-  it('should remember and answer account passwords across service phrasing', function() {
+  it('should reject password storage and never return password values', function() {
     const { tempDir, store } = createStore();
 
     const apple = store.learnFromText('remember this rakesh112005 as my apple account password');
@@ -136,14 +136,15 @@ describe('Active Learning Store', function() {
     const appleAnswer = reloaded.answerPersonalQuestion('what is my apple account password');
     const googleAnswer = reloaded.answerPersonalQuestion('what is my google account password');
 
-    assert.equal(apple.type, 'user-fact');
-    assert.equal(google.type, 'user-fact');
-    assert.equal(appleAnswer.known, true);
+    assert.equal(apple.type, 'rejected-sensitive');
+    assert.equal(google.type, 'rejected-sensitive');
+    assert.equal(appleAnswer.known, false);
     assert.equal(appleAnswer.fact, 'applePassword');
-    assert.match(appleAnswer.response, /rakesh112005/);
-    assert.equal(googleAnswer.known, true);
+    assert.doesNotMatch(appleAnswer.response, /rakesh112005/);
+    assert.equal(googleAnswer.known, false);
     assert.equal(googleAnswer.fact, 'googlePassword');
-    assert.match(googleAnswer.response, /hunter2/);
+    assert.doesNotMatch(googleAnswer.response, /hunter2/);
+    assert.deepEqual(reloaded.getSnapshot().userFacts, {});
   });
 
   it('should remember and answer generic personal facts', function() {

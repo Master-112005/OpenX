@@ -13,7 +13,7 @@ function audioNameFromPayload(payload = {}) {
 
 class ContextEngine {
   constructor(options = {}) {
-    this.logger = options.logger || new Logger({ level: options.logging?.level || 'info' });
+    this.logger = options.logger || new Logger(options.logging || { level: 'info' });
     this.signals = options.signals || signals;
     this.now = options.now || (() => Date.now());
     this.unsubscribers = [];

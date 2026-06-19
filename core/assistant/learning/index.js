@@ -1,12 +1,14 @@
 const fs = require('fs');
 const path = require('path');
 const { Normalizer } = require('../../shared/index');
-const { buildDataPaths } = require('../../shared/data-root');
+const { buildDataPaths, writeJsonAtomic } = require('../../shared/data-root');
 
 const MAX_EVENTS = 200;
 const MAX_REWRITES = 100;
 const MAX_PROMPTS = 100;
 const MAX_ROUTE_EVIDENCE = 200;
+const MAX_PREFERENCES = 100;
+const MAX_USER_FACTS = 150;
 const ACCOUNT_SERVICES = [
   'apple',
   'microsoft',
@@ -147,6 +149,9 @@ class ActiveLearningStore {
     this.pendingSaveTimer = null;
     this.storePath = config?.activeLearning?.storePath || buildDataPaths(config).learningPath;
     this.data = this._sanitize(this._load());
+    if (this._purgeProtectedUserFacts()) {
+      this._writeNow();
+    }
   }
 
   getSnapshot() {
@@ -231,6 +236,7 @@ class ActiveLearningStore {
       updatedAt: now
     };
     this.data.preferences[kind] = record;
+    this._pruneRecordObject(this.data.preferences, MAX_PREFERENCES);
     this._save();
     return record;
   }
@@ -265,6 +271,7 @@ class ActiveLearningStore {
       updatedAt: now
     };
     this.data.userFacts[normalizedKind] = record;
+    this._pruneRecordObject(this.data.userFacts, MAX_USER_FACTS);
     this._save();
     return record;
   }
@@ -309,9 +316,6 @@ class ActiveLearningStore {
     if (facts.friend_name) summary.push(`friend: ${facts.friend_name}`);
     if (facts.phone) summary.push(`phone: ${facts.phone}`);
     if (facts.email) summary.push(`email: ${facts.email}`);
-    if (facts.applePassword) summary.push(`has apple password`);
-    if (facts.googlePassword) summary.push(`has google password`);
-    if (facts.generalPassword) summary.push(`has general password`);
     return summary.length > 0 ? summary.join(', ') : 'no personal facts stored';
   }
 
@@ -420,20 +424,12 @@ class ActiveLearningStore {
     const passwordMatch = normalized.match(new RegExp(`^(?:what\\s+is|what'?s|tell me|do\\s+you\\s+(?:know|remember))\\s+my\\s+((?:${ACCOUNT_SERVICE_PATTERN})?\\s*)?(?:account\\s+)?password\\b`));
     if (passwordMatch) {
       const service = normalizeAccountService(passwordMatch[1]);
-      const password = this.getUserFact(`${service}Password`);
-      if (password?.value) {
-        return {
-          type: 'user-fact',
-          known: true,
-          fact: `${service}Password`,
-          response: `Your ${service} account password is: ${password.value}`
-        };
-      }
       return {
         type: 'user-fact',
         known: false,
         fact: `${service}Password`,
-        response: `I do not have your ${service} account password stored, sir. You can say, "remember my ${service} account password is [password]."`
+        sensitive: true,
+        response: `I cannot store or reveal ${service} account passwords. Please use Windows Credential Manager or a dedicated password manager.`
       };
     }
 
@@ -847,52 +843,19 @@ class ActiveLearningStore {
 
     const passwordRememberMatch = text.match(new RegExp(`^(?:remember|save|store)\\s+(?:my\\s+)?((?:${ACCOUNT_SERVICE_PATTERN})\\s+)?(?:account\\s+)?password\\s+(?:is\\s+)?(.+)$`, 'i'));
     if (passwordRememberMatch && (passwordRememberMatch[1] || passwordRememberMatch[2])) {
-      const password = passwordRememberMatch[2].replace(/[.!?]+$/g, '').trim();
       const serviceName = normalizeAccountService(passwordRememberMatch[1]);
-      if (password && password.length > 0 && password.length < 100) {
-        const fact = this.rememberUserFact(`${serviceName}Password`, password, {
-          source: 'user-stated-credential'
-        });
-        if (fact) {
-          return {
-            type: 'user-fact',
-            response: `Your ${serviceName} account password has been securely stored, sir.`
-          };
-        }
-      }
+      return this._rejectSensitiveCredential(serviceName);
     }
 
     const passwordThisMatch = text.match(new RegExp(`^(?:remember|save|store)\\s+this\\s+(.+?)\\s+as\\s+(?:my\\s+)?((?:${ACCOUNT_SERVICE_PATTERN})\\s+)?(?:account\\s+)?password$`, 'i'));
     if (passwordThisMatch && passwordThisMatch[1]) {
-      const password = passwordThisMatch[1].replace(/[.!?]+$/g, '').trim();
       const serviceName = normalizeAccountService(passwordThisMatch[2]);
-      if (password && password.length > 0 && password.length < 100) {
-        const fact = this.rememberUserFact(`${serviceName}Password`, password, {
-          source: 'user-stated-credential'
-        });
-        if (fact) {
-          return {
-            type: 'user-fact',
-            response: `Your ${serviceName} account password has been securely stored, sir.`
-          };
-        }
-      }
+      return this._rejectSensitiveCredential(serviceName);
     }
 
     const passwordGeneralMatch = text.match(/^(?:remember|save|store)\s+this\s+(.+?)\s+as\s+(?:my\s+)?password$/i);
     if (passwordGeneralMatch && passwordGeneralMatch[1]) {
-      const password = passwordGeneralMatch[1].replace(/[.!?]+$/g, '').trim();
-      if (password && password.length > 0 && password.length < 100) {
-        const fact = this.rememberUserFact('generalPassword', password, {
-          source: 'user-stated-credential'
-        });
-        if (fact) {
-          return {
-            type: 'user-fact',
-            response: `Your password has been securely stored, sir.`
-          };
-        }
-      }
+      return this._rejectSensitiveCredential('general');
     }
 
     if (identityMatch && identityMatch[1]) {
@@ -1172,28 +1135,76 @@ class ActiveLearningStore {
     if (!fs.existsSync(directory)) {
       fs.mkdirSync(directory, { recursive: true });
     }
-    const tempPath = `${this.storePath}.${process.pid}.${Date.now()}.tmp`;
-    try {
-      fs.writeFileSync(tempPath, JSON.stringify(this.data, null, 2), 'utf8');
-      fs.renameSync(tempPath, this.storePath);
-    } catch (error) {
-      try {
-        if (fs.existsSync(tempPath)) {
-          fs.unlinkSync(tempPath);
-        }
-      } catch (_) {
-        // Ignore cleanup failures; the original write error is more useful.
-      }
-      throw error;
+    writeJsonAtomic(this.storePath, this.data);
+  }
+
+  _rejectSensitiveCredential(serviceName = 'general') {
+    return {
+      type: 'rejected-sensitive',
+      learned: false,
+      sensitive: true,
+      service: serviceName,
+      response: `I cannot store ${serviceName} account passwords in assistant memory. Please use Windows Credential Manager or a dedicated password manager.`
+    };
+  }
+
+  _purgeProtectedUserFacts() {
+    const facts = this.data?.userFacts;
+    if (!isPlainObject(facts)) {
+      return false;
     }
+
+    let changed = false;
+    for (const key of Object.keys(facts)) {
+      if (PROTECTED_FACT_KEY_PATTERN.test(key)) {
+        delete facts[key];
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
+  _pruneRecordObject(records, maxSize) {
+    if (!isPlainObject(records) || !Number.isFinite(maxSize) || maxSize <= 0) {
+      return records;
+    }
+
+    const keys = Object.keys(records);
+    if (keys.length <= maxSize) {
+      return records;
+    }
+
+    const keep = new Set(keys
+      .sort((left, right) => {
+        const leftTime = Date.parse(records[left]?.updatedAt || records[left]?.createdAt || 0) || 0;
+        const rightTime = Date.parse(records[right]?.updatedAt || records[right]?.createdAt || 0) || 0;
+        return rightTime - leftTime;
+      })
+      .slice(0, maxSize));
+
+    for (const key of keys) {
+      if (!keep.has(key)) {
+        delete records[key];
+      }
+    }
+
+    return records;
   }
 
   _sanitize(input) {
     const source = isPlainObject(input) ? input : {};
+    const preferences = this._pruneRecordObject(
+      isPlainObject(source.preferences) ? { ...source.preferences } : {},
+      MAX_PREFERENCES
+    );
+    const userFacts = this._pruneRecordObject(
+      isPlainObject(source.userFacts) ? { ...source.userFacts } : {},
+      MAX_USER_FACTS
+    );
     return {
       version: 1,
-      preferences: isPlainObject(source.preferences) ? source.preferences : {},
-      userFacts: isPlainObject(source.userFacts) ? source.userFacts : {},
+      preferences,
+      userFacts,
       commandRewrites: Array.isArray(source.commandRewrites) ? source.commandRewrites.slice(0, MAX_REWRITES) : [],
       feedback: Array.isArray(source.feedback) ? source.feedback.slice(0, MAX_EVENTS) : [],
       mistakes: Array.isArray(source.mistakes) ? source.mistakes.slice(0, MAX_EVENTS) : [],

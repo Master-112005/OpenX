@@ -44,7 +44,7 @@ function parseNumber(output) {
 
 class BrightnessController {
   constructor(config) {
-    this.logger = new Logger({ level: config?.logging?.level || 'info' });
+    this.logger = new Logger(config?.logging || { level: 'info' });
     this.step = config?.system?.brightnessStep || 10;
   }
 

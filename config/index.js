@@ -102,7 +102,7 @@ const CONFIG = {
 
   logging: {
     level: 'info',
-    maxFileSize: 5242880,
+    maxFileSize: 10485760,
     maxFiles: 5,
     directory: DATA_PATHS.logsDir
   },

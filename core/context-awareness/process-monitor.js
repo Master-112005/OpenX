@@ -48,7 +48,7 @@ function parseJsonArray(output) {
 class ProcessMonitor {
   constructor(options = {}) {
     this.intervalMs = Math.max(PROCESS_POLL_MS, Number(options.intervalMs) || PROCESS_POLL_MS);
-    this.logger = options.logger || new Logger({ level: options.logging?.level || 'info' });
+    this.logger = options.logger || new Logger(options.logging || { level: 'info' });
     this.signals = options.signals || signals;
     this.runner = options.runner || runPowerShell;
     this.timer = null;

@@ -4,7 +4,29 @@ const Logger = require('../../shared/index').Logger;
 
 class SystemController {
   constructor(config) {
-    this.logger = new Logger({ level: config?.logging?.level || 'info' });
+    this.logger = new Logger(config?.logging || { level: 'info' });
+    this.cache = new Map();
+  }
+
+  _getCached(key, ttlMs, producer) {
+    const now = Date.now();
+    const cached = this.cache.get(key);
+    if (cached && now - cached.timestamp < ttlMs) {
+      return cached.value;
+    }
+
+    const value = producer();
+    this.cache.set(key, { timestamp: now, value });
+    return value;
+  }
+
+  _clearExpiredCache(maxAgeMs = 10 * 60 * 1000) {
+    const now = Date.now();
+    for (const [key, entry] of this.cache.entries()) {
+      if (!entry || now - entry.timestamp > maxAgeMs) {
+        this.cache.delete(key);
+      }
+    }
   }
 
   getTime(now = new Date()) {
@@ -196,6 +218,10 @@ class SystemController {
   }
 
   getCPUUsage() {
+    return this._getCached('cpuUsage', 15000, () => this._getCPUUsageNow());
+  }
+
+  _getCPUUsageNow() {
     try {
       const result = execSync(
         'powershell -Command "Get-CimInstance Win32_Processor | Measure-Object -Property LoadPercentage -Average | Select-Object -ExpandProperty Average"',
@@ -241,6 +267,10 @@ class SystemController {
   }
 
   getBatteryStatus() {
+    return this._getCached('batteryStatus', 60000, () => this._getBatteryStatusNow());
+  }
+
+  _getBatteryStatusNow() {
     try {
       const result = execSync(
         'powershell -Command "Get-CimInstance Win32_Battery | Select-Object -ExpandProperty EstimatedChargeRemaining"',
@@ -257,6 +287,10 @@ class SystemController {
   }
 
   getDiskSpace() {
+    return this._getCached('diskSpace', 60000, () => this._getDiskSpaceNow());
+  }
+
+  _getDiskSpaceNow() {
     try {
       const result = execSync(
         'powershell -Command "Get-CimInstance Win32_LogicalDisk -Filter DriveType=3 | Select-Object DeviceID, @{N=\'FreeGB\';E={[math]::Round($_.FreeSpace/1GB,1)}}, @{N=\'TotalGB\';E={[math]::Round($_.Size/1GB,1)}} | ConvertTo-Json"',
@@ -287,6 +321,10 @@ class SystemController {
   }
 
   getProcessCount() {
+    return this._getCached('processCount', 10000, () => this._getProcessCountNow());
+  }
+
+  _getProcessCountNow() {
     try {
       const result = execSync(
         'powershell -Command "(Get-Process).Count"',
@@ -300,6 +338,11 @@ class SystemController {
   }
 
   getRunningApps(options = {}) {
+    const queryApp = String(options?.queryApp || '').trim().toLowerCase();
+    return this._getCached(`runningApps:${queryApp}`, 3000, () => this._getRunningAppsNow({ queryApp }));
+  }
+
+  _getRunningAppsNow(options = {}) {
     try {
       const output = execFileSync('powershell.exe', [
         '-NoProfile',
@@ -371,6 +414,10 @@ class SystemController {
   }
 
   _getTopProcessBy(property, metric) {
+    return this._getCached(`topProcess:${property}:${metric}`, 10000, () => this._getTopProcessByNow(property, metric));
+  }
+
+  _getTopProcessByNow(property, metric) {
     try {
       const output = execFileSync('powershell.exe', [
         '-NoProfile',
@@ -405,6 +452,10 @@ class SystemController {
   }
 
   _getLargestUserFolders() {
+    return this._getCached('largestUserFolders', 10 * 60 * 1000, () => this._getLargestUserFoldersNow());
+  }
+
+  _getLargestUserFoldersNow() {
     try {
       const home = os.homedir();
       const folders = ['Desktop', 'Documents', 'Downloads', 'Pictures', 'Videos', 'Music']
@@ -437,6 +488,10 @@ class SystemController {
   }
 
   _getRecentlyInstalledApps() {
+    return this._getCached('recentlyInstalledApps', 10 * 60 * 1000, () => this._getRecentlyInstalledAppsNow());
+  }
+
+  _getRecentlyInstalledAppsNow() {
     try {
       const script = [
         '$roots = @("HKLM:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*", "HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*", "HKLM:\\Software\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*");',
@@ -541,6 +596,7 @@ class SystemController {
   }
 
   getStatus() {
+    this._clearExpiredCache();
     const cpu = this.getCPUUsage();
     const mem = this.getMemoryUsage();
     const battery = this.getBatteryStatus();

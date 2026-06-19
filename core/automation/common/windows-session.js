@@ -29,7 +29,7 @@ Add-Type -TypeDefinition $signature -ErrorAction SilentlyContinue | Out-Null
 
 class WindowsSessionController {
   constructor(config) {
-    this.logger = new Logger({ level: config?.logging?.level || 'info' });
+    this.logger = new Logger(config?.logging || { level: 'info' });
   }
 
   listWindows() {

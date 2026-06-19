@@ -13,7 +13,7 @@ const DEFAULT_PREFERRED_VOICES = [
 class TextToSpeech extends EventEmitter {
   constructor(config) {
     super();
-    this.logger = new Logger({ level: config?.logging?.level || 'info' });
+    this.logger = new Logger(config?.logging || { level: 'info' });
     this.isSpeaking = false;
     this.rate = this._normalizeRate(config?.voice?.tts?.rate);
     this.volume = this._normalizeVolume(config?.voice?.tts?.volume);
@@ -123,10 +123,27 @@ class TextToSpeech extends EventEmitter {
   }
 
   speakAsync(text) {
+    if (!text || typeof text !== 'string' || text.trim().length === 0) {
+      return Promise.resolve();
+    }
+
     return new Promise((resolve) => {
-      this.once('completed', resolve);
-      this.once('error', resolve);
-      this.once('stopped', resolve);
+      const cleanup = () => {
+        this.off('completed', onCompleted);
+        this.off('error', onError);
+        this.off('stopped', onStopped);
+      };
+      const finish = (value) => {
+        cleanup();
+        resolve(value);
+      };
+      const onCompleted = (value) => finish(value);
+      const onError = (value) => finish(value);
+      const onStopped = (value) => finish(value);
+
+      this.once('completed', onCompleted);
+      this.once('error', onError);
+      this.once('stopped', onStopped);
       this.speak(text);
     });
   }

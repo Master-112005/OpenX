@@ -1,21 +1,4 @@
-/**
- * WhatsAppDesktopController
- *
- * Automates the WhatsApp Desktop (Windows) application using PowerShell
- * UI-Automation. The PowerShell script is spawned as a fully detached,
- * background process so it NEVER blocks the Electron main-process thread.
- *
- * Architecture:
- *   caller → startVoiceCall / sendMessage
- *           → _dispatch()          ← spawns detached PowerShell, returns immediately
- *
- * The automation result is written by the script into a temp JSON file.
- * _dispatch() polls that file for up to POLL_TIMEOUT_MS then resolves.
- * If the poll times out the operation is considered "dispatched" (best-effort)
- * which is the same guarantee offered by launchTarget() elsewhere in this codebase.
- */
-
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -32,7 +15,8 @@ function escapePowerShell(value) {
 
 class WhatsAppDesktopController {
   constructor(config) {
-    this.logger = new Logger({ level: config?.logging?.level || 'info' });
+    this.logger = new Logger(config?.logging || { level: 'info' });
+    this.activeChildren = new Set();
   }
 
   sendMessage(contactName, messageText) {
@@ -55,9 +39,9 @@ class WhatsAppDesktopController {
   }
 
   /**
-   * Spawns the PowerShell automation script as a detached background process.
+   * Spawns the PowerShell automation script as a tracked background process.
    * Returns a Promise that resolves once the script writes its result JSON,
-   * or after POLL_TIMEOUT_MS if it takes too long (best-effort dispatch).
+   * or fails after POLL_TIMEOUT_MS if verification does not complete.
    *
    * @returns {Promise<{success: boolean, data?: object, error?: string}>}
    */
@@ -71,12 +55,22 @@ class WhatsAppDesktopController {
 
     return new Promise((resolve) => {
       let settled = false;
+      let child = null;
+      let pollHandle = null;
+      let timeoutHandle = null;
 
-      const settle = (result) => {
+      const settle = (result, options = {}) => {
         if (settled) return;
         settled = true;
-        clearInterval(pollHandle);
-        clearTimeout(timeoutHandle);
+        if (pollHandle) clearInterval(pollHandle);
+        if (timeoutHandle) clearTimeout(timeoutHandle);
+
+        if (child) {
+          this.activeChildren.delete(child);
+          if (options.killChild) {
+            this._killChild(child);
+          }
+        }
 
         // Clean up temp file
         try { fs.unlinkSync(resultFile); } catch (_) {}
@@ -84,8 +78,7 @@ class WhatsAppDesktopController {
         resolve(result);
       };
 
-      // Spawn PowerShell fully detached so it can't block the main process
-      let child;
+      // Spawn PowerShell asynchronously and keep ownership for timeout/shutdown cleanup.
       try {
         child = spawn('powershell.exe', [
           '-NoProfile',
@@ -93,11 +86,16 @@ class WhatsAppDesktopController {
           '-ExecutionPolicy', 'Bypass',
           '-Command', script
         ], {
-          detached: true,
           stdio: 'ignore',
           windowsHide: true
         });
-        child.unref();
+        this.activeChildren.add(child);
+        child.once('exit', () => {
+          this.activeChildren.delete(child);
+        });
+        child.once('error', () => {
+          this.activeChildren.delete(child);
+        });
       } catch (spawnErr) {
         this.logger.error('WhatsApp desktop: failed to spawn PowerShell', spawnErr.message);
         return resolve({
@@ -107,7 +105,7 @@ class WhatsAppDesktopController {
       }
 
       // Poll the result file written by the PS script
-      const pollHandle = setInterval(() => {
+      pollHandle = setInterval(() => {
         try {
           if (!fs.existsSync(resultFile)) return;
           const raw = fs.readFileSync(resultFile, 'utf8').trim();
@@ -140,41 +138,40 @@ class WhatsAppDesktopController {
       }, POLL_INTERVAL_MS);
 
       // Hard timeout — after this we give up polling.
-      // We do NOT return failure here: the script is still running in the background
-      // and will attempt to place/send the call. We return a best-effort success so
-      // the assistant responds promptly and doesn't freeze the UI.
-      const timeoutHandle = setTimeout(() => {
+      // Verification failure is reported as failure and the owned worker is stopped.
+      timeoutHandle = setTimeout(() => {
         this.logger.warn(
           'WhatsApp desktop automation',
-          `Timed out after ${POLL_TIMEOUT_MS}ms waiting for result — operation may still be in progress`
+          `Timed out after ${POLL_TIMEOUT_MS}ms waiting for result; terminating worker`
         );
         settle({
-          success: true,
-          data: {
-            contactName,
-            platform: 'whatsapp',
-            mode,
-            delivery: mode === 'message' ? 'best-effort' : undefined,
-            verification: 'timeout-best-effort',
-            transport: 'whatsapp-desktop'
-          }
-        });
+          success: false,
+          error: `WhatsApp desktop automation timed out before verification for ${contactName}`
+        }, { killChild: true });
       }, POLL_TIMEOUT_MS);
     });
   }
 
-  /**
-   * Builds the PowerShell automation script.
-   * The script writes a JSON result object to resultFile when done.
-   *
-   * Resilience improvements (v2):
-   *  - Focus-SearchBox: tries multiple known search box names + fallback wildcard
-   *  - Wait-ForChatReady: accepts any non-search edit box (WhatsApp changes label)
-   *  - Start-VoiceCall: tries 'Voice call', 'Audio call', 'Call'; falls back to
-   *    any button containing 'call' (excl. video/end); returns best-effort success
-   *    if call-state UI is not detected (instead of Fail-Action)
-   *  - Call-state polling: also scans Text elements for 'ringing/calling/connecting'
-   */
+  destroy() {
+    for (const child of Array.from(this.activeChildren)) {
+      this._killChild(child);
+      this.activeChildren.delete(child);
+    }
+  }
+
+  _killChild(child) {
+    const pid = child?.pid;
+    if (!pid) {
+      return;
+    }
+
+    try {
+      spawnSync('taskkill', ['/pid', String(pid), '/f', '/t'], { stdio: 'ignore' });
+    } catch (error) {
+      this.logger.warn('WhatsApp desktop: failed to terminate PowerShell worker', error.message);
+    }
+  }
+
   _buildScript({ mode, contactName, messageText, resultFile }) {
     const safeMode        = escapePowerShell(mode);
     const safeContact     = escapePowerShell(contactName);

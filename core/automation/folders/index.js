@@ -9,6 +9,7 @@ const {
   getHomeDirectory,
   getSpecialFolders,
   normalizeLocation,
+  requireSafeUserPath,
   resolveDestinationPath,
   resolveDirectory,
   splitNameAndLocation
@@ -64,14 +65,14 @@ function hasSearchTimeRemaining(startedAt, maxElapsedMs) {
 
 class FolderController {
   constructor(config) {
-    this.logger = new Logger({ level: config?.logging?.level || 'info' });
+    this.logger = new Logger(config?.logging || { level: 'info' });
   }
 
   _resolveFolderPath(folderName, targetPath = null) {
     if (!folderName) return null;
 
     if (path.isAbsolute(folderName) && fs.existsSync(folderName) && fs.statSync(folderName).isDirectory()) {
-      return path.resolve(folderName);
+      return requireSafeUserPath(folderName, { allowRoot: true });
     }
 
     const parsed = splitNameAndLocation(folderName);
@@ -114,10 +115,9 @@ class FolderController {
       return { success: false, error: 'Invalid folder name' };
     }
 
-    const dir = resolveDirectory(targetPath, { mustExist: false }) || getHomeDirectory();
-    const fullPath = path.join(dir, safeName);
-
     try {
+      const dir = requireSafeUserPath(resolveDirectory(targetPath, { mustExist: false }) || getHomeDirectory(), { allowRoot: true });
+      const fullPath = path.join(dir, safeName);
       if (fs.existsSync(fullPath)) {
         return { success: false, error: 'Folder already exists' };
       }
@@ -140,6 +140,7 @@ class FolderController {
       if (!fullPath) {
         return { success: false, error: 'Folder not found' };
       }
+      requireSafeUserPath(fullPath);
 
       const stats = fs.statSync(fullPath);
       if (!stats.isDirectory()) {
@@ -164,11 +165,13 @@ class FolderController {
       if (!sourcePath) {
         return { success: false, error: 'Source folder not found' };
       }
+      requireSafeUserPath(sourcePath);
 
       const finalPath = resolveDestinationPath(destination, sourcePath, { type: 'directory' });
       if (!finalPath) {
         return { success: false, error: 'Destination could not be resolved' };
       }
+      requireSafeUserPath(finalPath);
 
       fs.mkdirSync(path.dirname(finalPath), { recursive: true });
 
@@ -194,8 +197,9 @@ class FolderController {
     try {
       const selectedPath = options.selectedPath || options.targetPath;
       if (selectedPath && path.isAbsolute(selectedPath) && fs.existsSync(selectedPath) && fs.statSync(selectedPath).isDirectory()) {
-        this._openFolderPath(selectedPath, options);
-        return { success: true, data: { path: selectedPath, folderName: path.basename(selectedPath), openWith: options.openWith || null } };
+        const safeSelectedPath = requireSafeUserPath(selectedPath, { allowRoot: true });
+        this._openFolderPath(safeSelectedPath, options);
+        return { success: true, data: { path: safeSelectedPath, folderName: path.basename(safeSelectedPath), openWith: options.openWith || null } };
       }
 
       const matches = this._findFolderMatches(folderName);
@@ -221,7 +225,7 @@ class FolderController {
       }
 
       if (matches.length === 1) {
-        const matchedPath = matches[0];
+        const matchedPath = requireSafeUserPath(matches[0], { allowRoot: true });
         this._openFolderPath(matchedPath, options);
         return { success: true, data: { path: matchedPath, folderName: path.basename(matchedPath), openWith: options.openWith || null } };
       }
@@ -230,6 +234,7 @@ class FolderController {
       if (!fullPath) {
         return { success: false, error: 'Folder not found' };
       }
+      requireSafeUserPath(fullPath, { allowRoot: true });
 
       this._openFolderPath(fullPath, options);
       return { success: true, data: { path: fullPath, folderName: path.basename(fullPath), openWith: options.openWith || null } };
@@ -255,7 +260,7 @@ class FolderController {
     }
 
     if (path.isAbsolute(folderName) && fs.existsSync(folderName) && fs.statSync(folderName).isDirectory()) {
-      return [path.resolve(folderName)];
+      return [requireSafeUserPath(folderName, { allowRoot: true })];
     }
 
     const parsed = splitNameAndLocation(folderName);
