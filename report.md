@@ -1,6 +1,6 @@
 # OpenX Project Report
 
-Generated on: 2026-06-02  
+Generated on: 2026-06-19
 Project path: `C:\Users\rakes\Documents\OpenX`
 
 ## 1. Project Overview
@@ -46,6 +46,7 @@ OpenX acts as a local desktop assistant that can:
 - Windows-native automation engine.
 - Modular automation controllers.
 - Permission-based execution model.
+- Centralized assistant-owned memory and runtime data under `OpenX_Data`.
 - Multi-window Electron interface.
 - Event-driven coordination through a shared event bus.
 - Plugin support with lifecycle hooks.
@@ -69,6 +70,8 @@ OpenX acts as a local desktop assistant that can:
 | --- | --- |
 | `active-win` | Foreground application and active window detection |
 | `electron-store` | Persistent JSON settings |
+| `double-metaphone` | Phonetic matching for media and noisy command understanding |
+| `fuse.js` | Fuzzy search support |
 | `uuid` | Unique ID generation |
 
 ### Optional Dependencies
@@ -96,7 +99,6 @@ OpenX acts as a local desktop assistant that can:
 | `npm test` | Run all tests recursively |
 | `npm run test:core` | Run core tests |
 | `npm run test:automation` | Run automation tests |
-| `npm run test:voice` | Run voice tests |
 | `npm run lint` | Run ESLint |
 | `npm run package` | Build Windows package with Electron Builder |
 
@@ -160,6 +162,8 @@ This is the main assistant processing layer.
 - `entities`: extracts structured values from natural language.
 - `router`: orchestrates the command pipeline and routes actions.
 - `context`: stores session state and command history.
+- `learning`: stores bounded active-learning memory, personal facts, preferences, corrections, feedback, and routing evidence.
+- `nlu`: provides natural-language frame parsing and routing support for word-level command understanding.
 - `responses`: creates deterministic responses.
 - `personality`: applies assistant tone and style rules.
 
@@ -173,8 +177,10 @@ This layer performs Windows automation. It contains controllers for:
 - Communications
 - Files
 - Folders
+- Forms
 - Media
 - Scheduler
+- Screenshot capture
 - System information/actions
 - Volume
 - Windows/session control
@@ -200,18 +206,14 @@ This layer detects local audio output and headphone state.
 
 ### Context mode profiles
 
-Mode scoring and behavior profiles now live in `core/context-awareness/mode-engine.js`.
-The assistant no longer uses separate hardcoded `core/modes/*` modules.
+Mode scoring and behavior profiles live in `core/context-awareness/mode-engine.js`.
 
 ### `core/voice`
 
 This layer handles voice interaction:
 
-- Hotkey activation
-- Speech lifecycle state machine
-- Node Windows SAPI speech-to-text
-- Transcript reliability and contextual NLU
 - Naturalized text-to-speech
+- Windows SAPI voice selection and speaking-rate/volume handling
 
 ### `core/permissions`
 
@@ -226,11 +228,28 @@ This module validates whether an action is allowed. Permission levels are:
 
 ### `core/ui`
 
-This layer manages backend-driven UI state and notifications. It includes orb state handling, overlays, and notification behavior.
+This layer manages backend-driven UI notifications and overlays.
 
 ### `core/shared`
 
-This layer contains common shared utilities and the assistant event bus.
+This layer contains common shared utilities, the assistant event bus, and the centralized assistant data-root manager.
+
+### Assistant Data And Memory
+
+Assistant-owned data is centralized under `%USERPROFILE%\OpenX_Data` by default. The managed layout is:
+
+```text
+OpenX_Data/
+|-- settings.json
+|-- contacts.json
+|-- learning.json
+|-- logs/
+|-- runtime/
+|   `-- chrome-media-profile/
+`-- cache/
+```
+
+`core/shared/data-root.js` builds this layout, creates required directories, and safely migrates existing `%USERPROFILE%\.jarvis` settings, contacts, and learning files without overwriting newer `OpenX_Data` files.
 
 ### `apps/desktop`
 
@@ -239,7 +258,6 @@ This contains the Electron desktop application:
 - `electron/main.js`: Electron main process entry point.
 - `preload/index.js`: preload bridge.
 - `renderer/chat/index.html`: chat window.
-- `renderer/orb/index.html`: orb UI.
 - `renderer/settings/index.html`: settings UI.
 
 ### `plugins`
@@ -299,7 +317,7 @@ User says wake word
   -> Naturalized SAPI text-to-speech speaks response
 ```
 
-Voice reliability was redesigned around a Node-owned Windows SAPI STT engine instead of the previous Python worker. `core/voice/stt/windows-sapi.js` runs one recognition session per hotkey/follow-up listen request and emits the same voice events consumed by `VoiceManager`. It writes each recognition script to a temporary PowerShell file and launches it with `-File`, avoiding Windows `spawn ENAMETOOLONG` crashes when the command grammar grows. Electron now registers the primary `voice.activationShortcut` plus fallback shortcuts and exposes tray > Start Listening, then prints activation/listening console events so startup clearly shows whether activation fired and whether SAPI armed a recognition session. It loads an OpenX command grammar for common verbs, targets, aliases, and polite variants, then returns SAPI alternates so `VoiceManager` can recover an actionable phrase when the primary transcript is wrong. `core/voice/index.js` applies command-aware recovery through `voice.stt.commandRecoveryMinConfidence`, allowing actionable phrases such as "open chrome", "open youtube", and "please open youtube" to reach NLP/NLU routing even when recognition confidence is imperfect. It also blocks one-word non-actions and short filler phrases such as "the know of" or "the tool" before they reach the command router. `core/assistant/nlp/index.js` now performs command-frame extraction and noisy command repair, reducing transcripts such as "ope chrome", "sglkn open lsg chrome", and "sglkn increse lsg volum" to executable commands while preserving file names and multi-action media requests. It also extracts safe actions from conversational speech such as "I was just talking but please open Chrome now", "I was saying search for Java tutorial", "background speech set timer for 5 minutes", and "I was saying stop music", while leaving pure conversation unexecuted. `core/assistant/index.js` resolves contextual follow-ups such as "open it" from recent command entities before routing. Ignored speech returns the voice state machine to idle or, in conversation mode, re-arms only up to `voice.conversationIgnoredSpeechLimit` before ending the conversation without publishing `speechResult`.
+The current repository keeps voice output in `core/voice/tts/index.js`, backed by Windows SAPI text-to-speech. Chat and any recognized command text enter the same deterministic assistant pipeline. `core/assistant/nlp/index.js`, `core/assistant/nlu/index.js`, and `core/assistant/router/command-frame.js` now perform command-frame extraction, typo/noise repair, multi-command splitting, and semantic routing. This allows examples such as "ope chrome", "sglkn open lsg chrome", "sglkn increse lsg volum", "stop the video and set vol to 100", and "I was just talking but please open Chrome now" to resolve to executable commands while leaving pure conversation unexecuted. `core/assistant/index.js` resolves contextual follow-ups such as "open it" from recent command entities before routing.
 
 TTS now prefers configurable natural Windows voices, defaults to a slightly slower rate, keeps volume audible, and can speak SSML with short punctuation pauses through `voice.tts.naturalize`.
 
@@ -326,9 +344,11 @@ The built-in automation layer supports:
 - Folder creation, deletion, and opening
 - Browser URL opening and web search
 - Media playback control
+- Form understanding and form auto-fill
 - WhatsApp desktop communication
 - Contact storage and phone number normalization
 - Timers, alarms, and reminders
+- Screenshot capture
 - System monitoring
 - Windows lock, sleep, shutdown, restart, hibernate, logoff
 - Window minimize, maximize, close, focus, and navigation actions
@@ -432,7 +452,7 @@ Test command:
 npm test
 ```
 
-Latest verification result: 182 passing.
+Latest focused verification result: 193 passing.
 
 ## 17. Context Awareness And Device Detection
 
@@ -584,44 +604,46 @@ Mode state format:
 
 The project includes a graphify knowledge graph in `graphify-out/`.
 
-Graph report date: 2026-06-02
+Graph report date: 2026-06-19
 
 Graph stats:
 
-- 83 files analyzed.
-- Approximately 111,720 words.
-- 738 graph nodes.
-- 1,411 graph edges.
-- 33 communities detected.
-- 76% extracted edges.
-- 24% inferred edges.
+- 91 files analyzed.
+- Approximately 209,241 words.
+- 1,118 graph nodes.
+- 2,408 graph edges.
+- 41 communities detected.
+- 78% extracted edges.
+- 22% inferred edges.
 - 0% ambiguous edges.
 
 Most connected core abstractions:
 
 | Rank | Node | Edge count |
 | --- | --- | --- |
-| 1 | `emit()` | 37 |
-| 2 | `EntityExtractor` | 35 |
-| 3 | `VoiceManager` | 29 |
-| 4 | `MediaController` | 24 |
-| 5 | `ActionRouter` | 22 |
-| 6 | `AudioEngine` | 20 |
-| 7 | `AppController` | 17 |
-| 8 | `Assistant` | 15 |
-| 9 | `WindowsSessionController` | 14 |
-| 10 | `ContextEngine` | 14 |
+| 1 | `ActionRouter` | 110 |
+| 2 | `Assistant` | 55 |
+| 3 | `MediaController` | 45 |
+| 4 | `ContextManager` | 42 |
+| 5 | `EntityExtractor` | 37 |
+| 6 | `ActiveLearningStore` | 30 |
+| 7 | `FileController` | 29 |
+| 8 | `FormAutomation` | 29 |
+| 9 | `AppController` | 26 |
+| 10 | `BrowserController` | 26 |
 
 Important graphify observations:
 
-- `EntityExtractor` is the highest-degree project abstraction, which shows that entity parsing is central to command routing.
-- `emit()` is a major cross-community bridge, connecting voice, assistant, UI, and service modules through events.
-- `VoiceManager`, `AudioEngine`, and speech state modules are important in the voice pipeline.
-- `ActionRouter` is a central bridge between interpreted commands and executable automation.
-- `MediaController`, `AppController`, and `WindowsSessionController` are major automation modules.
+- `ActionRouter` is the highest-degree abstraction and remains the main bridge between parsed language and executable automation.
+- `Assistant`, `ContextManager`, and `ActiveLearningStore` are central to conversation state, follow-up resolution, active learning, and memory.
+- `EntityExtractor`, `NaturalLanguageRouter`, and `CommandFrameParser` form the core language-understanding path.
+- `MediaController`, `FileController`, `FormAutomation`, `AppController`, and `BrowserController` are major automation modules.
+- `buildDataPaths()`, `ensureDataRoot()`, and `migrateLegacyData()` are now visible in the settings/data community.
 
-Graphify reported two surprising inferred connections:
+Graphify reported these surprising inferred connections:
 
+- `ensureDataDir()` calls or relates to `ensureDataRoot()`.
+- `ensureDataDir()` calls or relates to `migrateLegacyData()`.
 - `getHomeDirectory()` calls or relates to `SEARCH_ROOTS()`.
 - `getSpecialFolders()` calls or relates to `SEARCH_ROOTS()`.
 
@@ -633,27 +655,30 @@ Main detected communities include:
 
 | Community | Main area |
 | --- | --- |
-| Community 0 | Entity extraction and NLP normalization |
-| Community 1 | Audio engine, wake command extraction, and audio processing |
-| Community 2 | Logger, speech state machine, and voice manager |
-| Community 3 | File/folder automation and path utilities |
-| Community 4 | Assistant, context, and personality |
-| Community 5 | Action router and orb state |
-| Community 6 | Event bus, UI windows, plugins, and notification management |
-| Community 7 | App controller and Windows controller |
-| Community 8 | Settings, shared object utilities, and runtime reload helpers |
-| Community 9 | Media controller |
-| Community 10 | Automation engine, intent registry, and sample plugin |
-| Community 11 | Brightness and volume controllers |
-| Community 12 | Response generation and honorific/style logic |
-| Community 13 | Communications and WhatsApp desktop automation |
-| Community 14 | Contact store and phone normalization |
-| Community 15 | Input parser, system controller, and self-test |
-| Community 16 | Windows session controller |
-| Community 17 | ID generator and scheduler controller |
-| Community 18 | Text-to-speech |
-| Community 19 | Permission validator |
-| Community 20 | Browser controller |
+| Community 0 | Action router and command execution coordination |
+| Community 1 | Assistant, context manager, personality, and text compaction |
+| Community 2 | Event bus, plugins, notification management, mode engine, and TTS |
+| Community 3 | Audio device and headphone/device event detection |
+| Community 4 | File/folder automation and path/search utilities |
+| Community 5 | Media controller and Windows session helpers |
+| Community 6 | Settings service, data-root management, runtime config, and UI startup helpers |
+| Community 7 | Scheduler, system controller, and media parser helpers |
+| Community 8 | NLP processor and normalization utilities |
+| Community 9 | Command-frame parsing and entity extraction |
+| Community 10 | Contact store and communications automation |
+| Community 11 | Form automation and form understanding |
+| Community 12 | Active-learning memory, preferences, facts, corrections, and routing evidence |
+| Community 13 | App controller and input parsing helpers |
+| Community 14 | Automation engine and Windows controller |
+| Community 15 | Browser controller and web result parsing |
+| Community 16 | Action verifier |
+| Community 17 | Brightness and volume controllers |
+| Community 18 | Natural-language router |
+| Community 19 | Response generation and honorific/style logic |
+| Community 20 | Process monitor and app categorization |
+| Community 21 | Context engine payload helpers |
+| Community 22 | Active-window monitor |
+| Community 23 | Phonetic and platform mapping |
 
 ## 21. Directory Tree
 
@@ -667,6 +692,7 @@ OpenX/
 |-- AGENTS.md
 |-- README.md
 |-- RULES.md
+|-- eslint.config.mjs
 |-- package-lock.json
 |-- package.json
 |-- report.md
@@ -679,10 +705,32 @@ OpenX/
 |       `-- renderer/
 |           |-- chat/
 |           |   `-- index.html
-|           |-- orb/
-|           |   `-- index.html
 |           `-- settings/
 |               `-- index.html
+|-- bin/
+|   `-- whisper/
+|       |-- bench.exe
+|       |-- command.exe
+|       |-- ggml.dll
+|       |-- ggml-base.dll
+|       |-- ggml-cpu.dll
+|       |-- main.exe
+|       |-- SDL2.dll
+|       |-- stream.exe
+|       |-- test.wav
+|       |-- test-vad.exe
+|       |-- test-vad-full.exe
+|       |-- wchess.exe
+|       |-- whisper.dll
+|       |-- whisper-bench.exe
+|       |-- whisper-cli.exe
+|       |-- whisper-command.exe
+|       |-- whisper-lsp.exe
+|       |-- whisper-quantize.exe
+|       |-- whisper-server.exe
+|       |-- whisper-stream.exe
+|       |-- whisper-talk-llama.exe
+|       `-- whisper-vad-speech-segments.exe
 |-- config/
 |   `-- index.js
 |-- core/
@@ -694,11 +742,16 @@ OpenX/
 |   |   |-- index.js
 |   |   |-- intents/
 |   |   |   `-- index.js
+|   |   |-- learning/
+|   |   |   `-- index.js
 |   |   |-- nlp/
 |   |   |   |-- constants.js
 |   |   |   |-- index.js
 |   |   |   |-- preprocessor.js
-|   |   |   `-- scorer.js
+|   |   |   |-- scorer.js
+|   |   |   `-- web-targets.js
+|   |   |-- nlu/
+|   |   |   `-- index.js
 |   |   |-- parser/
 |   |   |   `-- index.js
 |   |   |-- personality/
@@ -707,6 +760,7 @@ OpenX/
 |   |   |   |-- index.js
 |   |   |   `-- style.js
 |   |   `-- router/
+|   |       |-- command-frame.js
 |   |       `-- index.js
 |   |-- automation/
 |   |   |-- apps/
@@ -716,6 +770,7 @@ OpenX/
 |   |   |-- browser/
 |   |   |   `-- index.js
 |   |   |-- common/
+|   |   |   |-- action-verifier.js
 |   |   |   |-- launcher.js
 |   |   |   |-- path-utils.js
 |   |   |   `-- windows-session.js
@@ -727,10 +782,15 @@ OpenX/
 |   |   |   `-- index.js
 |   |   |-- folders/
 |   |   |   `-- index.js
+|   |   |-- forms/
+|   |   |   |-- index.js
+|   |   |   `-- understanding.js
 |   |   |-- index.js
 |   |   |-- media/
 |   |   |   `-- index.js
 |   |   |-- scheduler/
+|   |   |   `-- index.js
+|   |   |-- screenshot/
 |   |   |   `-- index.js
 |   |   |-- system/
 |   |   |   `-- index.js
@@ -749,28 +809,25 @@ OpenX/
 |   |   |-- audio-devices.js
 |   |   |-- device-events.js
 |   |   `-- headphones.js
+|   |-- media-understanding/
+|   |   |-- media-router.js
+|   |   |-- parser.js
+|   |   |-- phonetic.js
+|   |   `-- platform-mapper.js
 |   |-- permissions/
 |   |   `-- index.js
 |   |-- settings/
 |   |   `-- index.js
 |   |-- shared/
+|   |   |-- data-root.js
 |   |   |-- events.js
 |   |   `-- index.js
 |   |-- ui/
 |   |   |-- notifications/
 |   |   |   `-- index.js
-|   |   |-- orb/
-|   |   |   `-- index.js
-|   |   |-- overlay/
-|   |   |   `-- index.js
-|   |   `-- state/
+|   |   `-- overlay/
 |   |       `-- index.js
 |   `-- voice/
-|       |-- index.js
-|       |-- state/
-|       |   `-- index.js
-|       |-- stt/
-|       |   `-- windows-sapi.js
 |       `-- tts/
 |           `-- index.js
 |-- docs/
@@ -801,29 +858,34 @@ OpenX/
     |-- automation/
     |   |-- apps.test.js
     |   |-- automation.test.js
+    |   |-- browser.test.js
     |   |-- communications.test.js
     |   |-- file-management.test.js
     |   |-- media.test.js
     |   |-- volume-brightness.test.js
     |   `-- windows-session.test.js
+    |-- context-awareness/
+    |   |-- context-awareness.test.js
+    |   `-- mode-engine.test.js
     |-- core/
     |   |-- assistant.test.js
+    |   |-- command-corpus.test.js
+    |   |-- data-root.test.js
     |   |-- entities.test.js
     |   |-- intents.test.js
+    |   |-- learning.test.js
+    |   |-- media-youtube-corpus.test.js
+    |   |-- nlp.test.js
+    |   |-- nlu.test.js
     |   |-- parser.test.js
     |   |-- permissions.test.js
     |   |-- responses.test.js
     |   |-- router.test.js
     |   `-- settings.test.js
-    |-- context-awareness/
-    |   |-- context-awareness.test.js
-    |   `-- mode-engine.test.js
     |-- device-detection/
     |   `-- device-detection.test.js
-    `-- voice/
-        |-- pipeline.test.js
-        |-- stt-engine.test.js
-        |-- voice.test.js
+    `-- media-understanding/
+        `-- media-understanding.test.js
 ```
 
 ## 22. Important Entry Points
@@ -834,16 +896,26 @@ OpenX/
 | `apps/desktop/preload/index.js` | Renderer preload bridge |
 | `core/assistant/index.js` | Assistant module entry |
 | `core/assistant/router/index.js` | Command routing and execution coordination |
+| `core/assistant/router/command-frame.js` | Word/frame-level command parsing support |
+| `core/assistant/nlu/index.js` | Natural-language routing and command frame interpretation |
+| `core/assistant/learning/index.js` | Active-learning memory, preferences, facts, corrections, and routing evidence |
 | `core/assistant/intents/index.js` | Intent registry |
 | `core/assistant/entities/index.js` | Entity extraction |
 | `core/automation/index.js` | Automation engine entry |
+| `core/automation/common/action-verifier.js` | Shared action result validation helpers |
+| `core/automation/forms/index.js` | Form automation entry |
+| `core/automation/forms/understanding.js` | Form field understanding and validation |
+| `core/automation/screenshot/index.js` | Screenshot automation |
+| `core/media-understanding/parser.js` | Media command parsing |
+| `core/media-understanding/media-router.js` | Media intent routing |
 | `core/context-awareness/active-window.js` | Active window monitor |
 | `core/context-awareness/context-engine.js` | Context aggregation and snapshots |
 | `core/context-awareness/mode-engine.js` | Mode scoring and transition control |
 | `core/context-awareness/process-monitor.js` | Process monitor |
 | `core/context-awareness/signals.js` | Context signal emitter |
 | `core/device-detection/device-events.js` | Audio/headphone event monitor |
-| `core/voice/index.js` | Voice module entry |
+| `core/voice/tts/index.js` | Windows SAPI text-to-speech |
+| `core/shared/data-root.js` | Centralized `OpenX_Data` layout, directory creation, and legacy migration |
 | `core/shared/events.js` | Shared event bus |
 | `plugins/index.js` | Plugin manager |
 | `config/index.js` | Project configuration |
@@ -854,8 +926,8 @@ OpenX/
 - Good separation between assistant logic, automation, voice, UI, settings, permissions, and plugins.
 - Deterministic command matching is easier to test and reason about than LLM-based routing.
 - Permission validation is part of the command path.
-- Tests exist across core, automation, and voice areas.
-- Voice reliability and NLU tests cover Node SAPI engine behavior, temp-file SAPI script launching, expanded command grammar generation, alternate transcript recovery, low-confidence/no-speech transcripts, low-confidence fuzzy command recovery, command-frame extraction from conversational speech, noisy STT command repair, pure-conversation rejection, contextual pronoun resolution, one-word and short-phrase non-action filtering, common background hallucination phrases, and repeated ignored-noise conversation re-arming.
+- Tests exist across core, automation, settings, NLU, media-understanding, context-awareness, and device-detection areas.
+- NLU and routing tests cover command-frame extraction from conversational speech, noisy command repair, pure-conversation rejection, contextual pronoun resolution, multi-command execution, active-learning feedback records, and centralized data-root storage.
 - Documentation exists for architecture, setup, modules, workflows, and plugins.
 - Graphify knowledge graph exists and gives useful insight into central abstractions.
 - Context sensing is modular, local-only, event-driven, and covered by tests.

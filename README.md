@@ -1,4 +1,4 @@
-# OpenX — Intelligent Windows Desktop Assistant Platform
+# OpenX - Intelligent Windows Desktop Assistant Platform
 
 ## Overview
 
@@ -13,12 +13,13 @@ The platform is designed around a layered architecture with intent routing, enti
 * Offline-first voice assistant
 * Deterministic NLP pipeline (No LLM dependency)
 * Windows-native automation engine
-* Wake word detection + hallucination-resistant speech-to-text
+* Chat-first deterministic command processing with TTS response output
 * Naturalized Windows SAPI text-to-speech
 * Modular plugin system
 * Event-driven architecture
 * Context signal foundation for active windows, processes, and audio devices
 * Adaptive mode engine for development, streaming, gaming, media, work, and focus contexts
+* Centralized assistant memory and runtime data under `%USERPROFILE%\OpenX_Data`
 * Permission-based execution model
 * Multi-window Electron desktop interface
 * 80+ built-in intents
@@ -64,6 +65,8 @@ The platform is designed around a layered architecture with intent routing, enti
 | electron         | Desktop shell and window management |
 | active-win       | Foreground application and active window detection |
 | electron-store   | Persistent JSON settings            |
+| double-metaphone | Phonetic matching for media and noisy command understanding |
+| fuse.js          | Fuzzy search support |
 | electron-builder | Windows packaging                   |
 | uuid             | Unique identifiers                  |
 | mocha            | Testing framework                   |
@@ -110,24 +113,50 @@ Input Sources (Voice / Chat)
 
 ```text
 OpenX/
-├── config/
-├── core/
-│   ├── assistant/
-│   ├── automation/
-│   ├── context-awareness/
-│   ├── device-detection/
-│   ├── modes/
-│   ├── permissions/
-│   ├── settings/
-│   ├── shared/
-│   ├── ui/
-│   └── voice/
-├── apps/
-│   └── desktop/
-├── plugins/
-├── tests/
-├── docs/
-└── config/
+|-- apps/
+|   `-- desktop/
+|-- bin/
+|   `-- whisper/
+|-- config/
+|-- core/
+|   |-- assistant/
+|   |   |-- context/
+|   |   |-- entities/
+|   |   |-- intents/
+|   |   |-- learning/
+|   |   |-- nlp/
+|   |   |-- nlu/
+|   |   |-- parser/
+|   |   |-- personality/
+|   |   |-- responses/
+|   |   `-- router/
+|   |-- automation/
+|   |   |-- apps/
+|   |   |-- brightness/
+|   |   |-- browser/
+|   |   |-- common/
+|   |   |-- communications/
+|   |   |-- files/
+|   |   |-- folders/
+|   |   |-- forms/
+|   |   |-- media/
+|   |   |-- scheduler/
+|   |   |-- screenshot/
+|   |   |-- system/
+|   |   |-- volume/
+|   |   `-- windows/
+|   |-- context-awareness/
+|   |-- device-detection/
+|   |-- media-understanding/
+|   |-- permissions/
+|   |-- settings/
+|   |-- shared/
+|   |-- ui/
+|   `-- voice/
+|-- docs/
+|-- graphify-out/
+|-- plugins/
+`-- tests/
 ```
 
 ---
@@ -144,6 +173,7 @@ OpenX/
 * Context Manager
 * Response Generator
 * **Learning Engine** — active learning, personal facts, preferences, command corrections, password storage
+* **Natural Language Understanding** — command-frame parsing, multi-command splitting, semantic routing, and typo/noise repair
 * **Response Style Engine** — formal servant tone, honorific application, context-aware responses
 
 ## Automation Controllers
@@ -160,6 +190,7 @@ OpenX/
 * Windows Controller
 * Scheduler Controller
 * **Form Controller** — intelligent form field analysis, type inference, and auto-fill using personal context
+* Screenshot Controller
 
 ## Context Awareness
 
@@ -185,14 +216,29 @@ OpenX/
 * Work Mode
 * Focus Mode
 
+## Data And Memory Management
+
+Assistant-owned data is stored under `%USERPROFILE%\OpenX_Data` by default:
+
+```text
+OpenX_Data/
+|-- settings.json
+|-- contacts.json
+|-- learning.json
+|-- logs/
+|-- runtime/
+|   `-- chrome-media-profile/
+`-- cache/
+```
+
+`core/shared/data-root.js` owns this layout. It creates required directories, points runtime config to the same managed paths, and safely migrates old `%USERPROFILE%\.jarvis` settings, contacts, and learning files without overwriting newer data.
+
 ## Voice System
 
-* Wake Word Detector
-* Hallucination-resistant Speech-to-Text
 * Naturalized Text-to-Speech
-* Voice Activity Detection
-* Audio Buffer Management
-* Speech State Machine
+* Windows SAPI voice selection
+* Configurable speaking rate and volume
+* Shared response output for chat and automation results
 
 ---
 
@@ -263,44 +309,30 @@ The assistant learns and remembers personal information through natural conversa
 
 ---
 
-# Voice Pipeline
+# Command Output Pipeline
 
-## Voice Flow
-
-```text
-Wake Word Detection
-        ↓
-Active Listening
-        ↓
-Audio Reliability Gates
-        ↓
-Speech-to-Text
-        ↓
-Transcript Reliability Filter
-        ↓
-Intent Processing
-        ↓
-Automation Execution
-        ↓
-Text-to-Speech Response
-```
-
-## Speech State Machine
+## Command Flow
 
 ```text
-IDLE
-  ↓
-WAKE_DETECTED
-  ↓
-LISTENING
-  ↓
-HEARING_SPEECH
-  ↓
-PROCESSING
-  ↓
-RESPONDING
-  ↓
-IDLE
+Chat or recognized text
+        |
+        v
+Parser and NLP normalization
+        |
+        v
+NLU command-frame extraction
+        |
+        v
+Intent routing and entity extraction
+        |
+        v
+Permission validation
+        |
+        v
+Automation execution
+        |
+        v
+Response generation and optional TTS
 ```
 
 ---
@@ -567,45 +599,32 @@ Frameworks used:
 
 # Example Workflow
 
-## Voice Command Example
+## Command Example
 
 ```text
-User: "Jarvis, open calculator"
+User: "open calculator"
 
-1. Wake word detected
-2. Audio passes VAD, RMS, duration, confidence, no-speech, and repetition gates
-3. Speech converted to text
-4. Transcript normalized and filtered before routing
-5. Intent matched → app.open
-6. Entity extracted → calculator
-7. Permission validated
-8. Automation executed
-9. Response generated
-10. Naturalized text-to-speech playback
+1. Command text received
+2. Parser and NLP normalize the request
+3. NLU extracts command frames
+4. Intent matched -> app.open
+5. Entity extracted -> calculator
+6. Permission validated
+7. Automation executed
+8. Response generated
+9. Optional text-to-speech playback
 ```
 
 ## Voice Reliability
 
-OpenX filters speech at two layers before any automation can run:
+Command text from chat or any recognition source enters the same deterministic parser, NLP processor, NLU frame parser, intent matcher, entity extractor, permission validator, and action router.
 
-* `core/voice/stt/windows-sapi.js` performs Node-owned Windows SAPI recognition without a Python worker.
-* SAPI recognition is launched through a temporary PowerShell script file instead of a large `-Command` argument, avoiding Windows `spawn ENAMETOOLONG` crashes when the command grammar grows.
-* Electron registers `voice.activationShortcut` plus `voice.activationFallbackShortcuts`, so `Alt+Space`, `Control+Alt+Space`, and `Control+Space` can start listening when Windows or another app swallows one shortcut.
-* The tray menu includes `Start Listening`, and the console now prints activation and listening events so it is clear whether the shortcut fired, the assistant was busy, or SAPI started a recognition session.
-* Windows SAPI is loaded with an OpenX command grammar for common commands, targets, aliases, and polite variants, so phrases like "open chrome", "open youtube", "open you tube", and "please open youtube" are favored over unrelated dictation guesses.
-* Recognition alternates are inspected; if the primary transcript is filler noise but an alternate is actionable, the actionable alternate is routed.
-* `core/voice/index.js` uses command-aware recovery, so low-confidence but actionable phrases such as "open chrome" or "open youtube" still reach NLP/NLU routing.
-* `core/assistant/nlp/index.js` repairs noisy STT commands by finding the strongest action and known target inside the transcript; examples such as "ope chrome", "sglkn open lsg chrome", and "sglkn increse lsg volum" are reduced to executable commands without changing normal multi-action requests.
-* The NLU layer extracts command frames from general speech, so "I was just talking but please open Chrome now", "I was saying search for Java tutorial", "background speech set timer for 5 minutes", and "I was saying stop music" route to the intended actions, while pure conversation such as "I was just talking about Chrome today" is not executed.
-* `core/assistant/index.js` resolves short follow-ups such as "open it" from recent command context before routing.
-* `core/voice/index.js` performs a transcript reliability pass for one-word non-actions, short filler phrases such as "the know of" or "the tool", non-command low confidence, known background-noise hallucination phrases, and repeated token loops.
-* Rejected speech emits an ignored-speech event and returns to the voice state machine without publishing `speechResult`.
-* In conversation mode, repeated ignored speech is capped by `voice.conversationIgnoredSpeechLimit` so background noise cannot keep re-arming the microphone forever.
-* Voice transcripts still enter the same deterministic parser, NLP processor, intent matcher, entity extractor, and permission validator as chat input.
-
-Important voice tuning options live in `config/index.js`: `voice.activationShortcut`, `voice.activationFallbackShortcuts`, `voice.conversationIgnoredSpeechLimit`, plus STT options under `voice.stt` such as `minConfidence`, `commandRecoveryMinConfidence`, `confirmationMinConfidence`, `startSpeechTimeoutMs`, and `maxDurationMs`.
-
-TTS uses Windows SAPI with configurable `voice.tts.voiceName`, audible volume clamping, a slower default speaking rate, and SSML pauses when `voice.tts.naturalize` is enabled.
+* `core/assistant/nlp/index.js` repairs noisy command text by finding strong actions and known targets inside the sentence.
+* `core/assistant/nlu/index.js` and `core/assistant/router/command-frame.js` extract actionable command frames from natural language.
+* Multi-command requests such as "stop the video and set vol to 100" are split and executed in order.
+* Contextual follow-ups such as "open it" are resolved from recent command context before routing.
+* Pure conversation is kept out of automation when no actionable frame is found.
+* `core/voice/tts/index.js` uses Windows SAPI with configurable `voice.tts.voiceName`, audible volume clamping, speaking rate control, and SSML pauses when `voice.tts.naturalize` is enabled.
 
 ---
 
