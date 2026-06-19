@@ -7,6 +7,7 @@ const Assistant = require('../../../core/assistant/index');
 const TextToSpeech = require('../../../core/voice/tts/index');
 const { SettingsService } = require('../../../core/settings/index');
 const { AssistantEventBus } = require('../../../core/shared/index');
+const { ensureDataRoot, migrateLegacyData } = require('../../../core/shared/data-root');
 
 let chatWindow = null;
 let settingsWindow = null;
@@ -19,15 +20,13 @@ let eventBus = null;
 let registeredChatShortcuts = [];
 
 function ensureDataDir() {
-  const dirs = [
-    BASE_CONFIG.app.dataDir,
-    BASE_CONFIG.logging.directory
-  ];
-  dirs.forEach(dir => {
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-  });
+  const paths = ensureDataRoot(BASE_CONFIG);
+  if (BASE_CONFIG.app?.migrateLegacyData) {
+    migrateLegacyData(BASE_CONFIG);
+  }
+  if (!fs.existsSync(paths.logsDir)) {
+    fs.mkdirSync(paths.logsDir, { recursive: true });
+  }
 }
 
 function createChatWindow() {

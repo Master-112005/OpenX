@@ -1,11 +1,18 @@
 const path = require('path');
 const os = require('os');
+const { buildDataPaths } = require('../core/shared/data-root');
+
+const DATA_PATHS = buildDataPaths();
+const LEGACY_DATA_DIR = path.join(os.homedir(), '.jarvis');
 
 const CONFIG = {
   app: {
     name: 'JARVIS',
     version: '1.0.0',
-    dataDir: path.join(os.homedir(), '.jarvis')
+    dataDir: DATA_PATHS.root,
+    dataPaths: DATA_PATHS,
+    legacyDataDir: LEGACY_DATA_DIR,
+    migrateLegacyData: true
   },
 
   voice: {
@@ -21,7 +28,7 @@ const CONFIG = {
     displayName: 'JARVIS',
     title: 'Desktop Assistant',
     honorific: 'sir',
-    contactsPath: path.join(os.homedir(), '.jarvis', 'contacts.json'),
+    contactsPath: DATA_PATHS.contactsPath,
     userProfile: {
       fullName: '',
       email: '',
@@ -39,7 +46,7 @@ const CONFIG = {
   activeLearning: {
     enabled: true,
     askForFeedback: true,
-    storePath: ''
+    storePath: DATA_PATHS.learningPath
   },
 
   permissions: {
@@ -97,7 +104,7 @@ const CONFIG = {
     level: 'info',
     maxFileSize: 5242880,
     maxFiles: 5,
-    directory: path.join(os.homedir(), '.jarvis', 'logs')
+    directory: DATA_PATHS.logsDir
   },
 
   plugins: {

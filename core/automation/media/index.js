@@ -7,6 +7,7 @@ const { execFileSync, spawn } = require('child_process');
 const Logger = require('../../shared/index').Logger;
 const BrowserController = require('../browser/index');
 const WindowsSessionController = require('../common/windows-session');
+const { buildDataPaths } = require('../../shared/data-root');
 
 const DEFAULT_PLATFORM = 'youtube';
 const VK_MEDIA_STOP = 178;
@@ -68,6 +69,7 @@ const PLATFORM_REGISTRY = {
 
 class MediaController {
   constructor(config) {
+    this.config = config || {};
     this.logger = new Logger({ level: config?.logging?.level || 'info' });
     this.browser = new BrowserController(config);
     this.windowSession = new WindowsSessionController(config);
@@ -381,9 +383,8 @@ class MediaController {
   }
 
   _ensureChromeMediaProfile() {
-    const baseDir = process.env.LOCALAPPDATA ||
-      path.join(process.env.USERPROFILE || process.cwd(), 'AppData', 'Local');
-    const profileDir = path.join(baseDir, 'OpenX', 'JarvisMediaChromeProfile');
+    const profileDir = this.config?.app?.dataPaths?.mediaProfileDir ||
+      buildDataPaths(this.config).mediaProfileDir;
     fs.mkdirSync(profileDir, { recursive: true });
     return profileDir;
   }

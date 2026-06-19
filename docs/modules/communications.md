@@ -21,7 +21,7 @@ The assistant reads contacts from `assistant.contactsPath`.
 
 Default path:
 
-- `%USERPROFILE%\\.jarvis\\contacts.json`
+- `%USERPROFILE%\\OpenX_Data\\contacts.json`
 
 Supported structure:
 

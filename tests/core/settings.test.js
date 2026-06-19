@@ -48,11 +48,15 @@ describe('Settings Service', function() {
   }
 
   it('should expose default settings and themes', function() {
-    const { service } = createService();
+    const { service, tempDir, contactsPath } = createService();
     const snapshot = service.getSnapshot();
 
     assert.equal(snapshot.settings.assistant.displayName, 'JARVIS');
     assert.equal(snapshot.settings.chat.themeId, 'midnight');
+    assert.equal(snapshot.dataRoot, tempDir);
+    assert.equal(snapshot.dataPaths.settingsPath, path.join(tempDir, 'settings.json'));
+    assert.equal(snapshot.dataPaths.learningPath, path.join(tempDir, 'learning.json'));
+    assert.equal(snapshot.contactsPath, contactsPath);
     assert.ok(Array.isArray(snapshot.availableThemes));
     assert.ok(snapshot.availableThemes.length >= 1);
   });
@@ -136,6 +140,10 @@ describe('Settings Service', function() {
     assert.equal(runtimeConfig.system.permissionLevel, 'critical');
     assert.equal(runtimeConfig.activeLearning.enabled, false);
     assert.equal(runtimeConfig.activeLearning.askForFeedback, false);
+    assert.equal(runtimeConfig.app.dataDir, service.dataPaths.root);
+    assert.equal(runtimeConfig.app.dataPaths.learningPath, path.join(service.dataPaths.root, 'learning.json'));
+    assert.equal(runtimeConfig.activeLearning.storePath, path.join(service.dataPaths.root, 'learning.json'));
+    assert.equal(runtimeConfig.logging.directory, path.join(service.dataPaths.root, 'logs'));
     assert.deepEqual(runtimeConfig.modes[0], saved.modes[0]);
   });
 

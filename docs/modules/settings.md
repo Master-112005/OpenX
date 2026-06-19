@@ -27,6 +27,7 @@ This module provides persistent assistant settings for:
 
 ## Notes
 
-- Settings are stored locally in `%USERPROFILE%\\.jarvis\\settings.json`.
-- Contacts continue to live in `%USERPROFILE%\\.jarvis\\contacts.json`.
+- Settings are stored locally in `%USERPROFILE%\\OpenX_Data\\settings.json`.
+- Contacts continue to live in `%USERPROFILE%\\OpenX_Data\\contacts.json`.
+- Active-learning memory is stored in `%USERPROFILE%\\OpenX_Data\\learning.json`, with logs and runtime data under the same `OpenX_Data` folder.
 - User profile details are stored for deterministic reuse by future automation modules that need personal form data.

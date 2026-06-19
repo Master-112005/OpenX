@@ -556,6 +556,96 @@ describe('Assistant Confirmation Flow', function() {
     assert.deepEqual(routedInputs, ['find Resume.docx', 'find Resume.docx']);
   });
 
+  it('should expand compact pronoun commands and open the recent file result', async function() {
+    const routedInputs = [];
+    const filePath = 'C:\\Users\\rakes\\Documents\\PASSWORDS.txt';
+    const router = {
+      process: async (input) => {
+        routedInputs.push(input);
+        if (routedInputs.length === 1) {
+          return {
+            commandId: 'cmd-file-search',
+            success: true,
+            intent: 'file.search',
+            entities: { query: 'passwords' },
+            data: {
+              query: 'passwords',
+              count: 1,
+              results: [filePath],
+              entries: [{ name: 'PASSWORDS.txt', type: 'file', path: filePath }]
+            },
+            response: 'I found 1 matching item: PASSWORDS.txt.'
+          };
+        }
+
+        return {
+          commandId: 'cmd-file-open',
+          success: true,
+          intent: 'file.open',
+          entities: { filename: input.replace(/^open\s+/i, '') },
+          data: { path: filePath, filename: 'PASSWORDS.txt' },
+          response: 'Opening "PASSWORDS.txt".'
+        };
+      }
+    };
+
+    const assistant = new Assistant({ activeLearning: { enabled: false } }, {
+      router,
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    await assistant.processCommand('find passwords file', 'chat');
+    const opened = await assistant.processCommand('openit', 'chat');
+
+    assert.equal(opened.success, true);
+    assert.equal(routedInputs[1], `open ${filePath}`);
+  });
+
+  it('should open a named recent file result instead of treating it as an app', async function() {
+    const routedInputs = [];
+    const filePath = 'C:\\Users\\rakes\\Documents\\PASSWORDS.txt';
+    const router = {
+      process: async (input) => {
+        routedInputs.push(input);
+        if (routedInputs.length === 1) {
+          return {
+            commandId: 'cmd-file-search-2',
+            success: true,
+            intent: 'file.search',
+            entities: { query: 'passwords' },
+            data: {
+              query: 'passwords',
+              count: 1,
+              entries: [{ name: 'PASSWORDS.txt', type: 'file', path: filePath }]
+            },
+            response: 'I found 1 matching item: PASSWORDS.txt.'
+          };
+        }
+
+        return {
+          commandId: 'cmd-file-open-2',
+          success: true,
+          intent: 'file.open',
+          entities: { filename: input.replace(/^open\s+/i, '') },
+          data: { path: filePath, filename: 'PASSWORDS.txt' },
+          response: 'Opening "PASSWORDS.txt".'
+        };
+      }
+    };
+
+    const assistant = new Assistant({ activeLearning: { enabled: false } }, {
+      router,
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    await assistant.processCommand('find passwords file', 'chat');
+    await assistant.processCommand('open passwords', 'chat');
+
+    assert.equal(routedInputs[1], `open ${filePath}`);
+  });
+
   it('should allow the user to cancel a pending confirmation', async function() {
     const router = {
       process: async () => ({

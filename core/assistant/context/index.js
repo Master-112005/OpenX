@@ -507,16 +507,19 @@ class ContextManager {
     const entities = entry.entities || {};
     const data = entry.data || {};
     const opened = data.opened || null;
-    const firstResult = Array.isArray(data.results) ? data.results[0] : null;
     const firstEntry = Array.isArray(data.entries) ? data.entries[0] : null;
+    const firstResult = Array.isArray(data.results) ? data.results[0] : null;
     const candidate = opened || firstResult || firstEntry || {};
-    const name = candidate.name ||
+    const candidatePath = typeof candidate === 'string' ? candidate : candidate.path;
+    const candidateName = typeof candidate === 'string' ? '' : candidate.name;
+    const name = candidateName ||
+      firstEntry?.name ||
       entities.filename ||
       entities.fileName ||
       entities.query ||
       entities.source ||
       '';
-    const filePath = candidate.path || entities.path || entities.selectedPath || '';
+    const filePath = candidatePath || firstEntry?.path || entities.path || entities.selectedPath || '';
     if (!name && !filePath) {
       return null;
     }

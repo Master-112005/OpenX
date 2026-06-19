@@ -535,15 +535,28 @@ class Assistant extends EventEmitter {
   }
 
   _buildRoutedInput(input) {
-    const contextual = this._resolveContextualFollowUp(input);
-    const contextualChanged = contextual && contextual !== input;
-    const personalSource = contextualChanged ? '' : this._resolvePersonalSourceRouting(input);
-    const routedInput = contextualChanged ? contextual : (personalSource || contextual || input);
+    const normalizedInput = this._normalizeCompactCommandText(input);
+    const contextual = this._resolveContextualFollowUp(normalizedInput);
+    const contextualChanged = contextual && contextual !== normalizedInput;
+    const personalSource = contextualChanged ? '' : this._resolvePersonalSourceRouting(normalizedInput);
+    const routedInput = contextualChanged ? contextual : (personalSource || contextual || normalizedInput);
     const contextualForLearning = routedInput;
     const learned = this.learning?.findCorrection?.(contextualForLearning);
     this._lastRoutingLearning = learned || null;
     this._lastContextualRewrite = contextualForLearning !== input ? { input, correction: contextualForLearning } : null;
     return learned?.correction || contextualForLearning;
+  }
+
+  _normalizeCompactCommandText(input) {
+    const raw = String(input || '').trim();
+    if (!raw) {
+      return raw;
+    }
+
+    return raw
+      .replace(/\b(open|reopen|close|quit|exit|minimi[sz]e|maximi[sz]e|show|list|find|play|pause|resume|stop)(it|that|this|them|those)\b/gi, '$1 $2')
+      .replace(/\s+/g, ' ')
+      .trim();
   }
 
   _resolvePersonalSourceRouting(input) {
@@ -1308,6 +1321,11 @@ class Assistant extends EventEmitter {
       return '';
     }
 
+    const recentFileOpen = this._resolveRecentFileOpen(normalized);
+    if (recentFileOpen) {
+      return recentFileOpen;
+    }
+
     if (/^(?:what\s+is\s+)?(?:its|the)\s+file\s+name$/i.test(normalized)) {
       return '';
     }
@@ -1345,6 +1363,50 @@ class Assistant extends EventEmitter {
     }
 
     return `list ${type ? `${type} ` : ''}files in ${path}`;
+  }
+
+  _resolveRecentFileOpen(normalized) {
+    const openMatch = String(normalized || '').match(/^(?:open|show|launch|start)\s+(.+?)(?:\s+(?:file|document))?$/i);
+    if (!openMatch?.[1]) {
+      return '';
+    }
+
+    const target = Normalizer.normalizeText(openMatch[1])
+      .replace(/^(?:the|a|an)\s+/, '')
+      .replace(/\b(?:file|document)\b/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!target || /^(?:it|that|this|them|those)$/i.test(target)) {
+      return '';
+    }
+
+    const recentFileEntries = this.context.findRecentAll(entry =>
+      entry?.success && /^file\./.test(entry.intent || ''),
+    12);
+
+    for (const entry of recentFileEntries) {
+      const file = this.context.getFileReference(entry);
+      if (!file?.name && !file?.path) {
+        continue;
+      }
+
+      const query = Normalizer.normalizeText(entry.entities?.query || entry.data?.query || '');
+      const fileName = Normalizer.normalizeText(file.name || '');
+      const fileBase = fileName.replace(/\.[a-z0-9]{1,10}$/i, '').trim();
+      const haystacks = [query, fileName, fileBase]
+        .map(value => String(value || '').trim())
+        .filter(Boolean);
+      const matches = haystacks.some(value =>
+        value === target ||
+        value.includes(target) ||
+        target.includes(value)
+      );
+      if (matches) {
+        return `open ${file.path || file.name}`;
+      }
+    }
+
+    return '';
   }
 
   _resolveKnowledgeFollowUp(normalized) {
@@ -1553,17 +1615,17 @@ class Assistant extends EventEmitter {
       if (entry?.requiresConfirmation || entry?.needsClarification) {
         continue;
       }
+      const file = this.context.getFileReference(entry);
+      if (file?.path || file?.name) {
+        return (file.path || file.name).toLowerCase();
+      }
+
       const entities = entry?.entities || {};
       for (const key of keys) {
         const value = String(entities[key] || '').trim();
         if (value) {
           return value.toLowerCase();
         }
-      }
-
-      const file = this.context.getFileReference(entry);
-      if (file?.name) {
-        return file.name.toLowerCase();
       }
     }
 

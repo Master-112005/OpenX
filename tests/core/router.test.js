@@ -241,6 +241,52 @@ describe('Action Router', function() {
     assert.equal(executed[1].entities.appName, 'chrome');
   });
 
+  it('should route generic video stop controls to media.stop before app.close', async function() {
+    const config = {
+      permissions: {
+        levels: {
+          low: { requiresConfirmation: false, requiresAuth: false },
+          medium: { requiresConfirmation: false, requiresAuth: false }
+        }
+      }
+    };
+    const stubEngine = {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const result = await router.process('stop the video', 'chat');
+
+    assert.equal(result.intent, 'media.stop');
+    assert.equal(result.languageUnderstanding.commandFrame.action, 'stop');
+    assert.equal(result.languageUnderstanding.commandFrame.domain, 'media');
+  });
+
+  it('should execute media stop and volume set in one natural multi-command', async function() {
+    const config = {
+      permissions: {
+        levels: {
+          low: { requiresConfirmation: false, requiresAuth: false },
+          medium: { requiresConfirmation: false, requiresAuth: false }
+        }
+      }
+    };
+    const executed = [];
+    const stubEngine = {
+      execute(actionId, entities) {
+        executed.push({ actionId, entities });
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const result = await router.process('stop the video and set vol to 100', 'chat');
+
+    assert.equal(result.intent, 'multi.command');
+    assert.deepEqual(executed.map(step => step.actionId), ['media.stop', 'volume.set']);
+    assert.equal(executed[1].entities.value, 100);
+  });
+
   it('should split window and volume commands without swallowing the second command', async function() {
     this.timeout(20000);
     const config = {
@@ -621,6 +667,23 @@ describe('Action Router', function() {
     const result = await router.process('open rakesh folder', 'chat');
     assert.equal(result.intent, 'folder.open');
     assert.equal(result.entities.folderName, 'rakesh');
+  });
+
+  it('should route folders opened in VS Code as folder.open with editor context', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const result = await router.process('open java practice folder in vs code', 'chat');
+
+    assert.equal(result.intent, 'folder.open');
+    assert.equal(result.entities.folderName, 'java practice');
+    assert.equal(result.entities.openWith, 'code');
   });
 
   it('should keep multi-word app names on app.open', async function() {

@@ -194,8 +194,8 @@ class FolderController {
     try {
       const selectedPath = options.selectedPath || options.targetPath;
       if (selectedPath && path.isAbsolute(selectedPath) && fs.existsSync(selectedPath) && fs.statSync(selectedPath).isDirectory()) {
-        launchTarget(selectedPath);
-        return { success: true, data: { path: selectedPath, folderName: path.basename(selectedPath) } };
+        this._openFolderPath(selectedPath, options);
+        return { success: true, data: { path: selectedPath, folderName: path.basename(selectedPath), openWith: options.openWith || null } };
       }
 
       const matches = this._findFolderMatches(folderName);
@@ -222,8 +222,8 @@ class FolderController {
 
       if (matches.length === 1) {
         const matchedPath = matches[0];
-        launchTarget(matchedPath);
-        return { success: true, data: { path: matchedPath, folderName: path.basename(matchedPath) } };
+        this._openFolderPath(matchedPath, options);
+        return { success: true, data: { path: matchedPath, folderName: path.basename(matchedPath), openWith: options.openWith || null } };
       }
 
       const fullPath = this._resolveFolderPath(folderName);
@@ -231,12 +231,22 @@ class FolderController {
         return { success: false, error: 'Folder not found' };
       }
 
-      launchTarget(fullPath);
-      return { success: true, data: { path: fullPath, folderName: path.basename(fullPath) } };
+      this._openFolderPath(fullPath, options);
+      return { success: true, data: { path: fullPath, folderName: path.basename(fullPath), openWith: options.openWith || null } };
     } catch (err) {
       this.logger.error('Failed to open folder', err);
       return { success: false, error: err.message };
     }
+  }
+
+  _openFolderPath(folderPath, options = {}) {
+    const openWith = String(options.openWith || '').trim().toLowerCase();
+    if (openWith === 'code' || openWith === 'vscode' || openWith === 'vs code') {
+      launchTarget('code', [folderPath]);
+      return;
+    }
+
+    launchTarget(folderPath);
   }
 
   _findFolderMatches(folderName) {

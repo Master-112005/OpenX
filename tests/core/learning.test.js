@@ -24,6 +24,7 @@ describe('Active Learning Store', function() {
   it('should persist learned command corrections', function() {
     const { tempDir, store } = createStore();
 
+    assert.equal(store.storePath, path.join(tempDir, 'learning.json'));
     store.rememberCorrection('open photos', 'open google photos');
     const reloaded = new ActiveLearningStore({
       app: { dataDir: tempDir },

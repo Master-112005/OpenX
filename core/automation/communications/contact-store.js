@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
 const { Logger, Normalizer } = require('../../shared/index');
+const { buildDataPaths } = require('../../shared/data-root');
 
 const MAX_CONTACTS = 10;
 
@@ -33,8 +33,7 @@ class ContactStore {
       return path.resolve(configuredPath);
     }
 
-    const dataDir = this.config?.app?.dataDir || path.join(os.homedir(), '.jarvis');
-    return path.join(dataDir, 'contacts.json');
+    return buildDataPaths(this.config).contactsPath;
   }
 
   _ensureStoreExists() {

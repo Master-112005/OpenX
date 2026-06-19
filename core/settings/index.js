@@ -1,6 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { ContactStore, normalizePhoneNumber } = require('../automation/communications/contact-store');
+const { ensureDataRoot, migrateLegacyData } = require('../shared/data-root');
 
 const CHAT_THEMES = {
   midnight: {
@@ -265,49 +266,61 @@ function normalizeTtsRate(value, fallback) {
 class SettingsService {
   constructor(baseConfig) {
     this.baseConfig = deepClone(baseConfig || {});
-    this.settingsPath = path.join(
-      this.baseConfig?.app?.dataDir || process.cwd(),
-      'settings.json'
-    );
-    this.contactStore = new ContactStore(baseConfig);
+    this.dataPaths = ensureDataRoot(this.baseConfig);
+    if (this.baseConfig?.app?.migrateLegacyData) {
+      migrateLegacyData(this.baseConfig);
+    }
+
+    this.baseConfig.app = this.baseConfig.app || {};
+    this.baseConfig.app.dataDir = this.dataPaths.root;
+    this.baseConfig.app.dataPaths = deepClone(this.dataPaths);
+    this.baseConfig.assistant = this.baseConfig.assistant || {};
+    this.baseConfig.assistant.contactsPath = this.baseConfig.assistant.contactsPath || this.dataPaths.contactsPath;
+    this.baseConfig.activeLearning = this.baseConfig.activeLearning || {};
+    this.baseConfig.activeLearning.storePath = this.baseConfig.activeLearning.storePath || this.dataPaths.learningPath;
+    this.baseConfig.logging = this.baseConfig.logging || {};
+    this.baseConfig.logging.directory = this.baseConfig.logging.directory || this.dataPaths.logsDir;
+
+    this.settingsPath = this.dataPaths.settingsPath;
+    this.contactStore = new ContactStore(this.baseConfig);
     this.defaults = {
       assistant: {
-        displayName: String(baseConfig?.assistant?.displayName || baseConfig?.app?.name || 'JARVIS').trim(),
-        title: String(baseConfig?.assistant?.title || 'Desktop Assistant').trim(),
-        honorific: String(baseConfig?.assistant?.honorific || 'sir').trim().toLowerCase()
+        displayName: String(this.baseConfig?.assistant?.displayName || this.baseConfig?.app?.name || 'JARVIS').trim(),
+        title: String(this.baseConfig?.assistant?.title || 'Desktop Assistant').trim(),
+        honorific: String(this.baseConfig?.assistant?.honorific || 'sir').trim().toLowerCase()
       },
       userProfile: {
-        fullName: String(baseConfig?.assistant?.userProfile?.fullName || '').trim(),
-        email: String(baseConfig?.assistant?.userProfile?.email || '').trim(),
-        phone: normalizePhoneNumber(baseConfig?.assistant?.userProfile?.phone || ''),
-        addressLine1: String(baseConfig?.assistant?.userProfile?.addressLine1 || '').trim(),
-        city: String(baseConfig?.assistant?.userProfile?.city || '').trim(),
-        state: String(baseConfig?.assistant?.userProfile?.state || '').trim(),
-        postalCode: String(baseConfig?.assistant?.userProfile?.postalCode || '').trim(),
-        country: String(baseConfig?.assistant?.userProfile?.country || '').trim(),
-        company: String(baseConfig?.assistant?.userProfile?.company || '').trim(),
-        role: String(baseConfig?.assistant?.userProfile?.role || '').trim()
+        fullName: String(this.baseConfig?.assistant?.userProfile?.fullName || '').trim(),
+        email: String(this.baseConfig?.assistant?.userProfile?.email || '').trim(),
+        phone: normalizePhoneNumber(this.baseConfig?.assistant?.userProfile?.phone || ''),
+        addressLine1: String(this.baseConfig?.assistant?.userProfile?.addressLine1 || '').trim(),
+        city: String(this.baseConfig?.assistant?.userProfile?.city || '').trim(),
+        state: String(this.baseConfig?.assistant?.userProfile?.state || '').trim(),
+        postalCode: String(this.baseConfig?.assistant?.userProfile?.postalCode || '').trim(),
+        country: String(this.baseConfig?.assistant?.userProfile?.country || '').trim(),
+        company: String(this.baseConfig?.assistant?.userProfile?.company || '').trim(),
+        role: String(this.baseConfig?.assistant?.userProfile?.role || '').trim()
       },
       voice: {
         tts: {
-          rate: clampNumber(baseConfig?.voice?.tts?.rate, -10, 10, 0),
-          volume: clampNumber(baseConfig?.voice?.tts?.volume, 0, 100, 100),
-          voiceName: String(baseConfig?.voice?.tts?.voiceName || '').trim(),
-          naturalize: baseConfig?.voice?.tts?.naturalize !== false
+          rate: clampNumber(this.baseConfig?.voice?.tts?.rate, -10, 10, 0),
+          volume: clampNumber(this.baseConfig?.voice?.tts?.volume, 0, 100, 100),
+          voiceName: String(this.baseConfig?.voice?.tts?.voiceName || '').trim(),
+          naturalize: this.baseConfig?.voice?.tts?.naturalize !== false
         }
       },
       system: {
-        volumeStep: clampNumber(baseConfig?.system?.volumeStep, 1, 20, 5),
+        volumeStep: clampNumber(this.baseConfig?.system?.volumeStep, 1, 20, 5),
         permissionLevel: 'medium'
       },
       activeLearning: {
-        enabled: baseConfig?.activeLearning?.enabled !== false,
-        askForFeedback: baseConfig?.activeLearning?.askForFeedback !== false
+        enabled: this.baseConfig?.activeLearning?.enabled !== false,
+        askForFeedback: this.baseConfig?.activeLearning?.askForFeedback !== false
       },
       chat: {
-        activationShortcut: normalizeActivationShortcut(baseConfig?.chat?.activationShortcut, 'Alt+Space'),
-        themeId: String(baseConfig?.chat?.activeTheme || 'midnight').trim(),
-        maxHistory: clampNumber(baseConfig?.chat?.maxHistory, 50, 2000, 500)
+        activationShortcut: normalizeActivationShortcut(this.baseConfig?.chat?.activationShortcut, 'Alt+Space'),
+        themeId: String(this.baseConfig?.chat?.activeTheme || 'midnight').trim(),
+        maxHistory: clampNumber(this.baseConfig?.chat?.maxHistory, 50, 2000, 500)
       },
       modes: []
     };
@@ -362,6 +375,8 @@ class SettingsService {
     const settings = this.getSettings();
     return {
       settings,
+      dataRoot: this.dataPaths.root,
+      dataPaths: deepClone(this.dataPaths),
       contacts: this.contactStore.listContacts(),
       contactsPath: this.contactStore.contactsPath,
       availableThemes: Object.values(CHAT_THEMES)
@@ -380,11 +395,16 @@ class SettingsService {
     const settings = this.getSettings();
     const runtimeConfig = deepClone(this.baseConfig);
 
+    runtimeConfig.app = runtimeConfig.app || {};
+    runtimeConfig.app.dataDir = this.dataPaths.root;
+    runtimeConfig.app.dataPaths = deepClone(this.dataPaths);
+
     runtimeConfig.assistant = runtimeConfig.assistant || {};
     runtimeConfig.assistant.displayName = settings.assistant.displayName;
     runtimeConfig.assistant.title = settings.assistant.title;
     runtimeConfig.assistant.honorific = settings.assistant.honorific;
     runtimeConfig.assistant.userProfile = deepClone(settings.userProfile);
+    runtimeConfig.assistant.contactsPath = this.contactStore.contactsPath;
 
     runtimeConfig.voice = runtimeConfig.voice || {};
     runtimeConfig.voice.tts = runtimeConfig.voice.tts || {};
@@ -400,6 +420,10 @@ class SettingsService {
     runtimeConfig.activeLearning = runtimeConfig.activeLearning || {};
     runtimeConfig.activeLearning.enabled = settings.activeLearning.enabled;
     runtimeConfig.activeLearning.askForFeedback = settings.activeLearning.askForFeedback;
+    runtimeConfig.activeLearning.storePath = this.dataPaths.learningPath;
+
+    runtimeConfig.logging = runtimeConfig.logging || {};
+    runtimeConfig.logging.directory = this.dataPaths.logsDir;
 
     runtimeConfig.chat = runtimeConfig.chat || {};
     runtimeConfig.chat.activationShortcut = settings.chat.activationShortcut;

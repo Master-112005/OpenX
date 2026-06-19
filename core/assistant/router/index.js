@@ -8,6 +8,8 @@ const PermissionValidator = require('../../permissions/index');
 const NlpProcessor = require('../nlp/index');
 const { normalizeWebTarget } = require('../nlp/web-targets');
 const { MediaUnderstandingRouter } = require('../../media-understanding/media-router');
+const CommandFrameParser = require('./command-frame');
+const NaturalLanguageRouter = require('../nlu/index');
 
 const CONFIDENCE_THRESHOLD = 0.5;
 
@@ -56,6 +58,12 @@ class ActionRouter {
     this.permissionValidator = new PermissionValidator(config);
     this.automationEngine = automationEngine;
     this.nlp = new NlpProcessor(this.intentRegistry);
+    this.commandFrameParser = new CommandFrameParser();
+    this.naturalLanguageRouter = new NaturalLanguageRouter({
+      intentRegistry: this.intentRegistry,
+      entityExtractor: this.entityExtractor,
+      nlp: this.nlp
+    });
     this.learningStore = config?.learningStore || null;
     this.mediaUnderstanding = new MediaUnderstandingRouter({
       logging: config?.logging,
@@ -81,7 +89,8 @@ class ActionRouter {
     const useNoisyRepair = !this._classifyCapabilityCommand(
       initialPreparedInput.correctedText,
       parseResult.rawCommandText || parseResult.commandText
-    ) && this._shouldUseNoisyRepair(
+    ) && !this._shouldPreserveStructuralCommand(parseResult.rawCommandText || parseResult.commandText)
+      && this._shouldUseNoisyRepair(
       initialPreparedInput,
       parseResult.rawCommandText || parseResult.commandText,
       source
@@ -95,6 +104,8 @@ class ActionRouter {
     const rawCommandText = useNoisyRepair
       ? effectiveCommandText
       : (parseResult.rawCommandText || parseResult.commandText);
+    preparedInput.commandFrame = this.commandFrameParser.parse(rawCommandText, preparedInput);
+    preparedInput.semanticParse = this.naturalLanguageRouter.parse(rawCommandText, preparedInput);
 
     if (this._isIncompleteCommand(rawCommandText, preparedInput)) {
       return {
@@ -126,6 +137,14 @@ class ActionRouter {
     const minAcceptableConfidence = 0.3;
 
     if (!intentResult) {
+      this._recordRoutingEvidence({
+        input: rawCommandText,
+        source,
+        intent: null,
+        success: false,
+        preparedInput,
+        validationStatus: 'unknown'
+      });
       if (this._isIncompleteCommand(rawCommandText, preparedInput)) {
         return {
           commandId,
@@ -180,10 +199,13 @@ class ActionRouter {
       this._resolveExplicitReminderIntent(rawCommandText, preparedInput) ||
       this._resolveSystemSettingsIntent(rawCommandText, preparedInput) ||
       this._resolveSystemInsightIntent(rawCommandText, preparedInput) ||
+      this._resolveFolderOpenInAppIntent(rawCommandText, preparedInput) ||
       this._resolveWorkspaceSetupIntent(rawCommandText, preparedInput) ||
       this._resolveScreenshotIntent(rawCommandText, preparedInput) ||
       this._resolveFormFillIntent(rawCommandText, preparedInput) ||
       this._resolveYouTubeMediaIntent(rawCommandText, preparedInput) ||
+      this._resolveNaturalLanguageRouteIntent(rawCommandText, preparedInput) ||
+      this._resolveCommandFrameIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitMediaControlIntent(rawCommandText, preparedInput) ||
       this._resolveMediaUnderstandingIntent(rawCommandText, source) ||
       this._resolveExplicitMediaIntent(rawCommandText, preparedInput) ||
@@ -435,6 +457,12 @@ class ActionRouter {
     return null;
   }
 
+  _shouldPreserveStructuralCommand(rawText) {
+    const text = String(rawText || '').toLowerCase();
+    return /\b(?:folder|directory|file|document)\b/.test(text) &&
+      /\b(?:open|show|launch|start|find|locate|search|move|copy|rename|delete|create)\b/.test(text);
+  }
+
   _resolveCapabilityCommandIntent(rawText, preparedInput = {}) {
     const intent = this.intentRegistry.get('assistant.capability');
     if (!intent) {
@@ -570,6 +598,67 @@ class ActionRouter {
     }
 
     return null;
+  }
+
+  _resolveCommandFrameIntent(rawText, preparedInput = {}) {
+    const frame = preparedInput.commandFrame || this.commandFrameParser.parse(rawText, preparedInput);
+    if (!frame?.action || frame.validation?.status === 'unknown') {
+      return null;
+    }
+
+    if (frame.domain === 'media') {
+      const intentByAction = {
+        stop: 'media.stop',
+        pause: 'media.pause',
+        resume: 'media.resume',
+        next: 'media.next',
+        previous: 'media.previous',
+        mute: 'media.mute',
+        unmute: 'media.unmute'
+      };
+      const intentId = intentByAction[frame.action];
+      const intent = intentId ? this.intentRegistry.get(intentId) : null;
+      return intent
+        ? {
+            intent,
+            confidence: 0.99,
+            entities: {
+              target: frame.targetText || null,
+              routeSource: 'command-frame'
+            }
+          }
+        : null;
+    }
+
+    return null;
+  }
+
+  _resolveNaturalLanguageRouteIntent(rawText, preparedInput = {}) {
+    const route = this.naturalLanguageRouter.resolveIntent(rawText, preparedInput);
+    if (!route) {
+      return null;
+    }
+
+    const frame = route.semanticFrame || null;
+    if (!frame || frame.validation?.status !== 'passed') {
+      return null;
+    }
+
+    const safeDomains = new Set(['brightness', 'media', 'volume']);
+    if (!safeDomains.has(frame.domain)) {
+      return null;
+    }
+    if (frame.domain === 'media' && ['media.play', 'media.search'].includes(frame.intentId)) {
+      return null;
+    }
+
+    return {
+      intent: route.intent,
+      confidence: route.confidence,
+      entities: route.entities,
+      routeValidation: frame.validation,
+      semanticFrame: frame
+    };
   }
 
   _resolveSemanticUtilityIntent(action, domain, value) {
@@ -870,6 +959,14 @@ class ActionRouter {
     );
 
     if (missingRequired.length > 0) {
+      this._recordRoutingEvidence({
+        input: rawCommandText,
+        source,
+        intent: intentResult.intent.id,
+        success: false,
+        preparedInput,
+        validationStatus: 'incomplete'
+      });
       const capability = this._resolveCapabilityCommandIntent(rawCommandText, preparedInput);
       if (capability) {
         return this._completeIntent(commandId, capability, rawCommandText, source, preparedInput);
@@ -941,10 +1038,27 @@ class ActionRouter {
       return null;
     }
 
+    const politeGoAhead = text.match(/^(?:(?:can|could|would|will)\s+you\s+)?(?:please\s+)?(?:kindly\s+)?go\s+ahead\s+and\s+(.+)$/i);
+    if (politeGoAhead?.[1] && !/\b(?:and|then|after that|afterwards|also|plus)\b|[;]/i.test(politeGoAhead[1])) {
+      return null;
+    }
+
     const preparedWholeText = this.nlp.prepare(text);
+    preparedWholeText.semanticParse = this.naturalLanguageRouter.parse(text, preparedWholeText);
     const wholeLocalInfo = this._resolveLocalInfoIntent(text, preparedWholeText);
     if (wholeLocalInfo?.intent?.id === 'system.processes' && wholeLocalInfo.entities?.queryApp) {
       return null;
+    }
+
+    const semanticFrames = Array.isArray(preparedWholeText.semanticParse?.frames)
+      ? preparedWholeText.semanticParse.frames
+      : [];
+    const executableSemanticClauses = semanticFrames
+      .filter(frame => frame.validation?.status === 'passed' && frame.intentId)
+      .map(frame => frame.text)
+      .filter(Boolean);
+    if (executableSemanticClauses.length >= 2 && executableSemanticClauses.length === semanticFrames.length) {
+      return executableSemanticClauses.slice(0, 6);
     }
 
     let clauses = text
@@ -1154,6 +1268,26 @@ class ActionRouter {
     return `Completed ${completed} command${completed === 1 ? '' : 's'}.`;
   }
 
+  _recordRoutingEvidence(entry = {}) {
+    if (!this.learningStore?.recordRoutingEvidence) {
+      return null;
+    }
+
+    const semanticParse = entry.semanticParse ||
+      entry.preparedInput?.semanticParse ||
+      entry.languageUnderstanding?.semanticParse ||
+      null;
+    return this.learningStore.recordRoutingEvidence({
+      input: entry.input,
+      source: entry.source,
+      intent: entry.intent,
+      success: entry.success,
+      routeSource: entry.routeSource,
+      validationStatus: entry.validationStatus,
+      semanticParse
+    });
+  }
+
   async confirmAndExecute(commandId, intentId, entities) {
     const intent = this.intentRegistry.get(intentId);
     if (!intent) {
@@ -1172,6 +1306,15 @@ class ActionRouter {
     try {
       const result = await this.automationEngine.execute(intentResult.intent.action, entities);
       this.logger.info(`Execution result: ${commandId}`, { success: result.success });
+      this._recordRoutingEvidence({
+        input: rawCommandText,
+        source,
+        intent: intentResult.intent.id,
+        success: Boolean(result.success),
+        languageUnderstanding,
+        routeSource: entities?.routeSource || (intentResult.semanticFrame ? 'natural-language-router' : null),
+        validationStatus: result.success ? 'passed' : 'execution-failed'
+      });
 
       const modeCommandSteps = [];
       if (result.success && intentResult.intent.id === 'mode.start') {
@@ -1290,11 +1433,49 @@ class ActionRouter {
   _buildLanguageUnderstanding(preparedInput, intentResult, missingRequired = [], status = 'passed') {
     const intent = intentResult?.intent || null;
     const missing = Array.isArray(missingRequired) ? missingRequired : [];
+    const commandFrame = preparedInput?.commandFrame || null;
+    const semanticParse = preparedInput?.semanticParse || null;
+    const selectedSemanticFrame = intentResult?.semanticFrame || (
+      semanticParse?.frames?.find?.(frame => frame.intentId === intent?.id) || null
+    );
     return {
       status,
       normalizedText: preparedInput?.normalizedText || '',
       correctedText: preparedInput?.correctedText || '',
       intentText: preparedInput?.intentText || '',
+      commandFrame: commandFrame ? {
+        action: commandFrame.action || null,
+        actionToken: commandFrame.actionToken || null,
+        targetText: commandFrame.targetText || '',
+        domain: commandFrame.domain || 'unknown',
+        appRouteAllowed: Boolean(commandFrame.appRouteAllowed),
+        tokenRoles: commandFrame.tokenRoles || [],
+        validation: commandFrame.validation || null
+      } : null,
+      semanticParse: semanticParse ? {
+        version: semanticParse.version || 'semantic-frame-v1',
+        multiIntent: Boolean(semanticParse.multiIntent),
+        validation: semanticParse.validation || null,
+        frames: (semanticParse.frames || []).map(frame => ({
+          text: frame.text || '',
+          action: frame.action || null,
+          actionToken: frame.actionToken || null,
+          targetText: frame.targetText || '',
+          domain: frame.domain || 'unknown',
+          intentId: frame.intentId || null,
+          confidence: Number(frame.confidence || 0),
+          entities: frame.entities || {},
+          tokenRoles: frame.tokenRoles || [],
+          validation: frame.validation || null
+        })),
+        selectedFrame: selectedSemanticFrame ? {
+          text: selectedSemanticFrame.text || '',
+          action: selectedSemanticFrame.action || null,
+          domain: selectedSemanticFrame.domain || 'unknown',
+          intentId: selectedSemanticFrame.intentId || null,
+          validation: selectedSemanticFrame.validation || null
+        } : null
+      } : null,
       queryType: preparedInput?.query?.type || 'unknown',
       actionVerb: preparedInput?.query?.actionVerb || null,
       intent: intent?.id || null,
@@ -2166,6 +2347,11 @@ class ActionRouter {
         continue;
       }
 
+      const frame = preparedInput?.commandFrame || this.commandFrameParser.parse(rawText, preparedInput);
+      if (config.intentId === 'app.close' && frame?.domain === 'media' && !frame.appRouteAllowed) {
+        continue;
+      }
+
       return { intent, confidence: 0.99, entities: { appName } };
     }
 
@@ -2238,6 +2424,49 @@ class ActionRouter {
     }
 
     return null;
+  }
+
+  _resolveFolderOpenInAppIntent(rawText, preparedInput) {
+    const input = String(preparedInput?.correctedText || rawText || '').trim();
+    if (!input) {
+      return null;
+    }
+
+    const match = input.match(/^(?:open|show|launch|start|navigate\s+to|go\s+to)\s+(.+?)\s+(?:folder|directory)\s+(?:in|with|using|on)\s+(.+)$/i) ||
+      input.match(/^(?:open|show|launch|start|navigate\s+to|go\s+to)\s+(?:folder|directory)\s+(.+?)\s+(?:in|with|using|on)\s+(.+)$/i);
+    if (!match?.[1] || !match?.[2]) {
+      return null;
+    }
+
+    const openWith = this._normalizeFolderOpenApp(match[2]);
+    if (!openWith) {
+      return null;
+    }
+
+    const folderIntent = this.intentRegistry.get('folder.open');
+    if (!folderIntent) {
+      return null;
+    }
+
+    const folderName = String(match[1] || '')
+      .replace(/^(?:the|a|an)\s+/i, '')
+      .trim();
+    return folderName
+      ? { intent: folderIntent, confidence: 1, entities: { folderName, openWith } }
+      : null;
+  }
+
+  _normalizeFolderOpenApp(value) {
+    const target = String(value || '')
+      .toLowerCase()
+      .replace(/^(?:the|a|an)\s+/, '')
+      .replace(/\b(?:app|application|editor|ide)\b/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (/^(?:vs\s*code|vscode|visual\s+studio\s+code|code)$/.test(target)) {
+      return 'code';
+    }
+    return '';
   }
 
   _resolveKnownWebOpenIntent(rawText, preparedInput) {

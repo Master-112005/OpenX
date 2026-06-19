@@ -1,11 +1,12 @@
 const fs = require('fs');
 const path = require('path');
-const os = require('os');
 const { Normalizer } = require('../../shared/index');
+const { buildDataPaths } = require('../../shared/data-root');
 
 const MAX_EVENTS = 200;
 const MAX_REWRITES = 100;
 const MAX_PROMPTS = 100;
+const MAX_ROUTE_EVIDENCE = 200;
 const ACCOUNT_SERVICES = [
   'apple',
   'microsoft',
@@ -144,8 +145,7 @@ class ActiveLearningStore {
     this.askForFeedback = config?.activeLearning?.askForFeedback !== false;
     this.saveDelayMs = Number(config?.activeLearning?.saveDelayMs || 250);
     this.pendingSaveTimer = null;
-    const dataDir = config?.app?.dataDir || path.join(os.homedir(), '.jarvis');
-    this.storePath = config?.activeLearning?.storePath || path.join(dataDir, 'learning.json');
+    this.storePath = config?.activeLearning?.storePath || buildDataPaths(config).learningPath;
     this.data = this._sanitize(this._load());
   }
 
@@ -630,6 +630,48 @@ class ActiveLearningStore {
 
     this._save();
     return record;
+  }
+
+  recordRoutingEvidence(entry = {}) {
+    if (!this.enabled) {
+      return null;
+    }
+
+    const semanticParse = entry?.semanticParse || null;
+    const frames = Array.isArray(semanticParse?.frames)
+      ? semanticParse.frames.slice(0, 6).map(frame => ({
+          text: cleanCommand(frame.text),
+          action: frame.action || null,
+          domain: frame.domain || 'unknown',
+          intentId: frame.intentId || null,
+          confidence: Number(frame.confidence || 0),
+          validationStatus: frame.validation?.status || 'unknown'
+        }))
+      : [];
+
+    const record = {
+      timestamp: new Date().toISOString(),
+      input: cleanCommand(entry.input),
+      source: entry.source || 'chat',
+      intent: entry.intent || null,
+      success: Boolean(entry.success),
+      routeSource: entry.routeSource || null,
+      validationStatus: entry.validationStatus || semanticParse?.validation?.status || 'unknown',
+      frames
+    };
+
+    this.data.routingEvidence.unshift(record);
+    this.data.routingEvidence = this.data.routingEvidence.slice(0, MAX_ROUTE_EVIDENCE);
+    this._save({ defer: true });
+    return record;
+  }
+
+  getRoutingEvidence(limit = 20) {
+    if (!this.enabled) {
+      return [];
+    }
+
+    return (this.data.routingEvidence || []).slice(0, Math.max(0, Number(limit) || 20));
   }
 
   buildFeedbackKey(entry = {}) {
@@ -1156,6 +1198,7 @@ class ActiveLearningStore {
       feedback: Array.isArray(source.feedback) ? source.feedback.slice(0, MAX_EVENTS) : [],
       mistakes: Array.isArray(source.mistakes) ? source.mistakes.slice(0, MAX_EVENTS) : [],
       feedbackPrompts: Array.isArray(source.feedbackPrompts) ? source.feedbackPrompts.slice(0, MAX_PROMPTS) : [],
+      routingEvidence: Array.isArray(source.routingEvidence) ? source.routingEvidence.slice(0, MAX_ROUTE_EVIDENCE) : [],
       commandSequences: isPlainObject(source.commandSequences) ? source.commandSequences : {}
     };
   }
