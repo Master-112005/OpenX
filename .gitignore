@@ -4,3 +4,5 @@ graphify-out/
 .codex/
 .code-review-graph/
 models/whisper/*.bin
+dist/
+build/

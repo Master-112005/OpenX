@@ -1,8 +1,11 @@
 {
-  "name": "jarvis-assistant",
+  "name": "openx",
+  "productName": "OpenX",
   "version": "1.0.0",
   "description": "Intelligent Windows Desktop Assistant Platform - Offline chat-driven deterministic automation engine",
   "main": "apps/desktop/electron/main.js",
+  "author": "OpenX Team",
+  "license": "MIT",
   "scripts": {
     "start": "electron .",
     "dev": "electron . --dev",
@@ -10,7 +13,8 @@
     "test:core": "mocha tests/core/**/*.test.js --recursive",
     "test:automation": "mocha tests/automation/**/*.test.js --recursive",
     "lint": "eslint .",
-    "package": "electron-builder --win"
+    "package": "electron-builder --win",
+    "build": "electron-builder --win --x64"
   },
   "keywords": [
     "assistant",
@@ -18,10 +22,9 @@
     "automation",
     "chat-control",
     "desktop",
-    "offline"
+    "offline",
+    "openx"
   ],
-  "author": "",
-  "license": "MIT",
   "dependencies": {
     "active-win": "^8.2.1",
     "double-metaphone": "^2.0.1",
@@ -40,5 +43,65 @@
     "eslint": "^8.57.1",
     "globals": "^17.6.0",
     "mocha": "^10.2.0"
+  },
+  "build": {
+  "appId": "com.openx.assistant",
+  "productName": "OpenX",
+  "copyright": "Copyright (c) 2024 OpenX Team",
+
+  "directories": {
+    "output": "dist",
+    "buildResources": "build"
+  },
+
+    "files": [
+      "apps/**/*",
+      "config/**/*",
+      "core/**/*",
+      "plugins/**/*",
+      "package.json",
+
+      "!tests/**/*",
+      "!docs/**/*",
+      "!graphify-out/**/*",
+      "!.git/**/*",
+      "!.github/**/*",
+      "!.cursor/**/*",
+      "!.codex/**/*",
+      "!.agents/**/*",
+      "!.code-review-graph/**/*",
+      "!coverage/**/*",
+      "!**/*.test.js",
+      "!**/*.spec.js",
+      "!**/*.md"
+    ],
+
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": ["x64"]
+        }
+      ],
+      "icon": "build/icon.ico",
+      "artifactName": "OpenX Setup ${version}.exe"
+    },
+
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "allowElevation": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "OpenX",
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico",
+      "deleteAppDataOnUninstall": false
+    },
+
+    "asar": true,
+    "compression": "maximum"
   }
 }
