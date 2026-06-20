@@ -150,6 +150,10 @@ class CommandFrameParser {
     const hasUtility = targetTokens.some(token => UTILITY_TARGETS.has(token));
     const hasFile = /\b(?:file|folder|directory|document|pdf|docx?|txt|java|py|js|xlsx?|pptx?)\b/.test(normalizedText);
 
+    if (action === 'open' && /\bnew\s+(?:chrome\s+)?tab\b/.test(normalizedText)) {
+      return 'browser-tab';
+    }
+
     if (hasFile) {
       return 'local-file';
     }

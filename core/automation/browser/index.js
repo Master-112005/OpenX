@@ -1,5 +1,6 @@
 const Logger = require('../../shared/index').Logger;
 const { launchTarget } = require('../common/launcher');
+const WindowsSessionController = require('../common/windows-session');
 const { resolveTrustedWebTarget } = require('../../assistant/nlp/web-targets');
 const https = require('https');
 
@@ -66,6 +67,7 @@ class BrowserController {
   constructor(config) {
     this.logger = new Logger(config?.logging || { level: 'info' });
     this.defaultBrowser = this._detectBrowser();
+    this.windowSession = new WindowsSessionController(config);
     this.lastSearch = null;
   }
 
@@ -87,18 +89,47 @@ class BrowserController {
     return { path: null, name: 'msedge' };
   }
 
-  open(url) {
+  open(url, options = {}) {
     if (!url) {
       return { success: false, error: 'No URL provided' };
     }
 
-    let formattedUrl = url.trim();
+    const blankTabBrowser = this._normalizeBrowserName(options.browserName);
+    const isNewTabRequest = Boolean(options.newTab) || /^(?:about:newtab|chrome:\/\/newtab\/?|edge:\/\/newtab\/?)$/i.test(url.trim());
+    let formattedUrl = isNewTabRequest
+      ? this._nativeNewTabUrl(blankTabBrowser)
+      : url.trim();
     if (
       !formattedUrl.startsWith('http://') &&
       !formattedUrl.startsWith('https://') &&
       !/^(?:about|chrome|edge|file):/i.test(formattedUrl)
     ) {
       formattedUrl = 'https://' + formattedUrl;
+    }
+
+    if (
+      isNewTabRequest &&
+      blankTabBrowser === 'chrome' &&
+      !options.skipExistingBlankTabCheck
+    ) {
+      const existingBlankTab = this._focusExistingBlankTab(blankTabBrowser);
+      if (existingBlankTab) {
+        const browserLabel = existingBlankTab.browserName === 'chrome'
+          ? 'Chrome'
+          : existingBlankTab.browserName;
+        return {
+          success: false,
+          needsClarification: true,
+          error: `A new ${browserLabel} tab is already open, so I brought it to the foreground. Do you need another new tab? Say yes or ya to open one.`,
+          data: {
+            clarificationType: 'browser.open.blankTabAlreadyOpen',
+            browserName: existingBlankTab.browserName,
+            launchMethod: 'focus-existing',
+            matchedWindow: existingBlankTab.matchedWindow,
+            confirmEntities: { skipExistingBlankTabCheck: true }
+          }
+        };
+      }
     }
 
     try {
@@ -113,15 +144,61 @@ class BrowserController {
     }
   }
 
+  _nativeNewTabUrl(browserName) {
+    if (browserName === 'chrome') return 'chrome://newtab/';
+    if (browserName === 'edge') return 'edge://newtab/';
+    return 'about:newtab';
+  }
+
+  _focusExistingBlankTab(requestedBrowser) {
+    const browserName = this._normalizeBrowserName(requestedBrowser);
+    const processName = browserName === 'edge' ? 'msedge' : browserName;
+    const existing = this.windowSession.listWindows().find(window => {
+      const title = String(window?.title || '').trim().toLowerCase();
+      const process = String(window?.processName || '').trim().toLowerCase();
+      return title.includes('new tab') && process === processName;
+    });
+
+    if (!existing) {
+      return null;
+    }
+
+    const focused = this.windowSession.focusWindow(existing.title, {
+      preferredProcessNames: [processName],
+      preferredTitleTokens: ['new tab'],
+      requireTitleTokenMatch: true
+    });
+    if (!focused?.success) {
+      return null;
+    }
+
+    return {
+      browserName,
+      matchedWindow: focused.data?.matchedWindow || existing.title
+    };
+  }
+
+  _normalizeBrowserName(requestedBrowser) {
+    const requested = String(requestedBrowser || '').trim().toLowerCase();
+    if (!requested || requested === 'browser') {
+      return this.defaultBrowser.name === 'msedge' ? 'edge' : this.defaultBrowser.name;
+    }
+    return requested === 'msedge' ? 'edge' : requested;
+  }
+
   async search(query, options = {}) {
     if (!query) {
       return { success: false, error: 'No search query provided' };
     }
 
     const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
-    this.lastSearch = { query, searchUrl, results: [] };
+    this.lastSearch = { query, searchUrl, results: [], openedInBrowser: false };
     if (options.openInBrowser) {
-      return this.open(searchUrl);
+      const opened = this.open(searchUrl);
+      if (opened?.success) {
+        this.lastSearch.openedInBrowser = true;
+      }
+      return opened;
     }
 
     const results = await this._searchWebInBackground(query);
@@ -182,6 +259,26 @@ class BrowserController {
     const requestedQuery = String(query || this.lastSearch?.query || '').trim();
     if (!requestedQuery) {
       return { success: false, error: 'No previous search to open' };
+    }
+
+    const followsVisibleGoogleSearch = Boolean(
+      this.lastSearch?.openedInBrowser &&
+      this.lastSearch?.query === requestedQuery
+    );
+    if (followsVisibleGoogleSearch) {
+      const firstResultUrl = `https://www.google.com/search?btnI=1&q=${encodeURIComponent(requestedQuery)}`;
+      const opened = this.open(firstResultUrl);
+      return opened?.success
+        ? {
+            success: true,
+            data: {
+              query: requestedQuery,
+              title: 'First Google result',
+              url: firstResultUrl,
+              googleFirstResult: true
+            }
+          }
+        : opened;
     }
 
     const trusted = this._resolveTrustedWebTarget(requestedQuery);

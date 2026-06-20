@@ -93,7 +93,10 @@ function isPlainObject(value) {
 }
 
 function normalizeCommand(value) {
-  return Normalizer.normalizeText(String(value || '').trim());
+  return Normalizer.normalizeText(String(value || '').trim())
+    .replace(/\b(?:fresh|another|one more)\s+chrome\s+tab\b/g, 'new chrome tab')
+    .replace(/\b(?:fresh|another|one more)\s+tab\b/g, 'new tab')
+    .replace(/\bopen\s+(?:a\s+)?new\s+tab\s+(?:in|on)\s+(?:the\s+)?chrome\b/g, 'open new chrome tab');
 }
 
 function cleanCommand(value) {

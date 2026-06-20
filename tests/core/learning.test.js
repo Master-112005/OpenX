@@ -64,6 +64,15 @@ describe('Active Learning Store', function() {
     assert.equal(reloaded.getSnapshot().commandRewrites[0].uses, 1);
   });
 
+  it('should reuse new-tab corrections across equivalent phrasing', function() {
+    const { store } = createStore();
+
+    store.rememberCorrection('make another chrome tab', 'open new chrome tab');
+    const correction = store.findCorrection('make fresh chrome tab');
+
+    assert.equal(correction.correction, 'open new chrome tab');
+  });
+
   it('should apply browser and media preferences to routed entities', function() {
     const { store } = createStore();
 

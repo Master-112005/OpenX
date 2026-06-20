@@ -1169,7 +1169,9 @@ class Assistant extends EventEmitter {
     }
 
     const pending = this.pendingClarification;
-    if (pending.data?.confirmEntities && this._isConfirmPhrase(normalized)) {
+    const confirmsBlankTab = pending.data?.clarificationType === 'browser.open.blankTabAlreadyOpen' &&
+      normalized === 'ya';
+    if (pending.data?.confirmEntities && (this._isConfirmPhrase(normalized) || confirmsBlankTab)) {
       this.pendingClarification = null;
       const result = await this.router.confirmAndExecute(
         pending.commandId,

@@ -2369,10 +2369,18 @@ describe('Action Router', function() {
     const router = new ActionRouter(config, stubEngine);
 
     const tab = await router.process('open a new tab in chrome', 'chat');
+    const tabWithArticle = await router.process('open new tab in the chrome', 'chat');
+    const chromeTab = await router.process('open new chrome tab', 'chat');
     const search = await router.process('search for latest cricket news in new tab in chrome', 'chat');
 
     assert.equal(tab.intent, 'browser.open');
-    assert.equal(tab.entities.url, 'about:blank');
+    assert.equal(tab.entities.url, 'about:newtab');
+    assert.equal(tab.entities.browserName, 'chrome');
+    assert.equal(tab.entities.newTab, true);
+    assert.equal(tabWithArticle.intent, 'browser.open');
+    assert.equal(tabWithArticle.entities.browserName, 'chrome');
+    assert.equal(chromeTab.intent, 'browser.open');
+    assert.equal(chromeTab.entities.browserName, 'chrome');
     assert.equal(search.intent, 'browser.search');
     assert.equal(search.entities.query, 'latest cricket news');
     assert.equal(search.entities.openInBrowser, true);

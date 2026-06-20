@@ -644,7 +644,7 @@ class ActionRouter {
       return null;
     }
 
-    const safeDomains = new Set(['brightness', 'media', 'volume']);
+    const safeDomains = new Set(['brightness', 'browser-tab', 'media', 'volume']);
     if (!safeDomains.has(frame.domain)) {
       return null;
     }
@@ -2744,7 +2744,7 @@ class ActionRouter {
       .replace(/\bchrom\b/g, 'chrome')
       .replace(/\btaqbs?\b/g, 'tabs');
     const tabInput = `${input} ${rawInput}`.replace(/\s+/g, ' ').trim();
-    const browserMatch = (tabInput.match(/\b(?:in|on)\s+(chrome|browser|edge|firefox)\b/));
+    const browserMatch = (tabInput.match(/\b(?:in|on)\s+(?:the\s+)?(chrome|browser|edge|firefox)\b/));
 
     if (
       /^(?:what|which|show|list|tell)\b/.test(input) &&
@@ -2763,10 +2763,21 @@ class ActionRouter {
         : null;
     }
 
-    if (/^(?:open\s+)?(?:a\s+)?new\s+tab(?:\s+(?:in|on)\s+(?:chrome|browser|edge|firefox))?$/.test(input)) {
+    const newTabMatch = input.match(
+      /^(?:open\s+)?(?:a\s+)?new\s+(?:(chrome|browser|edge|firefox)\s+)?tab(?:\s+(?:in|on)\s+(?:the\s+)?(chrome|browser|edge|firefox))?$/
+    );
+    if (newTabMatch) {
       const intent = this.intentRegistry.get('browser.open');
       return intent
-        ? { intent, confidence: 1, entities: { url: 'about:blank' } }
+        ? {
+            intent,
+            confidence: 1,
+            entities: {
+              url: 'about:newtab',
+              browserName: newTabMatch[1] || newTabMatch[2] || browserMatch?.[1] || 'browser',
+              newTab: true
+            }
+          }
         : null;
     }
 

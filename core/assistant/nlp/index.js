@@ -281,6 +281,9 @@ class NlpProcessor {
 
   _inferDomain({ actionVerb, correctedText, targetText, localScope, webTarget, value }) {
     const combined = `${correctedText || ''} ${targetText || ''}`.toLowerCase();
+    if (actionVerb === 'open' && /\bnew\s+(?:chrome\s+)?tab\b/.test(combined)) {
+      return 'browser-tab';
+    }
     if (/\b(?:volume|sound|audio)\b/.test(combined)) {
       return 'volume';
     }
@@ -306,6 +309,10 @@ class NlpProcessor {
   _classifyTargetType({ actionVerb, correctedText, rawText, targetText, webTarget, localScope }) {
     const combined = `${correctedText || ''} ${rawText || ''}`.toLowerCase();
     const target = String(targetText || '').toLowerCase();
+
+    if (actionVerb === 'open' && /\bnew\s+(?:chrome\s+)?tab\b/.test(combined)) {
+      return 'browser-tab';
+    }
 
     if (/\b(?:file|folder|directory|desktop|downloads|documents|pictures|music|videos)\b|[^\s]+\.[a-z0-9]{1,10}\b/i.test(combined)) {
       return 'local-file';

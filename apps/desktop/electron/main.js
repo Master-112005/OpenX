@@ -307,7 +307,17 @@ function setupIPC() {
 
   registerIpcHandler('command:process', async (_event, { input, source }) => {
     if (!assistant) return { success: false, response: 'Assistant not initialized' };
-    return assistant.processCommand(input, source);
+    const result = await assistant.processCommand(input, source);
+    if (
+      result?.needsClarification &&
+      result.data?.clarificationType === 'browser.open.blankTabAlreadyOpen' &&
+      chatWindow &&
+      !chatWindow.isDestroyed()
+    ) {
+      chatWindow.show();
+      chatWindow.focus();
+    }
+    return result;
   });
 
   registerIpcHandler('command:confirm', async (_event, { commandId, intentId, entities }) => {

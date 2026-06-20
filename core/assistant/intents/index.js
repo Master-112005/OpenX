@@ -239,11 +239,11 @@ const INTENT_DEFINITIONS = [
   },
   {
     id: 'browser.open',
-    patterns: ['open website', 'go to website', 'open url', 'navigate to', 'browse to', 'open', 'go to'],
+    patterns: ['open website', 'go to website', 'open url', 'open new tab', 'open new chrome tab', 'navigate to', 'browse to', 'open', 'go to'],
     permissionLevel: 'low',
     action: 'browser.open',
     entities: [{ name: 'url', type: 'string', required: true }],
-    description: 'Open a website in browser'
+    description: 'Open a website or native new tab in browser'
   },
   {
     id: 'browser.search',

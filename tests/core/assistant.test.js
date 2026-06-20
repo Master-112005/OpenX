@@ -271,6 +271,45 @@ describe('Assistant Confirmation Flow', function() {
     assert.equal(selectedEntities.forceNewWindow, true);
   });
 
+  it('should treat ya as confirmation for an existing blank-tab prompt', async function() {
+    let selectedEntities = null;
+    const router = {
+      process: async () => ({
+        commandId: 'cmd-new-tab',
+        success: false,
+        needsClarification: true,
+        intent: 'browser.open',
+        entities: { url: 'about:newtab', browserName: 'chrome', newTab: true },
+        data: {
+          clarificationType: 'browser.open.blankTabAlreadyOpen',
+          confirmEntities: { skipExistingBlankTabCheck: true }
+        },
+        response: 'A new Chrome tab is already open. Do you need another new tab?'
+      }),
+      confirmAndExecute: async (commandId, intentId, entities) => {
+        selectedEntities = entities;
+        return {
+          commandId,
+          success: true,
+          intent: intentId,
+          entities,
+          response: 'Opening another new tab.'
+        };
+      }
+    };
+    const assistant = new Assistant({}, {
+      router,
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    await assistant.processCommand('open a new tab in chrome');
+    const result = await assistant.processCommand('ya');
+
+    assert.equal(result.success, true);
+    assert.equal(selectedEntities.skipExistingBlankTabCheck, true);
+  });
+
   it('should open a selected folder after an ambiguity prompt', async function() {
     let selectedEntities = null;
     const router = {

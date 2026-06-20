@@ -47,6 +47,51 @@ describe('Browser Controller', function() {
     assert.ok(openedUrl.includes('google.com/search'));
   });
 
+  it('should focus an existing Chrome new tab and ask before opening another', function() {
+    const controller = new BrowserController({});
+    controller.defaultBrowser = { path: 'chrome.exe', name: 'chrome' };
+    controller.windowSession.listWindows = () => ([{
+      handle: 100,
+      id: 10,
+      processName: 'chrome',
+      title: 'New Tab - Google Chrome'
+    }]);
+    controller.windowSession.focusWindow = () => ({
+      success: true,
+      data: { matchedWindow: 'New Tab - Google Chrome' }
+    });
+
+    const result = controller.open('about:newtab', { browserName: 'chrome', newTab: true });
+
+    assert.equal(result.success, false);
+    assert.equal(result.needsClarification, true);
+    assert.equal(result.data.clarificationType, 'browser.open.blankTabAlreadyOpen');
+    assert.equal(result.data.matchedWindow, 'New Tab - Google Chrome');
+    assert.deepEqual(result.data.confirmEntities, { skipExistingBlankTabCheck: true });
+    assert.match(result.error, /another new tab/i);
+  });
+
+  it('should map browser new-tab requests to native browser URLs', function() {
+    const controller = new BrowserController({});
+
+    assert.equal(controller._nativeNewTabUrl('chrome'), 'chrome://newtab/');
+    assert.equal(controller._nativeNewTabUrl('edge'), 'edge://newtab/');
+    assert.equal(controller._nativeNewTabUrl('firefox'), 'about:newtab');
+  });
+
+  it('should ignore new tabs belonging to a different browser', function() {
+    const controller = new BrowserController({});
+    controller.defaultBrowser = { path: null, name: 'chrome' };
+    controller.windowSession.listWindows = () => ([{
+      handle: 100,
+      id: 10,
+      processName: 'msedge',
+      title: 'New tab - Microsoft Edge'
+    }]);
+
+    assert.equal(controller._focusExistingBlankTab('chrome'), null);
+  });
+
   it('should search directly inside supported sites', function() {
     const controller = new BrowserController({});
     let openedUrl = '';
@@ -75,19 +120,46 @@ describe('Browser Controller', function() {
       openedUrl = url;
       return { success: true, data: { url } };
     };
-    controller._searchWebInBackground = async query => ([{
-      title: 'ChatGPT',
-      snippet: `${query} result`,
-      url: 'https://duckduckgo.com/l/?uddg=https%3A%2F%2Fchatgpt.com%2F'
-    }]);
+    let searchedInBackground = false;
+    controller._searchWebInBackground = async () => {
+      searchedInBackground = true;
+      return [{
+        title: 'Wikipedia result',
+        url: 'https://en.wikipedia.org/wiki/ChatGPT'
+      }];
+    };
 
     await controller.search('chatgpt', { openInBrowser: true });
     const result = await controller.openFirstResult();
 
     assert.equal(result.success, true);
-    assert.equal(result.data.title, 'ChatGPT');
-    assert.equal(result.data.url, 'https://chatgpt.com/');
-    assert.equal(openedUrl, 'https://chatgpt.com/');
+    assert.equal(result.data.title, 'First Google result');
+    assert.equal(result.data.googleFirstResult, true);
+    assert.ok(result.data.url.includes('google.com/search?btnI=1'));
+    assert.ok(result.data.url.includes('q=chatgpt'));
+    assert.equal(openedUrl, result.data.url);
+    assert.equal(searchedInBackground, false);
+  });
+
+  it('should use the visible Google search when opening the first link', async function() {
+    const controller = new BrowserController({});
+    const openedUrls = [];
+    controller.open = url => {
+      openedUrls.push(url);
+      return { success: true, data: { url } };
+    };
+    controller._searchWebInBackground = async () => ([{
+      title: 'Parul University - Wikipedia',
+      url: 'https://en.wikipedia.org/wiki/Parul_University'
+    }]);
+
+    await controller.search('parul university', { openInBrowser: true });
+    const result = await controller.openFirstResult();
+
+    assert.equal(result.data.googleFirstResult, true);
+    assert.ok(openedUrls[1].includes('google.com/search?btnI=1'));
+    assert.ok(openedUrls[1].includes('q=parul%20university'));
+    assert.equal(openedUrls[1].includes('wikipedia.org'), false);
   });
 
   it('should open trusted web app URLs instead of blindly opening the first search result', async function() {

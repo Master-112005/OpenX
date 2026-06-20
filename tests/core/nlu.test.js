@@ -75,4 +75,15 @@ describe('Natural Language Router', function() {
     assert.equal(evidence[0].frames[0].domain, 'media');
     assert.equal(evidence[0].frames[0].validationStatus, 'passed');
   });
+
+  it('should resolve new-tab language to a native browser action', function() {
+    const router = createRouter();
+    const result = router.resolveIntent('open a fresh tab in chrome');
+
+    assert.equal(result.intent.id, 'browser.open');
+    assert.equal(result.semanticFrame.domain, 'browser-tab');
+    assert.equal(result.entities.url, 'about:newtab');
+    assert.equal(result.entities.browserName, 'chrome');
+    assert.equal(result.entities.newTab, true);
+  });
 });

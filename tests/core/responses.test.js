@@ -330,6 +330,15 @@ describe('Response Generator', function() {
     assert.match(result, /foreground/);
   });
 
+  it('should describe native Chrome new-tab actions without exposing an internal URL', function() {
+    const gen = new ResponseGenerator();
+    const result = gen.generate('success', 'browser.open', {
+      entities: { url: 'about:newtab', browserName: 'chrome', newTab: true }
+    });
+
+    assert.match(result, /^Opening a new Chrome tab(?:, sir)?\.$/);
+  });
+
   it('should mention the matched window in window responses', function() {
     const gen = new ResponseGenerator();
     const result = gen.generate('success', 'window.minimize', {

@@ -412,6 +412,12 @@ const RESPONSE_BUILDERS = {
     },
     'browser.open': context => {
       const url = valueFromContext(context, 'url');
+      const newTab = Boolean(valueFromContext(context, 'newTab', false));
+      const browserName = valueFromContext(context, 'browserName', 'browser');
+      if (newTab) {
+        const browserLabel = browserName === 'chrome' ? 'Chrome' : browserName;
+        return `Opening a new ${browserLabel} tab.`;
+      }
       return chooseVariant(`browser.open:${url}`, [
         `Opening ${url} in your browser.`,
         `Opening that link for you now.`,

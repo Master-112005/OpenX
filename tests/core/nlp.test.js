@@ -95,4 +95,14 @@ describe('NLP Processor', function() {
       'turn on wifi'
     );
   });
+
+  it('should normalize native new-tab phrasing as a browser-tab action', function() {
+    const nlp = new NlpProcessor(new IntentRegistry());
+    const prepared = nlp.prepare('open another chrome tab');
+
+    assert.equal(prepared.correctedText, 'open new chrome tab');
+    assert.equal(prepared.semanticFrame.actionVerb, 'open');
+    assert.equal(prepared.semanticFrame.domain, 'browser-tab');
+    assert.equal(prepared.semanticFrame.targetType, 'browser-tab');
+  });
 });

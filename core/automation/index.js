@@ -105,7 +105,7 @@ class AutomationEngine {
       'folder.delete': (entities) => this.folders.delete(entities.folderName, entities.path),
       'folder.move': (entities) => this.folders.move(entities.source, entities.destination),
       'folder.open': (entities) => this.folders.open(entities.folderName, entities),
-      'browser.open': (entities) => this.browser.open(entities.url),
+      'browser.open': (entities) => this.browser.open(entities.url, entities),
       'browser.search': (entities) => this.browser.search(entities.query, entities),
       'browser.siteSearch': (entities) => this.browser.siteSearch(entities.site, entities.query, entities),
       'browser.openFirstResult': (entities) => this.browser.openFirstResult(entities.query),

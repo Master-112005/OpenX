@@ -224,6 +224,10 @@ class NaturalLanguageRouter {
     const has = domain => tokens.some(token => DOMAIN_TERMS[domain]?.has(token));
     const appMatch = this._findKnownApp(tokens);
 
+    if (action === 'open' && /\bnew\s+(?:chrome\s+)?tab\b/.test(text)) {
+      return 'browser-tab';
+    }
+
     if (/\.[a-z0-9]{1,10}\b/i.test(text) || has('file')) {
       return 'local-file';
     }
@@ -259,6 +263,10 @@ class NaturalLanguageRouter {
   }
 
   _intentForFrame(action, domain, tokens, text, value) {
+    if (domain === 'browser-tab' && action === 'open') {
+      return 'browser.open';
+    }
+
     if (domain === 'volume') {
       if (action === 'set' && Number.isFinite(value)) return 'volume.set';
       if (action === 'increase') return 'volume.up';
@@ -324,6 +332,13 @@ class NaturalLanguageRouter {
 
     if (intent.id === 'browser.search') {
       entities.query = entities.query || this._extractSearchQuery(rawText, frame);
+    }
+
+    if (intent.id === 'browser.open' && frame.domain === 'browser-tab') {
+      const browserMatch = frame.correctedText.match(/\b(chrome|browser|edge|firefox)\b/);
+      entities.url = 'about:newtab';
+      entities.browserName = browserMatch?.[1] || 'browser';
+      entities.newTab = true;
     }
 
     return Object.fromEntries(
