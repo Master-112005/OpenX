@@ -7,8 +7,8 @@
   "author": "OpenX Team",
   "license": "MIT",
   "scripts": {
-    "start": "electron .",
-    "dev": "electron . --dev",
+    "start": "node scripts/start-electron.js",
+    "dev": "node scripts/start-electron.js --dev",
     "test": "mocha tests/**/*.test.js --recursive",
     "test:core": "mocha tests/core/**/*.test.js --recursive",
     "test:automation": "mocha tests/automation/**/*.test.js --recursive",

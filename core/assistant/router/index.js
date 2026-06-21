@@ -10,6 +10,8 @@ const { normalizeWebTarget } = require('../nlp/web-targets');
 const { MediaUnderstandingRouter } = require('../../media-understanding/media-router');
 const CommandFrameParser = require('./command-frame');
 const NaturalLanguageRouter = require('../nlu/index');
+const AppCommandLanguage = require('../app-language/index');
+const BrowserCommandLanguage = require('../browser-language/index');
 
 const CONFIDENCE_THRESHOLD = 0.5;
 
@@ -64,6 +66,8 @@ class ActionRouter {
       entityExtractor: this.entityExtractor,
       nlp: this.nlp
     });
+    this.appCommandLanguage = new AppCommandLanguage();
+    this.browserCommandLanguage = new BrowserCommandLanguage();
     this.learningStore = config?.learningStore || null;
     this.mediaUnderstanding = new MediaUnderstandingRouter({
       logging: config?.logging,
@@ -106,6 +110,8 @@ class ActionRouter {
       : (parseResult.rawCommandText || parseResult.commandText);
     preparedInput.commandFrame = this.commandFrameParser.parse(rawCommandText, preparedInput);
     preparedInput.semanticParse = this.naturalLanguageRouter.parse(rawCommandText, preparedInput);
+    preparedInput.appLanguage = this.appCommandLanguage.parse(rawCommandText, preparedInput.correctedText);
+    preparedInput.browserLanguage = this.browserCommandLanguage.parse(rawCommandText, preparedInput.correctedText);
 
     if (this._isIncompleteCommand(rawCommandText, preparedInput)) {
       return {
@@ -204,6 +210,9 @@ class ActionRouter {
       this._resolveScreenshotIntent(rawCommandText, preparedInput) ||
       this._resolveFormFillIntent(rawCommandText, preparedInput) ||
       this._resolveYouTubeMediaIntent(rawCommandText, preparedInput) ||
+      this._resolveAppLanguageIntent(rawCommandText, preparedInput) ||
+      this._resolveBrowserLanguageIntent(rawCommandText, preparedInput) ||
+      this._resolveBrowserTabIntent(rawCommandText, preparedInput) ||
       this._resolveNaturalLanguageRouteIntent(rawCommandText, preparedInput) ||
       this._resolveCommandFrameIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitMediaControlIntent(rawCommandText, preparedInput) ||
@@ -215,7 +224,6 @@ class ActionRouter {
       this._resolveExplicitAlarmIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitTimerIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitModeIntent(rawCommandText, preparedInput) ||
-      this._resolveBrowserTabIntent(rawCommandText, preparedInput) ||
       this._resolveLocalInfoIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitAppIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitWindowIntent(rawCommandText, preparedInput) ||
@@ -1299,6 +1307,33 @@ class ActionRouter {
       };
     }
 
+    const verification = this._verifyResolvedIntent(
+      options.originalInput || '',
+      intent,
+      entities
+    );
+
+    if (!verification.verified && options.allowPartialVerification !== true) {
+      return {
+        commandId,
+        success: false,
+        error: 'Command verification failed',
+        response: this._buildResponse('error', 'commandVerificationFailed', {
+          warnings: verification.warnings,
+          unmatchedTokens: verification.unmatchedTokens
+        }),
+        intent: intent.id,
+        confidence: verification.confidence,
+        entities,
+        requiresConfirmation: true,
+        verification
+      };
+    }
+
+    if (verification.warnings.length > 0) {
+      this.logger.warn(`Command verification warnings for ${commandId}:`, verification.warnings);
+    }
+
     const permissionCheck = this.permissionValidator.validate(intent, entities, options.source || 'confirmation');
     if (!permissionCheck.allowed) {
       return {
@@ -1454,6 +1489,8 @@ class ActionRouter {
     const missing = Array.isArray(missingRequired) ? missingRequired : [];
     const commandFrame = preparedInput?.commandFrame || null;
     const semanticParse = preparedInput?.semanticParse || null;
+    const appLanguage = preparedInput?.appLanguage || null;
+    const browserLanguage = preparedInput?.browserLanguage || null;
     const selectedSemanticFrame = intentResult?.semanticFrame || (
       semanticParse?.frames?.find?.(frame => frame.intentId === intent?.id) || null
     );
@@ -1495,6 +1532,24 @@ class ActionRouter {
           validation: selectedSemanticFrame.validation || null
         } : null
       } : null,
+      appLanguage: appLanguage ? {
+        version: appLanguage.version,
+        action: appLanguage.action,
+        targetText: appLanguage.targetText,
+        forceNewWindow: Boolean(appLanguage.forceNewWindow),
+        requestedOperation: appLanguage.requestedOperation,
+        confidence: Number(appLanguage.confidence || 0),
+        tokenRoles: appLanguage.tokenRoles || [],
+        validation: appLanguage.validation || null
+      } : null,
+      browserLanguage: browserLanguage ? {
+        version: browserLanguage.version,
+        operation: browserLanguage.operation,
+        browserName: browserLanguage.browserName,
+        entities: browserLanguage.entities || {},
+        confidence: Number(browserLanguage.confidence || 0),
+        validation: browserLanguage.validation || null
+      } : null,
       queryType: preparedInput?.query?.type || 'unknown',
       actionVerb: preparedInput?.query?.actionVerb || null,
       intent: intent?.id || null,
@@ -1528,6 +1583,14 @@ class ActionRouter {
     }
 
     if (/^\s*(?:open|show|search|look\s+up|google)\b.*\b(?:in|on)\s+(?:chrome|browser|edge|firefox)\s*$/i.test(String(rawText || ''))) {
+      return false;
+    }
+
+    // Speech recognition can join the target's final word with "in"
+    // (for example, "jiohotstarin chrome"). Keep the original phrase so the
+    // browser-language parser can repair that boundary without losing the
+    // requested site or tab name.
+    if (/^\s*(?:open|show|search|look\s+up|google)\b.*[a-z0-9]{8,}in\s+(?:chrome|browser|edge|firefox)\s*$/i.test(String(rawText || ''))) {
       return false;
     }
 
@@ -1578,7 +1641,7 @@ class ActionRouter {
       const intent = this.intentRegistry.get(intentId);
       return intent ? { intent, confidence, entities } : null;
     };
-    const openUrl = (url, confidence = 0.98) => route('browser.open', { url }, confidence);
+    const openUrl = (url, confidence = 0.98, options = {}) => route('browser.open', { url, ...options }, confidence);
     const play = (query, confidence = 0.98) => route('media.play', {
       mediaQuery: query,
       mediaPlatform: 'youtube'
@@ -1590,6 +1653,13 @@ class ActionRouter {
 
     if ([rawLower, correctedLower].some(source => /^(?:open|go\s+to|launch|start)\s+(?:my\s+)?youtube(?:\s+homepage)?$/.test(source))) {
       return openUrl('https://www.youtube.com/');
+    }
+
+    if ([rawLower, correctedLower].some(source => /^(?:open|go\s+to|launch|start)\s+(?:a\s+)?(?:new|another|fresh)\s+youtube(?:\s+(?:tab|homepage))?$/.test(source))) {
+      return openUrl('https://www.youtube.com/', 1, {
+        newTab: true,
+        routeSource: 'youtube-browser-language-v1'
+      });
     }
 
     if (has(/\b(?:youtube.*subscriptions?|subscriptions?\s+on\s+youtube|channels?\s+i\s+follow|videos\s+from\s+channels?\s+i\s+follow|missed\s+.*subscriptions?|videos?\s+from\s+my\s+subscriptions?)\b/)) {
@@ -2377,6 +2447,91 @@ class ActionRouter {
     return null;
   }
 
+  _resolveAppLanguageIntent(rawText, preparedInput) {
+    const frame = preparedInput?.appLanguage || this.appCommandLanguage.parse(
+      rawText,
+      preparedInput?.correctedText
+    );
+    if (!frame || frame.validation?.status !== 'passed') {
+      return null;
+    }
+    if (frame.action === 'new-tab') {
+      const intent = this.intentRegistry.get('app.newTab');
+      return intent ? {
+        intent,
+        confidence: frame.confidence,
+        entities: {
+          appName: frame.targetText,
+          requestedOperation: 'open-new-tab',
+          routeSource: 'app-language-v1'
+        },
+        semanticFrame: {
+          ...frame,
+          domain: 'app',
+          intentId: 'app.newTab'
+        }
+      } : null;
+    }
+
+    if (frame.action !== 'open' || !frame.forceNewWindow) {
+      return null;
+    }
+
+    if (
+      this._resolveExplicitModeIntent(rawText, preparedInput) ||
+      this._resolveBrowserFollowupIntent(rawText, preparedInput) ||
+      this._resolveKnownWebOpenIntent(rawText, preparedInput) ||
+      this._resolveSiteSearchIntent(rawText, preparedInput) ||
+      this._resolvePersonalPhotoIntent(rawText, preparedInput)
+    ) {
+      return null;
+    }
+
+    const intentId = frame.action === 'open'
+      ? 'app.open'
+      : frame.action === 'close'
+        ? 'app.close'
+        : frame.action === 'focus'
+          ? 'app.switch'
+          : null;
+    const intent = intentId ? this.intentRegistry.get(intentId) : null;
+    if (!intent) return null;
+
+    const explicitAppCue = /\b(?:app|application|program)\b/i.test(String(rawText || ''));
+    const normalizedTarget = String(frame.targetText || '').toLowerCase();
+    if (frame.action === 'open' && WEBSITE_URL_MAP[normalizedTarget] && !explicitAppCue) {
+      return null;
+    }
+
+    const syntheticCommand = `${frame.action === 'focus' ? 'focus' : frame.action} ${frame.targetText}`;
+    const extracted = this.entityExtractor.extract(intent, syntheticCommand);
+    let appName = /^(?:visual studio code|vs code|vscode)$/i.test(frame.targetText)
+      ? frame.targetText
+      : (extracted.appName || frame.targetText);
+    if (!appName) return null;
+
+    if (frame.action === 'open') {
+      const compoundTarget = this._detectCompoundAppTarget(rawText, preparedInput?.correctedText, appName);
+      if (compoundTarget) appName = compoundTarget;
+    }
+
+    return {
+      intent,
+      confidence: frame.confidence,
+      entities: {
+        appName,
+        requestedOperation: frame.requestedOperation,
+        routeSource: 'app-language-v1',
+        ...(frame.forceNewWindow ? { forceNewWindow: true } : {})
+      },
+      semanticFrame: {
+        ...frame,
+        domain: 'app',
+        intentId
+      }
+    };
+  }
+
   _resolveExplicitOpenIntent(rawText, preparedInput) {
     const input = String(preparedInput?.correctedText || rawText || '').trim();
     if (!input) return null;
@@ -2607,15 +2762,83 @@ class ActionRouter {
     }
 
     const forceNewWindow = this._hasExplicitNewKeyword(raw, correctedText);
+    const compoundTarget = this._detectCompoundAppTarget(raw, correctedText, appName);
+    if (compoundTarget) {
+      return {
+        intent,
+        confidence: 0.99,
+        entities: {
+          appName: compoundTarget,
+          requestedOperation: forceNewWindow ? 'open-new-window' : 'open-or-focus',
+          ...(forceNewWindow ? { forceNewWindow: true } : {})
+        }
+      };
+    }
 
     return {
       intent,
       confidence: 0.99,
       entities: {
         appName,
+        requestedOperation: forceNewWindow ? 'open-new-window' : 'open-or-focus',
         ...(forceNewWindow ? { forceNewWindow: true } : {})
       }
     };
+  }
+
+  _detectCompoundAppTarget(rawText, correctedText, baseAppName) {
+    const raw = String(rawText || '').trim().toLowerCase();
+    const corrected = String(correctedText || '').trim().toLowerCase();
+    const normalizedApp = String(baseAppName || '').toLowerCase();
+
+    const compoundSuffixes = {
+      'settings': ['settings', 'setting'],
+      'preferences': ['preferences', 'preference', 'prefs', 'pref'],
+      'options': ['options', 'option'],
+      'config': ['config', 'configuration']
+    };
+
+    const browserCompounds = {
+      'chrome': 'chrome://settings',
+      'edge': 'edge://settings',
+      'firefox': 'about:preferences'
+    };
+
+    for (const [app, url] of Object.entries(browserCompounds)) {
+      if (normalizedApp.includes(app)) {
+        for (const variations of Object.values(compoundSuffixes)) {
+          for (const variation of variations) {
+            const pattern = new RegExp(`\\b${app}\\s+${variation}\\b`, 'i');
+            if (pattern.test(raw) || pattern.test(corrected)) {
+              return url;
+            }
+          }
+        }
+      }
+    }
+
+    const appSettingsPattern = new RegExp(`\\b(${Object.keys(compoundSuffixes).join('|')})\\b`, 'i');
+    const cleanedRaw = raw.replace(/\b(open|launch|start|run|new)\b/g, ' ').replace(/\s+/g, ' ').trim();
+    const cleanedCorrected = corrected.replace(/\b(open|launch|start|run|new)\b/g, ' ').replace(/\s+/g, ' ').trim();
+
+    if (appSettingsPattern.test(cleanedRaw) || appSettingsPattern.test(cleanedCorrected)) {
+      const parts = cleanedRaw.split(/\s+/).filter(p => !['a', 'an', 'the'].includes(p));
+      const correctedParts = cleanedCorrected.split(/\s+/).filter(p => !['a', 'an', 'the'].includes(p));
+      const allParts = [...new Set([...parts, ...correctedParts])];
+
+      if (allParts.length >= 2 && allParts.includes(normalizedApp)) {
+        const otherWords = allParts.filter(p => p !== normalizedApp);
+        for (const word of otherWords) {
+          for (const [, variations] of Object.entries(compoundSuffixes)) {
+            if (variations.includes(word)) {
+              return `${normalizedApp} ${word}`;
+            }
+          }
+        }
+      }
+    }
+
+    return null;
   }
 
   _hasExplicitNewKeyword(rawText, correctedText) {
@@ -2760,6 +2983,79 @@ class ActionRouter {
     return /\b(?:tutorials?|documentation|docs?|examples?|guide|learn|react|angular|node|javascript|typescript|python|java|api|framework|weather|news|score|scores|latest|best|capital|difference|meaning)\b/.test(text);
   }
 
+  _resolveBrowserLanguageIntent(rawText, preparedInput) {
+    const frame = preparedInput?.browserLanguage || this.browserCommandLanguage.parse(
+      rawText,
+      preparedInput?.correctedText
+    );
+    if (!frame || frame.validation?.status !== 'passed') return null;
+
+    if (frame.operation === 'list-tabs') {
+      const intent = this.intentRegistry.get('browser.listTabs');
+      return intent ? {
+        intent,
+        confidence: frame.confidence,
+        entities: {
+          browserName: frame.browserName,
+          responseMode: frame.entities.responseMode,
+          routeSource: 'browser-language-v1'
+        },
+        semanticFrame: frame
+      } : null;
+    }
+
+    if (frame.operation === 'new-tab') {
+      const intent = this.intentRegistry.get('browser.open');
+      return intent ? {
+        intent,
+        confidence: frame.confidence,
+        entities: {
+          url: 'about:newtab',
+          browserName: frame.browserName,
+          newTab: true,
+          forceNewTab: true,
+          routeSource: 'browser-language-v1'
+        },
+        semanticFrame: frame
+      } : null;
+    }
+
+    if (frame.operation === 'open-named-tab') {
+      const intent = this.intentRegistry.get('browser.openTab');
+      return intent ? {
+        intent,
+        confidence: frame.confidence,
+        entities: {
+          browserName: frame.browserName,
+          tabQuery: frame.entities.tabQuery,
+          forceNewTab: Boolean(frame.entities.forceNewTab),
+          routeSource: 'browser-language-v1'
+        },
+        semanticFrame: frame
+      } : null;
+    }
+
+    if (frame.operation === 'open-browser-target') {
+      const knownWeb = this._resolveKnownWebOpenIntent(rawText, preparedInput);
+      if (knownWeb) return knownWeb;
+      const intent = this.intentRegistry.get('browser.search');
+      return intent ? {
+        intent,
+        confidence: frame.confidence,
+        entities: {
+          query: frame.entities.query,
+          browserName: frame.browserName,
+          openInBrowser: true,
+          ...(frame.entities.newTab ? { newTab: true } : {}),
+          routeSource: 'browser-language-v1'
+        },
+        semanticFrame: frame
+      } : null;
+    }
+
+    return null;
+  }
+
   _resolveBrowserTabIntent(rawText, preparedInput) {
     const input = String(preparedInput?.correctedText || rawText || '')
       .trim()
@@ -2797,10 +3093,17 @@ class ActionRouter {
         : null;
     }
 
-    const newTabMatch = input.match(
+const newTabMatch = input.match(
       /^(?:open\s+)?(?:a\s+)?new\s+(?:(chrome|browser|edge|firefox)\s+)?tab(?:\s+(?:in|on)\s+(?:the\s+)?(chrome|browser|edge|firefox))?$/
     );
     if (newTabMatch) {
+      const specifiedTarget = newTabMatch[1] || newTabMatch[2];
+      if (!specifiedTarget && browserMatch?.[1]) {
+        const browserName = browserMatch[1];
+        if (!['chrome', 'browser', 'edge', 'firefox'].includes(browserName)) {
+          return null;
+        }
+      }
       const intent = this.intentRegistry.get('browser.open');
       return intent
         ? {
@@ -2813,6 +3116,13 @@ class ActionRouter {
             }
           }
         : null;
+    }
+
+    if (browserMatch?.[1]) {
+      const browserName = browserMatch[1].toLowerCase();
+      if (!['chrome', 'browser', 'edge', 'firefox'].includes(browserName)) {
+        return null;
+      }
     }
 
     const targetedClose = input.match(/^(?:close|remove|shut)\s+(?:the\s+)?(.+?)\s+tabs?(?:\s+(?:in|on)\s+(chrome|browser|edge|firefox))?$/i);
@@ -3225,6 +3535,7 @@ _resolveExplicitTimerIntent(rawText, preparedInput) {
     }
 
     if (
+      !/^(?:open|launch|start|run)\b/.test(input) &&
       /\b(?:running|open|opened|active|visible|in\s+use|being\s+used|used)\b/.test(input) &&
       /\b(?:apps?|applications?|processes|programs?|system)\b/.test(input)
     ) {
@@ -3846,6 +4157,85 @@ _resolveExplicitTimerIntent(rawText, preparedInput) {
     }
 
     return null;
+  }
+
+  _verifyResolvedIntent(rawInput, intent, entities) {
+    if (!rawInput || !intent) {
+      return { verified: true, confidence: 1.0, warnings: [] };
+    }
+
+    const text = String(rawInput || '').toLowerCase().trim();
+    const tokens = Normalizer.tokenize(text);
+
+    const stopWords = new Set([
+      'a', 'an', 'the', 'in', 'on', 'at', 'to', 'for', 'of', 'with', 'by',
+      'from', 'and', 'or', 'but', 'is', 'are', 'was', 'were', 'be', 'been',
+      'being', 'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would',
+      'could', 'should', 'may', 'might', 'must', 'shall', 'can', 'please',
+      'now', 'just', 'also', 'then', 'than', 'that', 'this', 'these', 'those'
+    ]);
+
+    const significantTokens = tokens.filter(t =>
+      t.length > 1 && !stopWords.has(t) && !/^\d+$/.test(t)
+    );
+
+    const intentWords = new Set();
+    const intentId = String(intent.id || '').toLowerCase();
+    const intentAction = String(intent.action || '').toLowerCase();
+
+    intentWords.add(intentId);
+    intentWords.add(intentAction);
+
+    if (entities) {
+      for (const value of Object.values(entities)) {
+        if (value && typeof value === 'string') {
+          const valueTokens = Normalizer.tokenize(String(value).toLowerCase());
+          valueTokens.forEach(t => intentWords.add(t));
+        }
+      }
+    }
+
+    const unmatchedTokens = significantTokens.filter(token => {
+      for (const intentWord of intentWords) {
+        if (intentWord.includes(token) || token.includes(intentWord)) {
+          return false;
+        }
+        if (this._tokensSimilar(token, intentWord)) {
+          return false;
+        }
+      }
+      return true;
+    });
+
+    const warnings = [];
+    if (unmatchedTokens.length > 0 && unmatchedTokens.length >= significantTokens.length * 0.4) {
+      warnings.push(`Command contains unmatched words: ${unmatchedTokens.join(', ')}`);
+    }
+
+    let verificationConfidence = 1.0;
+    if (unmatchedTokens.length > 0) {
+      verificationConfidence = Math.max(0.3, 1.0 - (unmatchedTokens.length * 0.15));
+    }
+
+    return {
+      verified: unmatchedTokens.length < significantTokens.length * 0.4,
+      confidence: verificationConfidence,
+      warnings,
+      unmatchedTokens,
+      matchedTokens: significantTokens.filter(t => !unmatchedTokens.includes(t))
+    };
+  }
+
+  _tokensSimilar(a, b) {
+    if (!a || !b || a.length < 3 || b.length < 3) return false;
+    if (a === b) return true;
+
+    let matches = 0;
+    const maxComparisons = Math.min(a.length, b.length, 3);
+    for (let i = 0; i < maxComparisons; i++) {
+      if (a[i] === b[i]) matches++;
+    }
+    return matches >= 2;
   }
 }
 

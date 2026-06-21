@@ -47,7 +47,7 @@ describe('Browser Controller', function() {
     assert.ok(openedUrl.includes('google.com/search'));
   });
 
-  it('should focus an existing Chrome new tab and ask before opening another', function() {
+  it('should open exactly one tab in the existing Chrome window', function() {
     const controller = new BrowserController({});
     controller.defaultBrowser = { path: 'chrome.exe', name: 'chrome' };
     controller.windowSession.listWindows = () => ([{
@@ -56,19 +56,26 @@ describe('Browser Controller', function() {
       processName: 'chrome',
       title: 'New Tab - Google Chrome'
     }]);
-    controller.windowSession.focusWindow = () => ({
+    let sent = null;
+    controller.windowSession.sendKeys = (windowName, keys, options) => {
+      sent = { windowName, keys, options };
+      return {
       success: true,
       data: { matchedWindow: 'New Tab - Google Chrome' }
-    });
+      };
+    };
 
     const result = controller.open('about:newtab', { browserName: 'chrome', newTab: true });
 
-    assert.equal(result.success, false);
-    assert.equal(result.needsClarification, true);
-    assert.equal(result.data.clarificationType, 'browser.open.blankTabAlreadyOpen');
+    assert.equal(result.success, true);
+    assert.deepEqual(sent, {
+      windowName: 'New Tab - Google Chrome',
+      keys: '^t',
+      options: { preferredProcessNames: ['chrome'] }
+    });
+    assert.equal(result.data.launchMethod, 'existing-window-shortcut');
+    assert.equal(result.data.openedNewWindow, false);
     assert.equal(result.data.matchedWindow, 'New Tab - Google Chrome');
-    assert.deepEqual(result.data.confirmEntities, { skipExistingBlankTabCheck: true });
-    assert.match(result.error, /another new tab/i);
   });
 
   it('should map browser new-tab requests to native browser URLs', function() {
@@ -77,6 +84,35 @@ describe('Browser Controller', function() {
     assert.equal(controller._nativeNewTabUrl('chrome'), 'chrome://newtab/');
     assert.equal(controller._nativeNewTabUrl('edge'), 'edge://newtab/');
     assert.equal(controller._nativeNewTabUrl('firefox'), 'about:newtab');
+  });
+
+  it('should navigate a requested website in the new tab instead of leaving it blank', function() {
+    const controller = new BrowserController({});
+    controller.windowSession.listWindows = () => ([{
+      handle: 100,
+      id: 10,
+      processName: 'chrome',
+      title: 'Existing - Google Chrome'
+    }]);
+    let navigation = null;
+    controller.windowSession.navigateWindowToUrl = (windowName, url, options) => {
+      navigation = { windowName, url, options };
+      return { success: true, data: { matchedWindow: windowName } };
+    };
+
+    const result = controller.open('https://www.youtube.com/', {
+      browserName: 'chrome',
+      newTab: true
+    });
+
+    assert.equal(result.success, true);
+    assert.deepEqual(navigation, {
+      windowName: 'Existing - Google Chrome',
+      url: 'https://www.youtube.com/',
+      options: { preferredProcessNames: ['chrome'], newTab: true }
+    });
+    assert.equal(result.data.url, 'https://www.youtube.com/');
+    assert.equal(result.data.openedNewTab, true);
   });
 
   it('should ignore new tabs belonging to a different browser', function() {
@@ -89,7 +125,7 @@ describe('Browser Controller', function() {
       title: 'New tab - Microsoft Edge'
     }]);
 
-    assert.equal(controller._focusExistingBlankTab('chrome'), null);
+    assert.equal(controller._findBrowserWindow('chrome'), undefined);
   });
 
   it('should search directly inside supported sites', function() {

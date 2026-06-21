@@ -45,6 +45,11 @@ class ActionVerifier {
       verified.data.verification = verification;
     }
 
+    if (verified.success && validation.status === 'failed') {
+      verified.success = false;
+      verified.error = validation.message || `Validation failed for ${actionId}`;
+    }
+
     if (verified.success && verification.status === 'failed' && verification.blocking !== false) {
       verified.success = false;
       verified.error = verification.message || `Could not verify ${actionId}`;
@@ -71,6 +76,25 @@ class ActionVerifier {
       return fail('result-url', { message: `Invalid URL returned: ${result.data.url}` });
     }
 
+    if (actionId === 'app.open') {
+      const wantsNewWindow = entities.forceNewWindow === true || entities.requestedOperation === 'open-new-window';
+      if (wantsNewWindow && result.data?.launchMethod === 'focus-existing') {
+        return fail('app-open-operation', {
+          message: 'The command requested a new app window, but the existing window was focused'
+        });
+      }
+      if (wantsNewWindow && result.data?.forceNewWindow !== true) {
+        return fail('app-open-operation', {
+          message: 'The new-window requirement was not preserved during execution'
+        });
+      }
+      if (!wantsNewWindow && result.data?.forceNewWindow === true) {
+        return fail('app-open-operation', {
+          message: 'A new app window was launched without being requested'
+        });
+      }
+    }
+
     if (actionId === 'system.calculate' && !Number.isFinite(Number(result.data?.result))) {
       return fail('calculation-result', { message: 'Calculation did not produce a finite number' });
     }
@@ -83,10 +107,10 @@ class ActionVerifier {
       return warn('postcondition', { reason: result.error || 'action failed before verification' });
     }
 
-    if (result.data?.verified === true) {
+    if (result.data?.verified === true && !actionId.startsWith('app.')) {
       return ok('controller-verification', { method: 'controller', target: this._targetLabel(actionId, entities, result) });
     }
-    if (result.data?.verified === false) {
+    if (result.data?.verified === false && !actionId.startsWith('app.')) {
       return fail('controller-verification', {
         method: 'controller',
         target: this._targetLabel(actionId, entities, result),
@@ -108,6 +132,28 @@ class ActionVerifier {
 
     if (actionId === 'app.close') {
       return this._verifyAppClose(entities, result);
+    }
+
+    if (actionId === 'app.newTab') {
+      return result.data?.verified === true && result.data?.matchedWindow
+        ? ok('app-new-tab', {
+            app: Normalizer.normalizeText(entities.appName || result.data?.app || ''),
+            matchedWindow: result.data.matchedWindow,
+            shortcut: result.data.shortcut || ''
+          })
+        : fail('app-new-tab', {
+            message: `Could not verify that a new tab opened in ${entities.appName || 'the requested application'}`
+          });
+    }
+
+    if (actionId === 'app.switch') {
+      return result.data?.matchedWindow
+        ? ok('app-focused', {
+            app: Normalizer.normalizeText(result.data?.app || entities.appName || ''),
+            matchedWindow: result.data.matchedWindow,
+            method: result.data?.launchMethod || 'window-focus'
+          })
+        : fail('app-focused', { message: 'No application window was confirmed in the foreground' });
     }
 
     if (actionId.startsWith('browser.')) {
@@ -259,11 +305,50 @@ class ActionVerifier {
   }
 
   _verifyAppOpen(entities, result) {
-    const appName = Normalizer.normalizeText(result.data?.app || result.data?.appName || entities.appName || '');
+    const appName = Normalizer.normalizeText(entities.appName || result.data?.app || result.data?.appName || '');
+    const wantsNewWindow = entities.forceNewWindow === true || entities.requestedOperation === 'open-new-window';
     if (result.data?.launchMethod === 'folder' && result.data?.path) {
       return fs.existsSync(result.data.path)
         ? ok('folder-fallback-target', { path: result.data.path })
         : fail('folder-fallback-target', { path: result.data.path, message: 'Folder fallback target does not exist' });
+    }
+
+    if (wantsNewWindow) {
+      if (result.data?.newWindowVerified === true) {
+        return ok('app-new-window', {
+          app: appName,
+          beforeWindowCount: Number(result.data.beforeWindowCount || 0),
+          afterWindowCount: Number(result.data.afterWindowCount || 0),
+          launchMethod: result.data.launchMethod,
+          launchArguments: result.data.launchArguments || []
+        });
+      }
+      if (result.data?.newWindowVerified === null) {
+        return warn('app-new-window', {
+          app: appName,
+          reason: 'The new-window launch was dispatched, but Windows window observation was unavailable',
+          blocking: false
+        });
+      }
+      return fail('app-new-window', {
+        app: appName,
+        beforeWindowCount: Number(result.data?.beforeWindowCount || 0),
+        afterWindowCount: Number(result.data?.afterWindowCount || 0),
+        message: `Could not verify that a new ${appName} window opened`
+      });
+    }
+
+    if (result.data?.launchMethod === 'focus-existing') {
+      return result.data?.matchedWindow
+        ? ok('app-existing-focused', {
+            app: appName,
+            matchedWindow: result.data.matchedWindow,
+            processName: result.data.processName || ''
+          })
+        : fail('app-existing-focused', {
+            app: appName,
+            message: `Could not verify that the existing ${appName} window was focused`
+          });
     }
 
     const apps = this.controllers.apps;
@@ -292,6 +377,7 @@ class ActionVerifier {
             message: `${appName} still appears to be open`
           });
     }
+
     const found = this._findAppWindowOrProcess(appName, { visibleOnly: true });
     return found
       ? fail('app-closed', {
@@ -306,7 +392,11 @@ class ActionVerifier {
     const data = result.data || {};
     if (actionId === 'browser.listTabs') {
       return Number.isFinite(Number(data.count))
-        ? ok('browser-tabs-read', { count: Number(data.count), limitation: data.limitation })
+        ? ok('browser-tabs-read', {
+            count: Number(data.count),
+            limitation: data.limitation,
+            verifiedAllTabs: data.verifiedAllTabs === true
+          })
         : warn('browser-tabs-read', { reason: 'No browser tab count returned', blocking: false });
     }
 
@@ -382,6 +472,7 @@ class ActionVerifier {
   _requiredFields(actionId) {
     const map = {
       'app.open': ['appName'],
+      'app.newTab': ['appName'],
       'app.close': ['appName'],
       'app.switch': ['appName'],
       'file.create': ['filename'],
@@ -396,6 +487,7 @@ class ActionVerifier {
       'folder.open': ['folderName'],
       'folder.move': ['source', 'destination'],
       'browser.open': ['url'],
+      'browser.openTab': ['tabQuery'],
       'browser.search': ['query'],
       'browser.siteSearch': ['site', 'query'],
       'system.insight': ['insightType'],

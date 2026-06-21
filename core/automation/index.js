@@ -90,6 +90,7 @@ class AutomationEngine {
         return appResult;
       },
       'app.close': (entities) => this.apps.close(entities.appName, entities),
+      'app.newTab': (entities) => this.apps.openNewTab(entities.appName),
       'app.switch': (entities) => this.apps.switchTo(entities.appName),
       'mode.start': (entities) => this._startMode(entities.modeName),
       'file.create': (entities) => this.files.create(entities.filename, entities.path),
@@ -109,6 +110,7 @@ class AutomationEngine {
       'browser.search': (entities) => this.browser.search(entities.query, entities),
       'browser.siteSearch': (entities) => this.browser.siteSearch(entities.site, entities.query, entities),
       'browser.openFirstResult': (entities) => this.browser.openFirstResult(entities.query),
+      'browser.openTab': (entities) => this._openBrowserTab(entities),
       'browser.closeTab': (entities) => this._closeBrowserTab(entities),
       'browser.listTabs': (entities) => this._listBrowserTabs(entities),
       'media.play': (entities) => this.media.play(entities.mediaQuery, entities.mediaPlatform),
@@ -170,7 +172,7 @@ class AutomationEngine {
         : this.system.getProcessCount(),
       'system.insight': (entities) => this.system.getInsight(entities.insightType),
       'system.bluetooth': (entities) => this.system.bluetooth(entities.enabled),
-      'assistant.identity': () => ({ success: true, data: { name: 'JARVIS' } }),
+      'assistant.identity': () => ({ success: true, data: { name: this.config?.assistant?.displayName || 'JARVIS' } }),
       'assistant.userName': () => ({ success: true, data: { known: false } }),
       'assistant.capability': (entities) => ({
         success: true,
@@ -214,7 +216,7 @@ class AutomationEngine {
     }
   }
 
-  _closeBrowserTab(entities = {}) {
+  async _closeBrowserTab(entities = {}) {
     const requested = Normalizer.normalizeText(entities.browserName || 'browser');
     const tabQuery = Normalizer.normalizeText(entities.tabQuery || '');
     const selectedTabIndex = entities.selectedTabIndex;
@@ -271,7 +273,7 @@ class AutomationEngine {
       return this._closeSelectedTab(requested, target, tabQuery, selectedTabIndex);
     }
 
-    const listResult = this._listBrowserTabs({ browserName: requested });
+    const listResult = await this._listBrowserTabs({ browserName: requested });
     const allTabs = listResult.success ? listResult.data.tabs : [];
     const matchedTabs = this._matchTabsByQuery(tabQuery, allTabs);
 
@@ -320,7 +322,7 @@ class AutomationEngine {
     }
 
     const matchedTab = matchedTabs[0];
-    const closeResult = this._closeTargetedBrowserTabs(requested, target, matchedTab.title, matchedTab.title.toLowerCase().split(/\s+/));
+    const closeResult = await this._closeDiscoveredBrowserTab(requested, target, matchedTab);
 
     if (closeResult.success) {
       return {
@@ -349,8 +351,8 @@ class AutomationEngine {
     };
   }
 
-  _closeSelectedTab(requested, target, originalQuery, selectedIndex) {
-    const listResult = this._listBrowserTabs({ browserName: requested });
+  async _closeSelectedTab(requested, target, originalQuery, selectedIndex) {
+    const listResult = await this._listBrowserTabs({ browserName: requested });
     const allTabs = listResult.success ? listResult.data.tabs : [];
     const matchedTabs = this._matchTabsByQuery(originalQuery, allTabs);
 
@@ -362,9 +364,7 @@ class AutomationEngine {
     }
 
     const selectedTab = matchedTabs[selectedIndex];
-    const queryTokens = Normalizer.tokenize(selectedTab.title.toLowerCase()).filter(t => t.length > 1);
-
-    const closeResult = this._closeTargetedBrowserTabs(requested, target, selectedTab.title, queryTokens);
+    const closeResult = await this._closeDiscoveredBrowserTab(requested, target, selectedTab);
 
     if (closeResult.success) {
       return {
@@ -386,7 +386,7 @@ class AutomationEngine {
     };
   }
 
-  _listBrowserTabs(entities = {}) {
+  async _listBrowserTabs(entities = {}) {
     const requested = Normalizer.normalizeText(entities.browserName || 'browser');
     const browserMap = {
       browser: ['chrome', 'msedge', 'firefox'],
@@ -399,8 +399,36 @@ class AutomationEngine {
       ? this.windows.listWindows()
       : this.windows.session?.listWindows?.() || [];
 
-    const cdpTabs = this._getCdpTabs(requested, processNames);
+    const cdpTabs = await this._getCdpTabs(requested, processNames);
+    const uiTabs = typeof this.windows.listBrowserTabs === 'function'
+      ? this.windows.listBrowserTabs(processNames)
+      : this.windows.session?.listBrowserTabs?.(processNames) || [];
+    if (uiTabs.length > 0) {
+      const cdpByTitle = new Map((cdpTabs.data?.tabs || []).map(tab => [
+        `${Normalizer.normalizeText(tab.processName)}:${Normalizer.normalizeText(tab.title)}`,
+        tab
+      ]));
+      const tabs = uiTabs.map(tab => {
+        const cdpTab = cdpByTitle.get(
+          `${Normalizer.normalizeText(tab.processName)}:${Normalizer.normalizeText(tab.title)}`
+        );
+        return cdpTab ? { ...tab, url: cdpTab.url, id: cdpTab.id } : tab;
+      });
+      return {
+        success: true,
+        data: {
+          browserName: requested,
+          count: tabs.length,
+          tabs,
+          responseMode: entities.responseMode || 'list',
+          limitation: 'ui-automation-tabs',
+          verifiedAllTabs: true
+        }
+      };
+    }
+
     if (cdpTabs.success && cdpTabs.data.tabs.length > 0) {
+      cdpTabs.data.responseMode = entities.responseMode || 'list';
       return cdpTabs;
     }
 
@@ -423,17 +451,73 @@ class AutomationEngine {
         browserName: requested,
         count: tabs.length,
         tabs,
-        limitation: cdpTabs.success ? 'cdp-tabs' : 'visible-browser-windows'
+        responseMode: entities.responseMode || 'list',
+        limitation: 'visible-browser-windows',
+        verifiedAllTabs: false
       }
     };
   }
 
-  _getCdpTabs(requested, processNames) {
+  async _openBrowserTab(entities = {}) {
+    const requested = Normalizer.normalizeText(entities.browserName || 'browser');
+    const tabQuery = Normalizer.normalizeText(entities.tabQuery || '');
+    if (!tabQuery) {
+      return { success: false, error: 'No browser tab name was provided' };
+    }
+
+    const browserMap = {
+      browser: ['chrome', 'msedge', 'firefox'],
+      chrome: ['chrome'],
+      edge: ['msedge'],
+      firefox: ['firefox']
+    };
+    const processNames = browserMap[requested] || browserMap.browser;
+
+    if (!entities.forceNewTab) {
+      const listed = await this._listBrowserTabs({ browserName: requested });
+      const matches = this._matchTabsByQuery(tabQuery, listed.data?.tabs || []);
+      if (matches.length > 0 && typeof this.windows.focusBrowserTab === 'function') {
+        const focused = this.windows.focusBrowserTab(matches[0].title, processNames);
+        if (focused?.success) {
+          return {
+            success: true,
+            data: {
+              ...focused.data,
+              action: 'focusTab',
+              browserName: requested,
+              tabQuery,
+              tabTitle: matches[0].title,
+              focusedExistingTab: true,
+              verified: true
+            }
+          };
+        }
+      }
+    }
+
+    const opened = await this.browser.search(tabQuery, {
+      openInBrowser: true,
+      browserName: requested
+    });
+    return opened?.success
+      ? {
+          success: true,
+          data: {
+            ...opened.data,
+            action: 'openTab',
+            browserName: requested,
+            tabQuery,
+            focusedExistingTab: false,
+            openedNewTab: true
+          }
+        }
+      : opened;
+  }
+
+  async _getCdpTabs(requested, processNames) {
     const debugPorts = { chrome: 9222, msedge: 9222, firefox: 9222 };
-    const browserKey = requested === 'browser' ? 'chrome' : requested;
 
     try {
-      const http = require('http');
       const tabs = [];
 
       for (const [browser, port] of Object.entries(debugPorts)) {
@@ -442,11 +526,11 @@ class AutomationEngine {
         }
 
         try {
-          const response = this._httpGet(`http://localhost:${port}/json`, 2000);
+          const response = await this._httpGet(`http://localhost:${port}/json`, 2000);
           if (response) {
             const parsed = JSON.parse(response);
             for (const tab of parsed) {
-              if (tab.type === 'page' && tab.url && !tab.url.startsWith('chrome://') && !tab.url.startsWith('about:')) {
+              if (tab.type === 'page' && tab.url) {
                 tabs.push({
                   title: tab.title || 'Untitled',
                   url: tab.url,
@@ -470,7 +554,8 @@ class AutomationEngine {
             browserName: requested,
             count: tabs.length,
             tabs,
-            limitation: 'cdp-tabs'
+            limitation: 'cdp-tabs',
+            verifiedAllTabs: true
           }
         };
       }
@@ -564,7 +649,6 @@ class AutomationEngine {
 
     try {
       const http = require('http');
-      const ws = require('ws') || this._createMinimalWs();
 
       const getTabs = () => new Promise((resolve) => {
         const req = http.get(`http://localhost:${port}/json`, { timeout: 2000 }, (res) => {
@@ -662,6 +746,33 @@ class AutomationEngine {
         verified: false
       }
     };
+  }
+
+  async _closeDiscoveredBrowserTab(requested, target, tab) {
+    if (typeof this.windows.closeBrowserTab !== 'function') {
+      const titleTokens = Normalizer.tokenize(tab.title).filter(token => token.length > 1);
+      return this._closeTargetedBrowserTabs(requested, target, tab.title, titleTokens);
+    }
+
+    const closed = this.windows.closeBrowserTab(tab.title, target.preferredProcessNames);
+    if (!closed?.success) {
+      return closed;
+    }
+
+    this._sleep(300);
+    const after = await this._listBrowserTabs({ browserName: requested });
+    const stillOpen = (after.data?.tabs || []).some(candidate => (
+      Normalizer.normalizeText(candidate.title) === Normalizer.normalizeText(tab.title)
+    ));
+    if (stillOpen) {
+      return {
+        success: false,
+        error: `I selected the ${tab.title} tab in ${requested}, but it did not close`,
+        data: { ...closed.data, verified: false }
+      };
+    }
+
+    return this._browserTabCloseSuccess(requested, tab.title, [closed.data], true);
   }
 
   _findTargetedBrowserTab(requested, target, tabQuery, titleTokens) {

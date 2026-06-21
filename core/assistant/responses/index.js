@@ -197,6 +197,11 @@ const RESPONSE_BUILDERS = {
           ? `${matchedWindow} was already open, so I brought it to the foreground.`
           : `${name} was already open, so I brought it to the foreground.`;
       }
+      const forceNewWindow = valueFromContext(context, 'forceNewWindow', false) === true;
+      const newWindowVerified = valueFromContext(context, 'newWindowVerified', false) === true;
+      if (forceNewWindow && newWindowVerified) {
+        return `Opened and verified a new ${name} window.`;
+      }
       return chooseVariant(`app.open:${name}`, [
         `Opening ${name} for you now.`,
         `${name} will launch shortly.`,
@@ -355,6 +360,13 @@ const RESPONSE_BUILDERS = {
         ? `${location} has ${count} ${typeLabel}. The first ones are ${names}, and ${remaining} more.`
         : `${location} has ${count} ${typeLabel}: ${names}.`;
     },
+    'app.newTab': context => {
+      const name = valueFromContext(context, 'appName');
+      const matchedWindow = valueFromContext(context, 'matchedWindow');
+      return matchedWindow
+        ? `Opened and verified a new tab in ${name}.`
+        : `Opened a new tab in ${name}.`;
+    },
     'form.fill': context => {
       const filledFields = valueFromContext(context, 'filledFields', []);
       const skippedFields = valueFromContext(context, 'skippedFields', []);
@@ -416,6 +428,9 @@ const RESPONSE_BUILDERS = {
       const browserName = valueFromContext(context, 'browserName', 'browser');
       if (newTab) {
         const browserLabel = browserName === 'chrome' ? 'Chrome' : browserName;
+        if (/youtube\.com/i.test(url)) {
+          return `Opening YouTube in a new ${browserLabel} tab.`;
+        }
         return `Opening a new ${browserLabel} tab.`;
       }
       return chooseVariant(`browser.open:${url}`, [
@@ -480,12 +495,29 @@ const RESPONSE_BUILDERS = {
       const tabs = valueFromContext(context, 'tabs', []);
       const count = valueFromContext(context, 'count', 0);
       const browserName = valueFromContext(context, 'browserName', 'browser');
+      const responseMode = valueFromContext(context, 'responseMode', 'list');
+      const verifiedAllTabs = valueFromContext(context, 'verifiedAllTabs', false) === true;
+      if (responseMode === 'count' && verifiedAllTabs) {
+        return `I verified ${count} open ${browserName} tab${count === 1 ? '' : 's'}.`;
+      }
       if (!count || !Array.isArray(tabs) || tabs.length === 0) {
-        return `I do not see any visible ${browserName} tabs right now.`;
+        return verifiedAllTabs
+          ? `I verified that there are no open ${browserName} tabs right now.`
+          : `I could not verify every open ${browserName} tab; I do not see any visible tabs right now.`;
       }
       const names = tabs.slice(0, 6).map(tab => tab.title || tab.rawTitle).filter(Boolean).join(', ');
       const more = count > 6 ? `, and ${count - 6} more` : '';
-      return `I can see ${count} visible ${browserName} tab${count === 1 ? '' : 's'}: ${names}${more}.`;
+      return verifiedAllTabs
+        ? `I verified all ${count} open ${browserName} tab${count === 1 ? '' : 's'}: ${names}${more}.`
+        : `I could not verify every open ${browserName} tab. I can only see ${count} active tab${count === 1 ? '' : 's'}: ${names}${more}.`;
+    },
+    'browser.openTab': context => {
+      const tabTitle = valueFromContext(context, 'tabTitle');
+      const tabQuery = valueFromContext(context, 'tabQuery', 'requested');
+      const focusedExistingTab = valueFromContext(context, 'focusedExistingTab', false) === true;
+      return focusedExistingTab
+        ? `I found and focused the ${tabTitle || tabQuery} tab.`
+        : `I did not find an existing ${tabQuery} tab, so I opened it in a new tab.`;
     },
     'system.time': context => {
       const time = valueFromContext(context, 'time');

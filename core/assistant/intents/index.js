@@ -71,8 +71,12 @@ const INTENT_DEFINITIONS = [
     patterns: ['open', 'launch', 'start', 'run', 'open up'],
     permissionLevel: 'low',
     action: 'app.open',
-    entities: [{ name: 'appName', type: 'string', required: true }],
-    description: 'Open an application'
+    entities: [
+      { name: 'appName', type: 'string', required: true },
+      { name: 'forceNewWindow', type: 'boolean', required: false },
+      { name: 'requestedOperation', type: 'string', required: false }
+    ],
+    description: 'Open or focus an application, or explicitly launch another window'
   },
   {
     id: 'app.close',
@@ -285,8 +289,31 @@ const INTENT_DEFINITIONS = [
     patterns: ['what tabs are open', 'list tabs', 'show open tabs', 'which tabs are open'],
     permissionLevel: 'low',
     action: 'browser.listTabs',
-    entities: [{ name: 'browserName', type: 'string', required: false }],
+    entities: [
+      { name: 'browserName', type: 'string', required: false },
+      { name: 'responseMode', type: 'string', required: false }
+    ],
     description: 'List visible browser tabs and browser windows'
+  },
+  {
+    id: 'app.newTab',
+    patterns: ['open new tab in app', 'open another tab in app'],
+    permissionLevel: 'low',
+    action: 'app.newTab',
+    entities: [{ name: 'appName', type: 'string', required: true }],
+    description: 'Open a new tab inside a tab-capable application'
+  },
+  {
+    id: 'browser.openTab',
+    patterns: ['open named tab', 'focus tab', 'switch to tab', 'show tab'],
+    permissionLevel: 'low',
+    action: 'browser.openTab',
+    entities: [
+      { name: 'tabQuery', type: 'string', required: true },
+      { name: 'browserName', type: 'string', required: false },
+      { name: 'forceNewTab', type: 'boolean', required: false }
+    ],
+    description: 'Focus an existing named tab or open it in a new tab when absent'
   },
   {
     id: 'form.fill',

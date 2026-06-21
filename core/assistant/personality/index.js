@@ -2,7 +2,7 @@ class Personality {
   constructor(config) {
     this.config = config;
     this.persona = {
-      name: 'JARVIS',
+      name: config?.assistant?.displayName,
       title: 'Desktop Assistant',
       greeting: 'How may I assist you, sir?',
       farewell: 'Awaiting your next command, sir.',

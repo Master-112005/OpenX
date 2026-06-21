@@ -67,6 +67,22 @@ class WindowsController {
     return this.session.listWindows();
   }
 
+  listBrowserTabs(processNames) {
+    return this.session.listBrowserTabs(processNames);
+  }
+
+  listProcessWindows(processNames) {
+    return this.session.listProcessWindows(processNames);
+  }
+
+  closeBrowserTab(tabTitle, processNames) {
+    return this.session.closeBrowserTab(tabTitle, processNames);
+  }
+
+  focusBrowserTab(tabTitle, processNames) {
+    return this.session.focusBrowserTab(tabTitle, processNames);
+  }
+
   findWindow(windowName, options = {}) {
     return this.session.findWindow(windowName, options);
   }

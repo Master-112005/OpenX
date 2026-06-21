@@ -15,6 +15,7 @@ describe('Automation Engine', function() {
     const actions = engine.getActions();
     assert.ok(actions.includes('volume.set'));
     assert.ok(actions.includes('app.open'));
+    assert.ok(actions.includes('app.newTab'));
     assert.ok(actions.includes('mode.start'));
     assert.ok(actions.includes('file.create'));
     assert.ok(actions.includes('file.open'));
@@ -418,6 +419,89 @@ describe('Automation Engine', function() {
     assert.equal(result.verification.check, 'app-open');
   });
 
+  it('should validate and verify explicit new app windows by count increase', function() {
+    const engine = new AutomationEngine({});
+    const verified = engine.verifier.verify('app.open', {
+      appName: 'notepad',
+      requestedOperation: 'open-new-window',
+      forceNewWindow: true
+    }, {
+      success: true,
+      data: {
+        app: 'notepad',
+        requestedOperation: 'open-new-window',
+        forceNewWindow: true,
+        launchMethod: 'executable',
+        beforeWindowCount: 1,
+        afterWindowCount: 2,
+        newWindowVerified: true,
+        launchArguments: []
+      }
+    });
+    const wrongAction = engine.verifier.verify('app.open', {
+      appName: 'notepad',
+      requestedOperation: 'open-new-window',
+      forceNewWindow: true
+    }, {
+      success: true,
+      data: {
+        app: 'notepad',
+        launchMethod: 'focus-existing',
+        forceNewWindow: false
+      }
+    });
+
+    assert.equal(verified.success, true);
+    assert.equal(verified.verification.check, 'app-new-window');
+    assert.equal(verified.verification.beforeWindowCount, 1);
+    assert.equal(verified.verification.afterWindowCount, 2);
+    assert.equal(wrongAction.validation.status, 'failed');
+    assert.equal(wrongAction.success, false);
+  });
+
+  it('should keep a dispatched new-window action successful when observation is unavailable', function() {
+    const engine = new AutomationEngine({});
+    const result = engine.verifier.verify('app.open', {
+      appName: 'chrome',
+      requestedOperation: 'open-new-window',
+      forceNewWindow: true
+    }, {
+      success: true,
+      data: {
+        app: 'chrome',
+        requestedOperation: 'open-new-window',
+        forceNewWindow: true,
+        launchMethod: 'executable',
+        newWindowVerified: null
+      }
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(result.verification.status, 'unknown');
+    assert.equal(result.verification.blocking, false);
+  });
+
+  it('should validate and verify a new tab inside the requested application', async function() {
+    const engine = new AutomationEngine({});
+    engine.apps.openNewTab = appName => ({
+      success: true,
+      data: {
+        app: appName,
+        action: 'new-tab',
+        matchedWindow: 'Notes - Notepad',
+        shortcut: '^n',
+        verified: true
+      }
+    });
+
+    const result = await engine.execute('app.newTab', { appName: 'notepad' });
+
+    assert.equal(result.success, true);
+    assert.equal(result.validation.status, 'passed');
+    assert.equal(result.verification.status, 'passed');
+    assert.equal(result.verification.check, 'app-new-tab');
+  });
+
   it('should execute expanded local calculation forms', async function() {
     const engine = new AutomationEngine({});
     const cases = [
@@ -469,6 +553,7 @@ describe('Automation Engine', function() {
 
   it('should close targeted browser tabs by title query', async function() {
     const engine = new AutomationEngine({});
+    engine._listBrowserTabs = async () => ({ success: true, data: { tabs: [] } });
     let captured = null;
     engine.windows.sendKeys = (windowName, keys, options) => {
       captured = { windowName, keys, options };
@@ -499,6 +584,7 @@ describe('Automation Engine', function() {
 
   it('should fail targeted browser tab close without closing a fallback tab', async function() {
     const engine = new AutomationEngine({});
+    engine._listBrowserTabs = async () => ({ success: true, data: { tabs: [] } });
     engine.windows.sendKeys = () => ({ success: false, error: 'Window not found' });
 
     const result = await engine.execute('browser.closeTab', {
@@ -512,6 +598,7 @@ describe('Automation Engine', function() {
 
   it('should not report targeted browser tab close success when verification fails', async function() {
     const engine = new AutomationEngine({});
+    engine._listBrowserTabs = async () => ({ success: true, data: { tabs: [] } });
     engine._sleep = () => {};
     engine.windows.sendKeys = () => ({
       success: true,
@@ -538,6 +625,7 @@ describe('Automation Engine', function() {
 
   it('should list visible browser tabs from browser windows', async function() {
     const engine = new AutomationEngine({});
+    engine.windows.listBrowserTabs = () => [];
     engine.windows.listWindows = () => ([
       { handle: 100, title: 'ChatGPT - Google Chrome', processName: 'chrome' },
       { handle: 200, title: 'Google Photos - Google Chrome', processName: 'chrome' },
@@ -549,6 +637,121 @@ describe('Automation Engine', function() {
     assert.equal(result.success, true);
     assert.equal(result.data.count, 2);
     assert.deepEqual(result.data.tabs.map(tab => tab.title), ['ChatGPT', 'Google Photos']);
+    assert.equal(result.data.verifiedAllTabs, false);
+  });
+
+  it('should verify every open Chrome tab through UI Automation', async function() {
+    const engine = new AutomationEngine({});
+    engine._getCdpTabs = async () => ({ success: false });
+    engine.windows.listBrowserTabs = processNames => {
+      assert.deepEqual(processNames, ['chrome']);
+      return [
+        { title: 'ChatGPT', processName: 'chrome', isActiveTab: true },
+        { title: 'GitHub', processName: 'chrome', isActiveTab: false },
+        { title: 'Documentation', processName: 'chrome', isActiveTab: false }
+      ];
+    };
+
+    const result = await engine.execute('browser.listTabs', { browserName: 'chrome' });
+
+    assert.equal(result.success, true);
+    assert.equal(result.data.count, 3);
+    assert.equal(result.data.verifiedAllTabs, true);
+    assert.equal(result.data.limitation, 'ui-automation-tabs');
+    assert.deepEqual(result.data.tabs.map(tab => tab.title), ['ChatGPT', 'GitHub', 'Documentation']);
+  });
+
+  it('should await DevTools tab discovery and include inactive tabs', async function() {
+    const engine = new AutomationEngine({});
+    engine._httpGet = async () => JSON.stringify([
+      { id: '1', type: 'page', title: 'Active', url: 'https://active.test', active: true },
+      { id: '2', type: 'page', title: 'Inactive', url: 'https://inactive.test', active: false },
+      { id: '3', type: 'page', title: 'New Tab', url: 'chrome://newtab/', active: false }
+    ]);
+    engine.windows.listBrowserTabs = () => [];
+
+    const result = await engine.execute('browser.listTabs', { browserName: 'chrome' });
+
+    assert.equal(result.success, true);
+    assert.equal(result.data.count, 3);
+    assert.equal(result.data.verifiedAllTabs, true);
+    assert.deepEqual(result.data.tabs.map(tab => tab.title), ['Active', 'Inactive', 'New Tab']);
+  });
+
+  it('should select and close an inactive discovered Chrome tab', async function() {
+    const engine = new AutomationEngine({});
+    let listed = 0;
+    let closed = null;
+    engine._sleep = () => {};
+    engine._listBrowserTabs = async () => {
+      listed += 1;
+      return {
+        success: true,
+        data: {
+          tabs: listed === 1
+            ? [{ title: 'ChatGPT', processName: 'chrome', isActiveTab: false }]
+            : []
+        }
+      };
+    };
+    engine.windows.closeBrowserTab = (title, processNames) => {
+      closed = { title, processNames };
+      return { success: true, data: { title, matchedWindow: 'GitHub - Google Chrome' } };
+    };
+
+    const result = await engine.execute('browser.closeTab', {
+      browserName: 'chrome',
+      tabQuery: 'chatgpt'
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(result.data.verified, true);
+    assert.deepEqual(closed, { title: 'ChatGPT', processNames: ['chrome'] });
+  });
+
+  it('should focus an existing named Chrome tab', async function() {
+    const engine = new AutomationEngine({});
+    let focused = null;
+    engine._listBrowserTabs = async () => ({
+      success: true,
+      data: { tabs: [{ title: 'JioHotstar', processName: 'chrome', isActiveTab: false }] }
+    });
+    engine.windows.focusBrowserTab = (title, processNames) => {
+      focused = { title, processNames };
+      return { success: true, data: { title, windowTitle: 'ChatGPT - Google Chrome' } };
+    };
+
+    const result = await engine.execute('browser.openTab', {
+      browserName: 'chrome',
+      tabQuery: 'jio hotstar'
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(result.data.focusedExistingTab, true);
+    assert.equal(result.data.tabTitle, 'JioHotstar');
+    assert.deepEqual(focused, { title: 'JioHotstar', processNames: ['chrome'] });
+  });
+
+  it('should open a missing named tab in the requested browser', async function() {
+    const engine = new AutomationEngine({});
+    let search = null;
+    engine._listBrowserTabs = async () => ({ success: true, data: { tabs: [] } });
+    engine.browser.search = async (query, options) => {
+      search = { query, options };
+      return { success: true, data: { query, url: 'https://www.google.com/search?q=jio%20hotstar' } };
+    };
+
+    const result = await engine.execute('browser.openTab', {
+      browserName: 'chrome',
+      tabQuery: 'jio hotstar'
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(result.data.openedNewTab, true);
+    assert.deepEqual(search, {
+      query: 'jio hotstar',
+      options: { openInBrowser: true, browserName: 'chrome' }
+    });
   });
 
   it('should parse human reminder day phrases', function() {

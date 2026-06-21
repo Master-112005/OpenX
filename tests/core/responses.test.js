@@ -128,12 +128,13 @@ describe('Response Generator', function() {
         data: {
           browserName: 'chrome',
           count: 2,
-          tabs: [{ title: 'ChatGPT' }, { title: 'Google Photos' }]
+          tabs: [{ title: 'ChatGPT' }, { title: 'Google Photos' }],
+          verifiedAllTabs: true
         }
       }
     });
 
-    assert.ok(result.includes('2 visible chrome tabs'));
+    assert.ok(result.includes('verified all 2 open chrome tabs'));
     assert.ok(result.includes('ChatGPT'));
     assert.ok(result.includes('Google Photos'));
   });
@@ -234,6 +235,37 @@ describe('Response Generator', function() {
     assert.ok(result.includes('Failed command: open chatgpt'));
   });
 
+  it('should answer browser tab counts without listing titles', function() {
+    const gen = new ResponseGenerator();
+    const result = gen.generate('success', 'browser.listTabs', {
+      result: {
+        data: {
+          browserName: 'chrome',
+          count: 6,
+          tabs: [{ title: 'One' }],
+          responseMode: 'count',
+          verifiedAllTabs: true
+        }
+      }
+    });
+
+    assert.match(result, /verified 6 open chrome tabs/i);
+    assert.doesNotMatch(result, /One/);
+  });
+
+  it('should distinguish focused and newly opened named tabs', function() {
+    const gen = new ResponseGenerator();
+    const focused = gen.generate('success', 'browser.openTab', {
+      result: { data: { tabQuery: 'jio hotstar', tabTitle: 'JioHotstar', focusedExistingTab: true } }
+    });
+    const opened = gen.generate('success', 'browser.openTab', {
+      result: { data: { tabQuery: 'jio hotstar', focusedExistingTab: false, openedNewTab: true } }
+    });
+
+    assert.match(focused, /found and focused/i);
+    assert.match(opened, /opened it in a new tab/i);
+  });
+
   it('should confirm verified media playback without asking for feedback', function() {
     const gen = new ResponseGenerator();
     const result = gen.generate('success', 'media.play', {
@@ -330,6 +362,44 @@ describe('Response Generator', function() {
     assert.match(result, /foreground/);
   });
 
+  it('should confirm a verified new app window', function() {
+    const gen = new ResponseGenerator();
+    const result = gen.generate('success', 'app.open', {
+      entities: { appName: 'notepad', forceNewWindow: true },
+      result: {
+        data: {
+          app: 'notepad',
+          forceNewWindow: true,
+          newWindowVerified: true
+        }
+      }
+    });
+
+    assert.match(result, /^Opened and verified a new notepad window(?:, sir)?\.$/);
+  });
+
+  it('should preserve Visual Studio Code and confirm application tabs by strict name', function() {
+    const gen = new ResponseGenerator();
+    const newWindow = gen.generate('success', 'app.open', {
+      entities: { appName: 'visual studio code', forceNewWindow: true },
+      result: {
+        data: {
+          app: 'visual studio code',
+          forceNewWindow: true,
+          newWindowVerified: true
+        }
+      }
+    });
+    const newTab = gen.generate('success', 'app.newTab', {
+      entities: { appName: 'notepad' },
+      result: { data: { matchedWindow: 'Notes - Notepad' } }
+    });
+
+    assert.match(newWindow, /new visual studio code window/i);
+    assert.doesNotMatch(newWindow, /new code window/i);
+    assert.match(newTab, /verified a new tab in notepad/i);
+  });
+
   it('should describe native Chrome new-tab actions without exposing an internal URL', function() {
     const gen = new ResponseGenerator();
     const result = gen.generate('success', 'browser.open', {
@@ -337,6 +407,19 @@ describe('Response Generator', function() {
     });
 
     assert.match(result, /^Opening a new Chrome tab(?:, sir)?\.$/);
+  });
+
+  it('should confirm another YouTube request as a website tab', function() {
+    const gen = new ResponseGenerator();
+    const result = gen.generate('success', 'browser.open', {
+      entities: {
+        url: 'https://www.youtube.com/',
+        browserName: 'chrome',
+        newTab: true
+      }
+    });
+
+    assert.match(result, /^Opening YouTube in a new Chrome tab(?:, sir)?\.$/);
   });
 
   it('should mention the matched window in window responses', function() {

@@ -95,10 +95,12 @@ class BrowserController {
     }
 
     const blankTabBrowser = this._normalizeBrowserName(options.browserName);
-    const isNewTabRequest = Boolean(options.newTab) || /^(?:about:newtab|chrome:\/\/newtab\/?|edge:\/\/newtab\/?)$/i.test(url.trim());
-    let formattedUrl = isNewTabRequest
+    const requestedUrl = url.trim();
+    const isBlankTabRequest = /^(?:about:newtab|about:blank|chrome:\/\/newtab\/?|edge:\/\/newtab\/?)$/i.test(requestedUrl);
+    const isNewTabRequest = Boolean(options.newTab) || isBlankTabRequest;
+    let formattedUrl = isBlankTabRequest
       ? this._nativeNewTabUrl(blankTabBrowser)
-      : url.trim();
+      : requestedUrl;
     if (
       !formattedUrl.startsWith('http://') &&
       !formattedUrl.startsWith('https://') &&
@@ -107,26 +109,34 @@ class BrowserController {
       formattedUrl = 'https://' + formattedUrl;
     }
 
-    if (
-      isNewTabRequest &&
-      blankTabBrowser === 'chrome' &&
-      !options.skipExistingBlankTabCheck
-    ) {
-      const existingBlankTab = this._focusExistingBlankTab(blankTabBrowser);
-      if (existingBlankTab) {
-        const browserLabel = existingBlankTab.browserName === 'chrome'
-          ? 'Chrome'
-          : existingBlankTab.browserName;
+    if (isNewTabRequest) {
+      const existingWindow = this._findBrowserWindow(blankTabBrowser);
+      if (existingWindow) {
+        const processName = blankTabBrowser === 'edge' ? 'msedge' : blankTabBrowser;
+        const opened = isBlankTabRequest
+          ? this.windowSession.sendKeys(existingWindow.title, '^t', {
+              preferredProcessNames: [processName]
+            })
+          : this.windowSession.navigateWindowToUrl(existingWindow.title, formattedUrl, {
+              preferredProcessNames: [processName],
+              newTab: true
+            });
+        if (!opened?.success) {
+          return {
+            success: false,
+            error: `Chrome is open, but I could not open a new tab in its existing window.`
+          };
+        }
         return {
-          success: false,
-          needsClarification: true,
-          error: `A new ${browserLabel} tab is already open, so I brought it to the foreground. Do you need another new tab? Say yes or ya to open one.`,
+          success: true,
           data: {
-            clarificationType: 'browser.open.blankTabAlreadyOpen',
-            browserName: existingBlankTab.browserName,
-            launchMethod: 'focus-existing',
-            matchedWindow: existingBlankTab.matchedWindow,
-            confirmEntities: { skipExistingBlankTabCheck: true }
+            url: formattedUrl,
+            browserName: blankTabBrowser,
+            launchMethod: 'existing-window-shortcut',
+            matchedWindow: opened.data?.matchedWindow || existingWindow.title,
+            openedNewWindow: false,
+            openedNewTab: true,
+            verified: true
           }
         };
       }
@@ -150,32 +160,13 @@ class BrowserController {
     return 'about:newtab';
   }
 
-  _focusExistingBlankTab(requestedBrowser) {
+  _findBrowserWindow(requestedBrowser) {
     const browserName = this._normalizeBrowserName(requestedBrowser);
     const processName = browserName === 'edge' ? 'msedge' : browserName;
-    const existing = this.windowSession.listWindows().find(window => {
-      const title = String(window?.title || '').trim().toLowerCase();
+    return this.windowSession.listWindows().find(window => {
       const process = String(window?.processName || '').trim().toLowerCase();
-      return title.includes('new tab') && process === processName;
+      return process === processName && Number(window?.handle || 0) !== 0;
     });
-
-    if (!existing) {
-      return null;
-    }
-
-    const focused = this.windowSession.focusWindow(existing.title, {
-      preferredProcessNames: [processName],
-      preferredTitleTokens: ['new tab'],
-      requireTitleTokenMatch: true
-    });
-    if (!focused?.success) {
-      return null;
-    }
-
-    return {
-      browserName,
-      matchedWindow: focused.data?.matchedWindow || existing.title
-    };
   }
 
   _normalizeBrowserName(requestedBrowser) {
@@ -194,7 +185,7 @@ class BrowserController {
     const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
     this.lastSearch = { query, searchUrl, results: [], openedInBrowser: false };
     if (options.openInBrowser) {
-      const opened = this.open(searchUrl);
+      const opened = this.open(searchUrl, options);
       if (opened?.success) {
         this.lastSearch.openedInBrowser = true;
       }

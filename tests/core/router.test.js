@@ -2386,6 +2386,119 @@ describe('Action Router', function() {
     assert.equal(search.entities.openInBrowser, true);
   });
 
+  it('should preserve ordinary-focus and explicit-new app operations', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const executed = [];
+    const stubEngine = {
+      execute(actionId, entities) {
+        executed.push({ actionId, entities });
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const ordinary = await router.process('open notepad', 'chat');
+    const newWindow = await router.process('open a new notepad window', 'chat');
+    const another = await router.process('launch another calculator app', 'chat');
+
+    assert.equal(ordinary.intent, 'app.open');
+    assert.equal(ordinary.entities.requestedOperation || 'open-or-focus', 'open-or-focus');
+    assert.equal(ordinary.entities.forceNewWindow, undefined);
+    assert.equal(newWindow.entities.appName, 'notepad');
+    assert.equal(newWindow.entities.forceNewWindow, true);
+    assert.equal(newWindow.entities.requestedOperation, 'open-new-window');
+    assert.equal(another.entities.appName, 'calc');
+    assert.equal(another.entities.forceNewWindow, true);
+    assert.ok(executed.every(entry => entry.actionId === 'app.open'));
+  });
+
+  it('should route browser counts, named tabs, another tabs, and joined speech', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const executed = [];
+    const stubEngine = {
+      execute(actionId, entities) {
+        executed.push({ actionId, entities });
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const count = await router.process('how many tabs are in chrome', 'chat');
+    const named = await router.process('open jio hotstar tab in chrome', 'chat');
+    const another = await router.process('open another new tab in chrome', 'chat');
+    const joined = await router.process('open jiohotstarin chrome', 'chat');
+
+    assert.equal(count.intent, 'browser.listTabs');
+    assert.equal(count.entities.responseMode, 'count');
+    assert.equal(named.intent, 'browser.openTab');
+    assert.equal(named.entities.tabQuery, 'jio hotstar');
+    assert.equal(another.intent, 'browser.open');
+    assert.equal(another.entities.forceNewTab, true);
+    assert.equal(joined.intent, 'browser.search');
+    assert.equal(joined.entities.query, 'jiohotstar');
+    assert.deepEqual(executed.map(entry => entry.actionId), [
+      'browser.listTabs',
+      'browser.openTab',
+      'browser.open',
+      'browser.search'
+    ]);
+  });
+
+  it('should keep application tabs and another website tabs in their correct domains', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const executed = [];
+    const stubEngine = {
+      execute(actionId, entities) {
+        executed.push({ actionId, entities });
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const notepadTab = await router.process('open new tab in notepad', 'chat');
+    const youtubeTab = await router.process('open another youtube', 'chat');
+    const codeWindow = await router.process('open another visual studio code', 'chat');
+
+    assert.equal(notepadTab.intent, 'app.newTab');
+    assert.equal(notepadTab.entities.appName, 'notepad');
+    assert.equal(youtubeTab.intent, 'browser.open');
+    assert.equal(youtubeTab.entities.url, 'https://www.youtube.com/');
+    assert.equal(youtubeTab.entities.newTab, true);
+    assert.equal(codeWindow.intent, 'app.open');
+    assert.equal(codeWindow.entities.appName, 'visual studio code');
+    assert.deepEqual(executed.map(entry => entry.actionId), [
+      'app.newTab',
+      'browser.open',
+      'app.open'
+    ]);
+  });
+
+  it('should treat open YouTube app as an app command, not an app-list question', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const executed = [];
+    const stubEngine = {
+      execute(actionId, entities) {
+        executed.push({ actionId, entities });
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const result = await router.process('open youtube app', 'chat');
+
+    assert.equal(result.intent, 'app.open');
+    assert.equal(result.entities.appName, 'youtube');
+    assert.deepEqual(executed.map(entry => entry.actionId), ['app.open']);
+  });
+
   it('should not carry open into ask-style follow-up clauses', async function() {
     const config = {
       permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }

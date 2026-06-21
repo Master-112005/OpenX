@@ -28,11 +28,11 @@ describe('Entity Extractor', function() {
     assert.equal(entities.appName, 'chrome');
   });
 
-  it('should resolve app aliases', function() {
+  it('should preserve strict user-facing app names', function() {
     const extractor = new EntityExtractor({});
     const intent = { entities: [{ name: 'appName', type: 'string', required: true }] };
     const entities = extractor.extract(intent, 'open visual studio code');
-    assert.equal(entities.appName, 'code');
+    assert.equal(entities.appName, 'visual studio code');
   });
 
   it('should resolve misspelled app names', function() {

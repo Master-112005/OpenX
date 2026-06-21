@@ -58,6 +58,238 @@ class WindowsSessionController {
     }
   }
 
+  listBrowserTabs(processNames = ['chrome']) {
+    const normalizedProcesses = [...new Set(processNames
+      .map(name => Normalizer.normalizeText(name))
+      .filter(name => /^[a-z0-9._-]+$/.test(name)))];
+    if (normalizedProcesses.length === 0) {
+      return [];
+    }
+
+    const processFilter = normalizedProcesses
+      .map(name => `'${escapePowerShell(name)}'`)
+      .join(',');
+    const script = `
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
+$processNames = @(${processFilter})
+$tabs = New-Object System.Collections.Generic.List[object]
+
+Get-Process | Where-Object {
+  $_.MainWindowHandle -ne 0 -and $processNames -contains $_.ProcessName.ToLowerInvariant()
+} | ForEach-Object {
+  $process = $_
+  $root = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$process.MainWindowHandle)
+  if (-not $root) { return }
+
+  $condition = New-Object System.Windows.Automation.PropertyCondition(
+    [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+    [System.Windows.Automation.ControlType]::TabItem
+  )
+  $items = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition)
+  foreach ($item in $items) {
+    $title = [string]$item.Current.Name
+    if ([string]::IsNullOrWhiteSpace($title)) { continue }
+    $selected = $false
+    try {
+      $pattern = $item.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
+      if ($pattern) { $selected = $pattern.Current.IsSelected }
+    } catch {}
+    $tabs.Add([pscustomobject]@{
+      title = $title.Trim()
+      rawTitle = $title.Trim()
+      processName = $process.ProcessName
+      processId = $process.Id
+      handle = [int64]$process.MainWindowHandle
+      windowTitle = $process.MainWindowTitle
+      isActiveTab = [bool]$selected
+    })
+  }
+
+}
+
+$tabs | ConvertTo-Json -Compress
+`;
+
+    try {
+      const output = execFileSync('powershell.exe', [
+        '-NoProfile',
+        '-Command',
+        script
+      ], {
+        encoding: 'utf8',
+        timeout: 12000
+      });
+      const parsed = JSON.parse(output || '[]');
+      return Array.isArray(parsed) ? parsed : (parsed ? [parsed] : []);
+    } catch (err) {
+      this.logger.warn('Failed to enumerate browser tabs with UI Automation', err.message);
+      return [];
+    }
+  }
+
+  listProcessWindows(processNames = []) {
+    const normalizedProcesses = [...new Set(processNames
+      .map(name => Normalizer.normalizeText(name).replace(/\.exe$/i, ''))
+      .filter(name => /^[a-z0-9._-]+$/.test(name)))];
+    if (normalizedProcesses.length === 0) return [];
+
+    const processFilter = normalizedProcesses.map(name => `'${escapePowerShell(name)}'`).join(',');
+    const script = `
+$ErrorActionPreference = 'Stop'
+$signature = @'
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+public static class OpenXTopLevelWindowApi {
+  public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc callback, IntPtr lParam);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowTextLength(IntPtr hWnd);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder text, int maxCount);
+}
+'@
+Add-Type -TypeDefinition $signature -ErrorAction SilentlyContinue | Out-Null
+$processNames = @(${processFilter})
+$targets = @{}
+Get-Process | Where-Object { $processNames -contains $_.ProcessName.ToLowerInvariant() } | ForEach-Object {
+  $targets[[string]$_.Id] = $_.ProcessName
+}
+$result = New-Object System.Collections.Generic.List[object]
+$callback = [OpenXTopLevelWindowApi+EnumWindowsProc]{
+  param([IntPtr]$hwnd, [IntPtr]$lParam)
+  if (-not [OpenXTopLevelWindowApi]::IsWindowVisible($hwnd)) { return $true }
+  [uint32]$pidValue = 0
+  [OpenXTopLevelWindowApi]::GetWindowThreadProcessId($hwnd, [ref]$pidValue) | Out-Null
+  if (-not $targets.ContainsKey([string]$pidValue)) { return $true }
+  $length = [OpenXTopLevelWindowApi]::GetWindowTextLength($hwnd)
+  $title = New-Object System.Text.StringBuilder ($length + 1)
+  [OpenXTopLevelWindowApi]::GetWindowText($hwnd, $title, $title.Capacity) | Out-Null
+  $result.Add([pscustomobject]@{
+    handle = [int64]$hwnd
+    title = $title.ToString()
+    processName = $targets[[string]$pidValue]
+    id = [int]$pidValue
+  })
+  return $true
+}
+[OpenXTopLevelWindowApi]::EnumWindows($callback, [IntPtr]::Zero) | Out-Null
+$result | ConvertTo-Json -Compress
+`;
+
+    try {
+      const output = execFileSync('powershell.exe', ['-NoProfile', '-Command', script], {
+        encoding: 'utf8',
+        timeout: 3000
+      });
+      const parsed = JSON.parse(output || '[]');
+      this.lastProcessWindowEnumerationSucceeded = true;
+      return Array.isArray(parsed) ? parsed : (parsed ? [parsed] : []);
+    } catch (err) {
+      this.lastProcessWindowEnumerationSucceeded = false;
+      this.logger.warn('Failed to enumerate application windows', err.message);
+      return [];
+    }
+  }
+
+  closeBrowserTab(tabTitle, processNames = ['chrome']) {
+    return this._controlBrowserTab(tabTitle, processNames, true);
+  }
+
+  focusBrowserTab(tabTitle, processNames = ['chrome']) {
+    return this._controlBrowserTab(tabTitle, processNames, false);
+  }
+
+  _controlBrowserTab(tabTitle, processNames, closeAfterFocus) {
+    const normalizedProcesses = [...new Set(processNames
+      .map(name => Normalizer.normalizeText(name))
+      .filter(name => /^[a-z0-9._-]+$/.test(name)))];
+    const title = String(tabTitle || '').trim();
+    if (!title || normalizedProcesses.length === 0) {
+      return { success: false, error: 'A browser tab title is required' };
+    }
+
+    const processFilter = normalizedProcesses.map(name => `'${escapePowerShell(name)}'`).join(',');
+    const script = `
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName UIAutomationClient
+Add-Type -AssemblyName UIAutomationTypes
+${USER32_BOOTSTRAP}
+$processNames = @(${processFilter})
+$targetTitle = '${escapePowerShell(title)}'
+$closeAfterFocus = ${closeAfterFocus ? '$true' : '$false'}
+$matched = $null
+
+Get-Process | Where-Object {
+  $_.MainWindowHandle -ne 0 -and $processNames -contains $_.ProcessName.ToLowerInvariant()
+} | ForEach-Object {
+  if ($matched) { return }
+  $process = $_
+  $root = [System.Windows.Automation.AutomationElement]::FromHandle([IntPtr]$process.MainWindowHandle)
+  if (-not $root) { return }
+  $condition = New-Object System.Windows.Automation.PropertyCondition(
+    [System.Windows.Automation.AutomationElement]::ControlTypeProperty,
+    [System.Windows.Automation.ControlType]::TabItem
+  )
+  $items = $root.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition)
+  foreach ($item in $items) {
+    if (-not [string]::Equals([string]$item.Current.Name, $targetTitle, [System.StringComparison]::OrdinalIgnoreCase)) {
+      continue
+    }
+    try {
+      $selection = $item.GetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern)
+      $selection.Select()
+    } catch {
+      $invoke = $item.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)
+      $invoke.Invoke()
+    }
+    $matched = [pscustomobject]@{
+      title = [string]$item.Current.Name
+      windowTitle = $process.MainWindowTitle
+      processName = $process.ProcessName
+      processId = $process.Id
+      handle = [int64]$process.MainWindowHandle
+    }
+    break
+  }
+}
+
+if (-not $matched) { throw 'Browser tab not found' }
+$hwnd = [IntPtr]$matched.handle
+if ([Win32WindowApi]::IsIconic($hwnd)) {
+  [Win32WindowApi]::ShowWindowAsync($hwnd, 9) | Out-Null
+} else {
+  [Win32WindowApi]::ShowWindowAsync($hwnd, 5) | Out-Null
+}
+[Win32WindowApi]::SetForegroundWindow($hwnd) | Out-Null
+$wshell = New-Object -ComObject WScript.Shell
+$null = $wshell.AppActivate($matched.processId)
+Start-Sleep -Milliseconds 180
+if ($closeAfterFocus) { $wshell.SendKeys('^w') }
+$matched | ConvertTo-Json -Compress
+`;
+
+    try {
+      const output = execFileSync('powershell.exe', ['-NoProfile', '-Command', script], {
+        encoding: 'utf8',
+        timeout: 12000
+      });
+      return {
+        success: true,
+        data: {
+          ...JSON.parse(output),
+          action: closeAfterFocus ? 'closeTab' : 'focusTab'
+        }
+      };
+    } catch (err) {
+      const action = closeAfterFocus ? 'close' : 'focus';
+      this.logger.warn(`Failed to ${action} browser tab with UI Automation`, err.message);
+      return { success: false, error: `Could not find a ${title} tab` };
+    }
+  }
+
   minimizeWindow(windowName, options = {}) {
     return this._applyWindowAction('minimize', windowName, options);
   }
@@ -119,6 +351,7 @@ if ([Win32WindowApi]::IsIconic($hwnd)) {
 $wshell = New-Object -ComObject WScript.Shell
 $null = $wshell.AppActivate(${target.id})
 Start-Sleep -Milliseconds 250
+${options.newTab === true ? "$wshell.SendKeys('^t')`nStart-Sleep -Milliseconds 120" : ''}
 Set-Clipboard -Value $url
 Start-Sleep -Milliseconds 80
 $wshell.SendKeys('^l')

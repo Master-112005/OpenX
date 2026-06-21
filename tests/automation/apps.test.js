@@ -461,6 +461,8 @@ describe('App Controller', function() {
   it('should open when the user confirms a new app window', function() {
     const controller = new AppController({});
     let launched = null;
+    const windowCounts = [1, 2];
+    controller._countAppWindows = () => windowCounts.shift() ?? 2;
 
     controller._getRunningProcessDetails = () => ([{
       Id: 300,
@@ -479,6 +481,180 @@ describe('App Controller', function() {
 
     assert.equal(result.success, true);
     assert.equal(launched.appId, 'Sample.App');
+    assert.equal(result.data.requestedOperation, 'open-new-window');
+    assert.equal(result.data.forceNewWindow, true);
+    assert.equal(result.data.beforeWindowCount, 1);
+    assert.equal(result.data.afterWindowCount, 2);
+    assert.equal(result.data.newWindowVerified, true);
+  });
+
+  it('should launch Chrome with an explicit new-window argument', function() {
+    const fs = require('fs');
+    const appsPath = require.resolve('../../core/automation/apps/index');
+    const launcherPath = require.resolve('../../core/automation/common/launcher');
+    const previousApps = require.cache[appsPath];
+    const previousLauncher = require.cache[launcherPath];
+    const originalExistsSync = fs.existsSync;
+    let launch = null;
+
+    try {
+      delete require.cache[appsPath];
+      require.cache[launcherPath] = {
+        id: launcherPath,
+        filename: launcherPath,
+        loaded: true,
+        exports: {
+          launchTarget(target, args) {
+            launch = { target, args };
+          }
+        }
+      };
+      fs.existsSync = target => String(target).toLowerCase().endsWith('chrome.exe') || originalExistsSync(target);
+      const FreshAppController = require('../../core/automation/apps/index');
+      const controller = new FreshAppController({});
+      const counts = [1, 2];
+      controller._countAppWindows = () => counts.shift() ?? 2;
+
+      const result = controller.open('chrome', {
+        requestedOperation: 'open-new-window',
+        forceNewWindow: true
+      });
+
+      assert.equal(result.success, true);
+      assert.deepEqual(launch.args, ['--new-window']);
+      assert.equal(result.data.newWindowVerified, true);
+    } finally {
+      fs.existsSync = originalExistsSync;
+      delete require.cache[appsPath];
+      delete require.cache[launcherPath];
+      if (previousApps) require.cache[appsPath] = previousApps;
+      if (previousLauncher) require.cache[launcherPath] = previousLauncher;
+    }
+  });
+
+  it('should launch another VS Code window through the command instead of Start menu', function() {
+    const appsPath = require.resolve('../../core/automation/apps/index');
+    const launcherPath = require.resolve('../../core/automation/common/launcher');
+    const previousApps = require.cache[appsPath];
+    const previousLauncher = require.cache[launcherPath];
+    let launch = null;
+
+    try {
+      delete require.cache[appsPath];
+      require.cache[launcherPath] = {
+        id: launcherPath,
+        filename: launcherPath,
+        loaded: true,
+        exports: {
+          launchTarget(target, args) {
+            launch = { target, args };
+          }
+        }
+      };
+      const FreshAppController = require('../../core/automation/apps/index');
+      const controller = new FreshAppController({});
+      const counts = [1, 2];
+      controller._countAppWindows = () => counts.shift() ?? 2;
+      controller._sleep = () => {};
+      controller._launchSpecialApp = () => ({ success: false });
+      controller._commandExists = command => command === 'code';
+      controller._resolveStartApp = () => {
+        throw new Error('Start menu must not be used for an explicit new VS Code window');
+      };
+
+      const result = controller.open('visual studio code', {
+        requestedOperation: 'open-new-window',
+        forceNewWindow: true
+      });
+
+      assert.equal(result.success, true);
+      assert.deepEqual(launch, { target: 'code', args: ['--new-window'] });
+      assert.equal(result.data.launchMethod, 'command');
+      assert.equal(result.data.newWindowVerified, true);
+    } finally {
+      delete require.cache[appsPath];
+      delete require.cache[launcherPath];
+      if (previousApps) require.cache[appsPath] = previousApps;
+      if (previousLauncher) require.cache[launcherPath] = previousLauncher;
+    }
+  });
+
+  it('should wait for a delayed VS Code window and preserve its strict display name', function() {
+    const controller = new AppController({});
+    const counts = [1, 2];
+    const delays = [];
+    controller._countAppWindows = () => counts.shift() ?? 2;
+    controller._sleep = milliseconds => delays.push(milliseconds);
+
+    const result = controller._completeAppOpen('code', {
+      success: true,
+      data: { app: 'code', launchMethod: 'command' }
+    }, {
+      forceNewWindow: true,
+      requestedOperation: 'open-new-window',
+      beforeWindowCount: 1,
+      launchArgs: ['--new-window'],
+      displayName: 'visual studio code'
+    });
+
+    assert.equal(result.data.app, 'visual studio code');
+    assert.equal(result.data.appId, 'code');
+    assert.equal(result.data.newWindowVerified, true);
+    assert.deepEqual(delays, [600, 350]);
+  });
+
+  it('should open a new Notepad tab in Notepad, never in Chrome', function() {
+    const controller = new AppController({});
+    controller.findVisibleApp = () => ({
+      Id: 50,
+      ProcessName: 'Notepad',
+      MainWindowTitle: 'Notes - Notepad',
+      MainWindowHandle: 100
+    });
+    controller._resolveProcessCandidates = () => ['Notepad'];
+    let controlled = null;
+    controller.windowSession.sendKeys = (windowName, keys, options) => {
+      controlled = { windowName, keys, options };
+      return {
+        success: true,
+        data: { matchedWindow: 'Notes - Notepad', processName: 'Notepad' }
+      };
+    };
+
+    const result = controller.openNewTab('notepad');
+
+    assert.equal(result.success, true);
+    assert.equal(controlled.windowName, 'Notes - Notepad');
+    assert.equal(controlled.keys, '^n');
+    assert.deepEqual(controlled.options.preferredProcessNames, ['Notepad']);
+    assert.equal(result.data.app, 'notepad');
+    assert.equal(result.data.verified, true);
+  });
+
+  it('should stop new-window verification immediately when observation is unavailable', function() {
+    const controller = new AppController({});
+    let observations = 0;
+    controller._countAppWindows = () => {
+      observations += 1;
+      return null;
+    };
+    controller._sleep = () => {
+      throw new Error('unavailable observation must not be retried');
+    };
+
+    const result = controller._completeAppOpen('chrome', {
+      success: true,
+      data: { app: 'chrome', launchMethod: 'executable' }
+    }, {
+      forceNewWindow: true,
+      requestedOperation: 'open-new-window',
+      beforeWindowCount: 1,
+      launchArgs: ['--new-window']
+    });
+
+    assert.equal(observations, 1);
+    assert.equal(result.data.newWindowVerified, null);
+    assert.equal(result.data.verificationMethod, 'top-level-window-count-unavailable');
   });
 
   it('should not treat a YouTube Chrome PWA as an open Chrome browser', function() {
@@ -492,6 +668,7 @@ describe('App Controller', function() {
       MainWindowHandle: 456,
       Path: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
     }]);
+    controller.windowSession.listProcessWindows = () => [];
     controller.windowSession.findWindow = (_query, options) => {
       fallbackOptions = options;
       return null;
@@ -500,6 +677,30 @@ describe('App Controller', function() {
     assert.equal(controller.findVisibleApp('google chrome'), null);
     assert.equal(fallbackOptions.requireTitleTokenMatch, true);
     assert.deepEqual(fallbackOptions.preferredTitleTokens, ['chrome']);
+  });
+
+  it('should find a regular Chrome window when Get-Process reports a PWA window', function() {
+    const controller = new AppController({});
+    controller._getRunningProcessDetails = () => ([{
+      Id: 901,
+      ProcessName: 'chrome',
+      MainWindowTitle: 'Music - YouTube',
+      MainWindowHandle: 456,
+      Path: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
+    }]);
+    controller.windowSession.listProcessWindows = processNames => {
+      assert.ok(processNames.includes('chrome'));
+      return [
+        { id: 901, processName: 'chrome', title: 'Music - YouTube', handle: 456 },
+        { id: 901, processName: 'chrome', title: 'OpenX - Google Chrome', handle: 789 }
+      ];
+    };
+
+    const found = controller.findVisibleApp('chrome', { allowWindowFallback: false });
+
+    assert.ok(found);
+    assert.equal(found.MainWindowTitle, 'OpenX - Google Chrome');
+    assert.equal(found.MainWindowHandle, 789);
   });
 
   it('should resolve and launch installed Store apps such as Instagram', function() {

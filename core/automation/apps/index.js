@@ -5,30 +5,38 @@ const { launchTarget } = require('../common/launcher');
 const WindowsSessionController = require('../common/windows-session');
 
 const KNOWN_APPS = {
-  'code': { path: null, cmd: 'code', processName: 'Code' },
+  'code': {
+    path: null,
+    cmd: 'code',
+    processName: 'Code',
+    newWindowArgs: ['--new-window'],
+    newTabShortcut: '^n',
+    newWindowVerification: { initialDelayMs: 600, attempts: 2, retryDelayMs: 350 }
+  },
   'chrome': {
     path: 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
     cmd: 'chrome',
+    newWindowArgs: ['--new-window'],
     closeStrategy: 'window',
     windowQuery: 'chrome',
     preferredTitleTokens: ['chrome', 'new tab', '- google chrome'],
     preferredProcessNames: ['chrome', 'ApplicationFrameHost']
   },
-  'msedge': { path: 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe', cmd: 'msedge' },
-  'edge': { path: 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe', cmd: 'msedge' },
-  'firefox': { path: 'C:\\Program Files\\Mozilla Firefox\\firefox.exe', cmd: 'firefox' },
-  'notepad': { path: 'C:\\Windows\\System32\\notepad.exe', cmd: 'notepad' },
+  'msedge': { path: 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe', cmd: 'msedge', newWindowArgs: ['--new-window'] },
+  'edge': { path: 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe', cmd: 'msedge', newWindowArgs: ['--new-window'] },
+  'firefox': { path: 'C:\\Program Files\\Mozilla Firefox\\firefox.exe', cmd: 'firefox', newWindowArgs: ['--new-window'] },
+  'notepad': { path: 'C:\\Windows\\System32\\notepad.exe', cmd: 'notepad', newTabShortcut: '^n' },
   'calc': { path: 'C:\\Windows\\System32\\calc.exe', cmd: 'calc' },
   'mspaint': { path: 'C:\\Windows\\System32\\mspaint.exe', cmd: 'mspaint' },
   'cmd': { path: 'C:\\Windows\\System32\\cmd.exe', cmd: 'cmd' },
   'powershell': { path: 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe', cmd: 'powershell' },
-  'explorer': { path: 'C:\\Windows\\explorer.exe', cmd: 'explorer' },
+  'explorer': { path: 'C:\\Windows\\explorer.exe', cmd: 'explorer', newWindowArgs: ['/n'] },
   'taskmgr': { path: 'C:\\Windows\\System32\\Taskmgr.exe', cmd: 'taskmgr' },
   'control': { path: 'C:\\Windows\\System32\\control.exe', cmd: 'control' },
   'snippingtool': { path: 'C:\\Windows\\System32\\SnippingTool.exe', cmd: 'SnippingTool' },
-  'winword': { cmd: 'winword' },
-  'excel': { cmd: 'excel' },
-  'powerpoint': { cmd: 'powerpnt', processName: 'POWERPNT' },
+  'winword': { cmd: 'winword', newWindowArgs: ['/n'] },
+  'excel': { cmd: 'excel', newWindowArgs: ['/x'] },
+  'powerpoint': { cmd: 'powerpnt', processName: 'POWERPNT', newWindowArgs: ['/n'] },
   'outlook': { cmd: 'outlook' },
   'spotify': { cmd: 'spotify' },
   'discord': { cmd: 'discord', processName: 'Discord' },
@@ -108,8 +116,15 @@ class AppController {
       return { success: false, error: 'No application name provided' };
     }
 
+    const displayName = Normalizer.normalizeText(appName);
     const name = this._normalizeAppName(appName);
     const app = KNOWN_APPS[name];
+    const forceNewWindow = Boolean(options.forceNewWindow);
+    const requestedOperation = forceNewWindow
+      ? 'open-new-window'
+      : (options.requestedOperation || 'open-or-focus');
+    const beforeWindowCount = forceNewWindow ? this._countAppWindows(name) : null;
+    const launchArgs = forceNewWindow ? (app?.newWindowArgs || []) : [];
 
     try {
       if (!options.forceNewWindow && !options.skipAlreadyOpenCheck) {
@@ -117,6 +132,10 @@ class AppController {
         if (existingTarget) {
           const focused = this._focusExistingApp(name, existingTarget);
           if (focused) {
+            focused.data.app = displayName;
+            focused.data.appId = name;
+            focused.data.requestedOperation = requestedOperation;
+            focused.data.forceNewWindow = false;
             return focused;
           }
         }
@@ -124,28 +143,38 @@ class AppController {
 
       if (app && app.path) {
         if (require('fs').existsSync(app.path)) {
-          launchTarget(app.path);
-          return {
+          launchTarget(app.path, launchArgs);
+          return this._completeAppOpen(name, {
             success: true,
             data: { app: name, launchMethod: 'executable', target: app.path }
-          };
+          }, { forceNewWindow, requestedOperation, beforeWindowCount, launchArgs, displayName });
         }
       }
 
       const specialLaunch = this._launchSpecialApp(name);
       if (specialLaunch.success) {
-        return specialLaunch;
+        return this._completeAppOpen(name, specialLaunch, {
+          forceNewWindow,
+          requestedOperation,
+          beforeWindowCount,
+          launchArgs: [],
+          displayName
+        });
       }
 
-      if (COMMAND_FIRST_APPS.has(name) && app?.cmd && this._commandExists(app.cmd)) {
-        launchTarget(app.cmd);
-        return { success: true, data: { app: name, launchMethod: 'command' } };
+      const commandSupportsNewWindow = forceNewWindow && Array.isArray(app?.newWindowArgs) && app.newWindowArgs.length > 0;
+      if ((COMMAND_FIRST_APPS.has(name) || commandSupportsNewWindow) && app?.cmd && this._commandExists(app.cmd)) {
+        launchTarget(app.cmd, launchArgs);
+        return this._completeAppOpen(name, {
+          success: true,
+          data: { app: name, launchMethod: 'command' }
+        }, { forceNewWindow, requestedOperation, beforeWindowCount, launchArgs, displayName });
       }
 
       const startApp = this._resolveStartApp(name);
       if (startApp) {
         this._launchStartApp(startApp);
-        return {
+        return this._completeAppOpen(name, {
           success: true,
           data: {
             app: name,
@@ -153,19 +182,136 @@ class AppController {
             appId: startApp.appId,
             launchMethod: 'start-menu'
           }
-        };
+        }, { forceNewWindow, requestedOperation, beforeWindowCount, launchArgs: [], displayName });
       }
 
       if (app?.cmd && this._commandExists(app.cmd)) {
-        launchTarget(app.cmd);
-        return { success: true, data: { app: name, launchMethod: 'command' } };
+        launchTarget(app.cmd, launchArgs);
+        return this._completeAppOpen(name, {
+          success: true,
+          data: { app: name, launchMethod: 'command' }
+        }, { forceNewWindow, requestedOperation, beforeWindowCount, launchArgs, displayName });
       }
 
-      return { success: false, error: `Could not find app: ${name}` };
+      return { success: false, error: `Could not find app: ${displayName}` };
     } catch (err) {
       this.logger.error(`Failed to open app: ${name}`, err);
-      return { success: false, error: `Could not find or open: ${name}` };
+      return { success: false, error: `Could not find or open: ${displayName}` };
     }
+  }
+
+  _completeAppOpen(name, result, context = {}) {
+    const data = {
+      ...(result.data || {}),
+      app: context.displayName || result.data?.app || name,
+      appId: name,
+      requestedOperation: context.requestedOperation || 'open-or-focus',
+      forceNewWindow: Boolean(context.forceNewWindow),
+      launchArguments: Array.isArray(context.launchArgs) ? context.launchArgs : []
+    };
+    if (!context.forceNewWindow) {
+      return { ...result, data };
+    }
+
+    const beforeWindowCount = Number.isFinite(context.beforeWindowCount)
+      ? context.beforeWindowCount
+      : null;
+    if (beforeWindowCount === null) {
+      return {
+        ...result,
+        data: {
+          ...data,
+          beforeWindowCount: null,
+          afterWindowCount: null,
+          newWindowVerified: null,
+          verificationMethod: 'top-level-window-count-unavailable'
+        }
+      };
+    }
+
+    const verificationConfig = KNOWN_APPS[name]?.newWindowVerification || {};
+    if (Number(verificationConfig.initialDelayMs) > 0) {
+      this._sleep(verificationConfig.initialDelayMs);
+    }
+
+    let afterWindowCount = this._countAppWindows(name);
+    const attempts = Math.max(1, Number(verificationConfig.attempts) || 1);
+    for (let attempt = 1; attempt < attempts && afterWindowCount !== null && afterWindowCount <= beforeWindowCount; attempt += 1) {
+      this._sleep(verificationConfig.retryDelayMs || 250);
+      afterWindowCount = this._countAppWindows(name);
+    }
+    const observationAvailable = afterWindowCount !== null;
+
+    return {
+      ...result,
+      data: {
+        ...data,
+        beforeWindowCount,
+        afterWindowCount,
+        newWindowVerified: observationAvailable ? afterWindowCount > beforeWindowCount : null,
+        verificationMethod: observationAvailable
+          ? 'top-level-window-count'
+          : 'top-level-window-count-unavailable'
+      }
+    };
+  }
+
+  _countAppWindows(appName) {
+    const processNames = this._resolveProcessCandidates(appName);
+    if (typeof this.windowSession.listProcessWindows === 'function') {
+      const windows = this.windowSession.listProcessWindows(processNames);
+      return this.windowSession.lastProcessWindowEnumerationSucceeded === false
+        ? null
+        : windows.length;
+    }
+    return this._visibleCloseTargets(
+      this._filterCloseTargets(appName, this._findRunningProcesses(appName, processNames))
+    ).length;
+  }
+
+  openNewTab(appName) {
+    if (!appName) return { success: false, error: 'No application name provided' };
+
+    const displayName = Normalizer.normalizeText(appName);
+    const name = this._normalizeAppName(appName);
+    const app = KNOWN_APPS[name];
+    if (!app?.newTabShortcut) {
+      return { success: false, error: `${displayName} does not have a supported new-tab command` };
+    }
+
+    let target = this.findVisibleApp(name, { allowWindowFallback: false });
+    let openedApp = false;
+    if (!target) {
+      const openResult = this.open(displayName);
+      if (!openResult.success) return openResult;
+      target = this.waitForVisibleApp(name, { attempts: 5, intervalMs: 180 });
+      openedApp = true;
+    }
+    if (!target) {
+      return { success: false, error: `Could not verify an open ${displayName} window for the new tab` };
+    }
+
+    const title = String(target.MainWindowTitle || app.windowQuery || displayName).trim();
+    const controlled = this.windowSession.sendKeys(title, app.newTabShortcut, {
+      ...this._windowMatchOptions(name, app),
+      preferredProcessNames: this._resolveProcessCandidates(name)
+    });
+    if (!controlled.success) return controlled;
+
+    return {
+      success: true,
+      data: {
+        app: displayName,
+        appId: name,
+        action: 'new-tab',
+        requestedOperation: 'open-new-tab',
+        shortcut: app.newTabShortcut,
+        openedApp,
+        matchedWindow: controlled.data?.matchedWindow || title,
+        processName: controlled.data?.processName || target.ProcessName || '',
+        verified: true
+      }
+    };
   }
 
   close(appName, options = {}) {
@@ -675,6 +821,24 @@ class AppController {
       return processTarget;
     }
 
+    // Get-Process exposes only one MainWindowTitle per process. Chromium can
+    // own a regular browser window and one or more PWA windows at the same
+    // time, so inspect every top-level browser window before deciding that the
+    // browser is closed and launching another instance.
+    if (this._isBrowserAppName(name) && typeof this.windowSession.listProcessWindows === 'function') {
+      const nativeWindows = this.windowSession.listProcessWindows(processNames)
+        .map(window => ({
+          Id: window.id,
+          ProcessName: window.processName,
+          MainWindowTitle: window.title,
+          MainWindowHandle: window.handle
+        }));
+      const browserWindow = this._visibleCloseTargets(
+        this._filterCloseTargets(name, nativeWindows)
+      )[0];
+      if (browserWindow) return browserWindow;
+    }
+
     if (options.allowWindowFallback === false) return null;
 
     const app = KNOWN_APPS[name];
@@ -838,16 +1002,8 @@ class AppController {
       return;
     }
 
-    try {
-      execFileSync('powershell.exe', [
-        '-NoProfile',
-        '-Command',
-        `Start-Sleep -Milliseconds ${duration}`
-      ], {
-        timeout: duration + 1000,
-        stdio: 'ignore'
-      });
-    } catch (err) {}
+    const signal = new Int32Array(new SharedArrayBuffer(4));
+    Atomics.wait(signal, 0, 0, duration);
   }
 
   switchTo(appName) {

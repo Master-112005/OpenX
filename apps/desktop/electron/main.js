@@ -27,6 +27,10 @@ const UNRESPONSIVE_RELOAD_DELAY_MS = 15 * 1000;
 const FATAL_CLEANUP_TIMEOUT_MS = 3000;
 const STABLE_RUNTIME_MS = 2 * 60 * 1000;
 
+if (!app.isPackaged) {
+  app.setPath('userData', path.join(app.getPath('appData'), 'OpenX-Development'));
+}
+
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
   app.quit();
@@ -705,6 +709,9 @@ app.whenReady().then(async () => {
   setupIPC();
   createTray();
   await initializeAssistant();
+  if (!app.isPackaged) {
+    createChatWindow();
+  }
   startStatusPolling();
   stableRuntimeHandle = setTimeout(() => {
     stableRuntimeHandle = null;

@@ -269,7 +269,10 @@ class Assistant extends EventEmitter {
       pending.commandId,
       pending.intentId,
       pending.entities,
-      { source: pending.source || 'confirmation' }
+      {
+        source: pending.source || 'confirmation',
+        originalInput: pending.multiCommand?.confirmedInput || pending.originalInput
+      }
     );
     if (result.success && pending?.multiCommand) {
       return this._continuePendingMultiCommand(pending, result, pending.source || 'chat');
@@ -990,7 +993,10 @@ class Assistant extends EventEmitter {
         pending.commandId,
         pending.intentId,
         pending.entities,
-        { source }
+        {
+          source,
+          originalInput: pending.multiCommand?.confirmedInput || pending.originalInput
+        }
       );
       if (pending.multiCommand) {
         return this._continuePendingMultiCommand(pending, result, source);

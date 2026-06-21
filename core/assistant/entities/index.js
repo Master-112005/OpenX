@@ -4,9 +4,9 @@ const Validator = require('../../shared/index').Validator;
 const { cleanEntityName } = require('../../automation/common/path-utils');
 
 const APP_ALIASES = {
-  'vscode': 'code',
-  'visual studio code': 'code',
-  'vs code': 'code',
+  'vscode': 'vscode',
+  'visual studio code': 'visual studio code',
+  'vs code': 'vs code',
   'chrome': 'chrome',
   'google chrome': 'chrome',
   'firefox': 'firefox',
