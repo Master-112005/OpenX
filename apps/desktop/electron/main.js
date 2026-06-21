@@ -26,6 +26,51 @@ const RENDERER_RESTART_DELAY_MS = 1000;
 const UNRESPONSIVE_RELOAD_DELAY_MS = 15 * 1000;
 const FATAL_CLEANUP_TIMEOUT_MS = 3000;
 const STABLE_RUNTIME_MS = 2 * 60 * 1000;
+
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+  process.exit(0);
+}
+
+app.on('second-instance', () => {
+  if (chatWindow && !chatWindow.isDestroyed()) {
+    if (chatWindow.isMinimized()) chatWindow.restore();
+    chatWindow.show();
+    chatWindow.focus();
+  }
+});
+
+class ChildProcessRegistry {
+  constructor() {
+    this.children = new Set();
+  }
+
+  register(child) {
+    if (!child || !child.pid) return;
+    this.children.add(child);
+  }
+
+  unregister(child) {
+    this.children.delete(child);
+  }
+
+  killAll() {
+    if (process.platform !== 'win32') return;
+    for (const child of this.children) {
+      try {
+        if (child && child.pid) {
+          const { spawnSync } = require('child_process');
+          spawnSync('taskkill', ['/pid', String(child.pid), '/f', '/t'], { stdio: 'ignore' });
+        }
+      } catch (_) {}
+    }
+    this.children.clear();
+  }
+}
+
+const childProcessRegistry = new ChildProcessRegistry();
+
 const mainLogger = new Logger(BASE_CONFIG.logging);
 const crashRecoveryPolicy = new CrashRecoveryPolicy({
   statePath: path.join(BASE_CONFIG.app.dataPaths.runtimeDir, 'crash-recovery.json'),
@@ -466,6 +511,7 @@ async function cleanupRuntime() {
     unresponsiveTimeouts.clear();
     unregisterChatShortcut();
     globalShortcut.unregisterAll();
+    childProcessRegistry.killAll();
     teardownIPC();
     destroyTextToSpeech();
     await destroyAssistantInstance();
@@ -705,4 +751,11 @@ app.on('before-quit', (event) => {
       cleanupFinished = true;
       app.quit();
     });
+});
+
+app.on('will-quit', () => {
+  if (!cleanupFinished) {
+    globalShortcut.unregisterAll();
+    childProcessRegistry.killAll();
+  }
 });

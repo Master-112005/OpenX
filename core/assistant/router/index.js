@@ -2563,7 +2563,8 @@ class ActionRouter {
   }
 
   _resolveExplicitAppOpenIntent(rawText, preparedInput) {
-    const correctedText = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
+    const raw = String(rawText || '').trim();
+    const correctedText = String(preparedInput?.correctedText || raw || '').trim().toLowerCase();
     if (!correctedText || !this._containsActionVerb(correctedText, ['open', 'launch', 'start', 'run'])) {
       return null;
     }
@@ -2605,7 +2606,40 @@ class ActionRouter {
       return null;
     }
 
-    return { intent, confidence: 0.99 };
+    const forceNewWindow = this._hasExplicitNewKeyword(raw, correctedText);
+
+    return {
+      intent,
+      confidence: 0.99,
+      entities: {
+        appName,
+        ...(forceNewWindow ? { forceNewWindow: true } : {})
+      }
+    };
+  }
+
+  _hasExplicitNewKeyword(rawText, correctedText) {
+    const raw = String(rawText || '').trim();
+    const corrected = String(correctedText || '').trim().toLowerCase();
+
+    const newPatterns = [
+      /\bopen\s+(?:a\s+)?new\s+/i,
+      /\blaunch\s+(?:a\s+)?new\s+/i,
+      /\bstart\s+(?:a\s+)?new\s+/i,
+      /\brun\s+(?:a\s+)?new\s+/i,
+      /\bopen\s+another\s+/i,
+      /\blaunch\s+another\s+/i,
+      /\bstart\s+another\s+/i,
+      /\brun\s+another\s+/i
+    ];
+
+    for (const pattern of newPatterns) {
+      if (pattern.test(raw) || pattern.test(corrected)) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   _looksLikeUrlRequest(input) {

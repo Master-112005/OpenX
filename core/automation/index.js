@@ -217,6 +217,7 @@ class AutomationEngine {
   _closeBrowserTab(entities = {}) {
     const requested = Normalizer.normalizeText(entities.browserName || 'browser');
     const tabQuery = Normalizer.normalizeText(entities.tabQuery || '');
+    const selectedTabIndex = entities.selectedTabIndex;
     const browserMap = {
       browser: {
         windowName: 'browser',
@@ -243,34 +244,145 @@ class AutomationEngine {
     const titleTokens = tabQuery
       ? Normalizer.tokenize(tabQuery).filter(token => token.length > 1)
       : target.preferredTitleTokens;
-    if (tabQuery) {
-      return this._closeTargetedBrowserTabs(requested, target, tabQuery, titleTokens);
+
+    if (!tabQuery) {
+      const windowName = target.windowName;
+      const result = this.windows.sendKeys(windowName, '^w', {
+        preferredProcessNames: target.preferredProcessNames,
+        preferredTitleTokens: titleTokens
+      });
+
+      if (!result?.success) {
+        return result;
+      }
+
+      return {
+        success: true,
+        data: {
+          ...result.data,
+          action: 'closeTab',
+          browserName: requested,
+          tabQuery: 'current'
+        }
+      };
     }
 
-    const windowName = tabQuery || target.windowName;
-    const result = this.windows.sendKeys(windowName, '^w', {
-      preferredProcessNames: target.preferredProcessNames,
-      preferredTitleTokens: titleTokens
-    });
+    if (selectedTabIndex !== undefined && selectedTabIndex !== null) {
+      return this._closeSelectedTab(requested, target, tabQuery, selectedTabIndex);
+    }
 
-    if (!result?.success) {
-      if (tabQuery) {
-        return {
-          success: false,
-          error: `Could not find a ${tabQuery} tab in ${requested}`
-        };
+    const listResult = this._listBrowserTabs({ browserName: requested });
+    const allTabs = listResult.success ? listResult.data.tabs : [];
+    const matchedTabs = this._matchTabsByQuery(tabQuery, allTabs);
+
+    if (matchedTabs.length === 0) {
+      const fallbackResult = this._closeTargetedBrowserTabs(requested, target, tabQuery, titleTokens);
+      if (fallbackResult.success) {
+        return fallbackResult;
       }
-      return result;
+      return {
+        success: false,
+        error: fallbackResult.error,
+        needsClarification: fallbackResult.error?.includes('still appears to be active') ? true : undefined,
+        data: {
+          ...fallbackResult.data,
+          action: 'closeTab',
+          browserName: requested,
+          tabQuery,
+          availableTabs: allTabs.slice(0, 10)
+        }
+      };
+    }
+
+    if (matchedTabs.length > 1) {
+      const tabOptions = matchedTabs.slice(0, 8).map((tab, idx) => ({
+        index: idx + 1,
+        title: tab.title,
+        url: tab.url,
+        isActiveTab: tab.isActiveTab,
+        matchScore: tab.matchScore,
+        entities: {
+          selectedTabIndex: idx
+        }
+      }));
+
+      return {
+        success: false,
+        needsClarification: true,
+        error: `I found ${matchedTabs.length} tabs matching "${tabQuery}". Which one should I close?`,
+        data: {
+          clarificationType: 'browser.multipleTabMatch',
+          browserName: requested,
+          tabQuery,
+          matchedTabs: tabOptions
+        }
+      };
+    }
+
+    const matchedTab = matchedTabs[0];
+    const closeResult = this._closeTargetedBrowserTabs(requested, target, matchedTab.title, matchedTab.title.toLowerCase().split(/\s+/));
+
+    if (closeResult.success) {
+      return {
+        success: true,
+        data: {
+          ...closeResult.data,
+          action: 'closeTab',
+          browserName: requested,
+          tabQuery: matchedTab.title,
+          closedTabTitle: matchedTab.title
+        }
+      };
     }
 
     return {
-      success: true,
+      success: false,
+      error: closeResult.error || `Could not close the "${matchedTab.title}" tab in ${requested}`,
       data: {
-        ...result.data,
+        ...closeResult.data,
         action: 'closeTab',
         browserName: requested,
-        tabQuery
+        tabQuery: matchedTab.title,
+        matchedTab,
+        availableTabs: allTabs.slice(0, 10)
       }
+    };
+  }
+
+  _closeSelectedTab(requested, target, originalQuery, selectedIndex) {
+    const listResult = this._listBrowserTabs({ browserName: requested });
+    const allTabs = listResult.success ? listResult.data.tabs : [];
+    const matchedTabs = this._matchTabsByQuery(originalQuery, allTabs);
+
+    if (selectedIndex < 0 || selectedIndex >= matchedTabs.length) {
+      return {
+        success: false,
+        error: `Invalid tab selection. Please choose between 1 and ${matchedTabs.length}.`
+      };
+    }
+
+    const selectedTab = matchedTabs[selectedIndex];
+    const queryTokens = Normalizer.tokenize(selectedTab.title.toLowerCase()).filter(t => t.length > 1);
+
+    const closeResult = this._closeTargetedBrowserTabs(requested, target, selectedTab.title, queryTokens);
+
+    if (closeResult.success) {
+      return {
+        success: true,
+        data: {
+          ...closeResult.data,
+          action: 'closeTab',
+          browserName: requested,
+          tabQuery: selectedTab.title,
+          closedTabTitle: selectedTab.title
+        }
+      };
+    }
+
+    return {
+      success: false,
+      error: `Could not close the "${selectedTab.title}" tab in ${requested}`,
+      data: closeResult.data
     };
   }
 
@@ -286,13 +398,21 @@ class AutomationEngine {
     const windows = typeof this.windows.listWindows === 'function'
       ? this.windows.listWindows()
       : this.windows.session?.listWindows?.() || [];
+
+    const cdpTabs = this._getCdpTabs(requested, processNames);
+    if (cdpTabs.success && cdpTabs.data.tabs.length > 0) {
+      return cdpTabs;
+    }
+
     const tabs = windows
       .filter(window => processNames.includes(Normalizer.normalizeText(window.processName)))
       .map(window => ({
         title: this._cleanBrowserWindowTitle(window.title, window.processName),
         rawTitle: window.title,
         processName: window.processName,
-        handle: window.handle
+        handle: window.handle,
+        windowTitle: window.title,
+        isActiveTab: true
       }))
       .filter(tab => tab.title)
       .slice(0, 12);
@@ -303,9 +423,123 @@ class AutomationEngine {
         browserName: requested,
         count: tabs.length,
         tabs,
-        limitation: 'visible-browser-windows'
+        limitation: cdpTabs.success ? 'cdp-tabs' : 'visible-browser-windows'
       }
     };
+  }
+
+  _getCdpTabs(requested, processNames) {
+    const debugPorts = { chrome: 9222, msedge: 9222, firefox: 9222 };
+    const browserKey = requested === 'browser' ? 'chrome' : requested;
+
+    try {
+      const http = require('http');
+      const tabs = [];
+
+      for (const [browser, port] of Object.entries(debugPorts)) {
+        if (!processNames.includes(browser) && !requested.includes('browser')) {
+          continue;
+        }
+
+        try {
+          const response = this._httpGet(`http://localhost:${port}/json`, 2000);
+          if (response) {
+            const parsed = JSON.parse(response);
+            for (const tab of parsed) {
+              if (tab.type === 'page' && tab.url && !tab.url.startsWith('chrome://') && !tab.url.startsWith('about:')) {
+                tabs.push({
+                  title: tab.title || 'Untitled',
+                  url: tab.url,
+                  rawTitle: tab.title || '',
+                  processName: browser,
+                  id: tab.id,
+                  webSocketDebuggerUrl: tab.webSocketDebuggerUrl,
+                  isActiveTab: tab.active || false
+                });
+              }
+            }
+          }
+        } catch (e) {
+        }
+      }
+
+      if (tabs.length > 0) {
+        return {
+          success: true,
+          data: {
+            browserName: requested,
+            count: tabs.length,
+            tabs,
+            limitation: 'cdp-tabs'
+          }
+        };
+      }
+    } catch (err) {
+    }
+
+    return { success: false };
+  }
+
+  _httpGet(url, timeout) {
+    try {
+      const http = require('http');
+      return new Promise((resolve, reject) => {
+        const req = http.get(url, { timeout }, (res) => {
+          let data = '';
+          res.on('data', chunk => data += chunk);
+          res.on('end', () => resolve(data));
+        });
+        req.on('error', () => resolve(null));
+        req.on('timeout', () => { req.destroy(); resolve(null); });
+      }).catch(() => null);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  _matchTabsByQuery(tabQuery, tabs) {
+    if (!tabQuery || !tabs || tabs.length === 0) {
+      return [];
+    }
+
+    const queryLower = tabQuery.toLowerCase().trim();
+    const queryTokens = Normalizer.tokenize(queryLower).filter(t => t.length > 1);
+
+    const scored = tabs.map(tab => {
+      const titleLower = (tab.title || '').toLowerCase();
+      const urlLower = (tab.url || '').toLowerCase();
+      const rawTitleLower = (tab.rawTitle || '').toLowerCase();
+      let score = 0;
+
+      if (titleLower === queryLower || rawTitleLower === queryLower) {
+        score = 200;
+      } else if (titleLower.includes(queryLower) || rawTitleLower.includes(queryLower)) {
+        score = 150;
+      } else if (urlLower.includes(queryLower)) {
+        score = 130;
+      }
+
+      for (const token of queryTokens) {
+        if (titleLower.includes(token) || rawTitleLower.includes(token)) {
+          score += 40;
+        }
+        if (urlLower.includes(token)) {
+          score += 25;
+        }
+      }
+
+      const titleSimilarity = Normalizer.similarity(queryLower, titleLower);
+      if (titleSimilarity >= 0.5) {
+        score += Math.round(titleSimilarity * 80);
+      }
+
+      return { tab, score };
+    });
+
+    return scored
+      .filter(item => item.score >= 40)
+      .sort((a, b) => b.score - a.score)
+      .map(item => ({ ...item.tab, matchScore: item.score }));
   }
 
   _cleanBrowserWindowTitle(title, processName) {
@@ -315,6 +549,57 @@ class AutomationEngine {
         ? / - Microsoft Edge$/i
         : / - Mozilla Firefox$/i;
     return String(title || '').replace(browserLabel, '').trim();
+  }
+
+  _findCdpTabId(tabTitle, tabs) {
+    const matched = tabs.find(t =>
+      (t.title === tabTitle || t.rawTitle === tabTitle) && t.id
+    );
+    return matched?.id || null;
+  }
+
+  _closeBrowserTabViaCdp(tabId, browser) {
+    const debugPorts = { chrome: 9222, msedge: 9222, firefox: 9222 };
+    const port = debugPorts[browser] || 9222;
+
+    try {
+      const http = require('http');
+      const ws = require('ws') || this._createMinimalWs();
+
+      const getTabs = () => new Promise((resolve) => {
+        const req = http.get(`http://localhost:${port}/json`, { timeout: 2000 }, (res) => {
+          let data = '';
+          res.on('data', chunk => data += chunk);
+          res.on('end', () => {
+            try { resolve(JSON.parse(data)); }
+            catch { resolve([]); }
+          });
+        });
+        req.on('error', () => resolve([]));
+        req.on('timeout', () => { req.destroy(); resolve([]); });
+      });
+
+      return getTabs().then(tabs => {
+        const tab = tabs.find(t => String(t.id) === String(tabId));
+        if (!tab || !tab.webSocketDebuggerUrl) {
+          return { success: false, error: 'Tab not found via CDP' };
+        }
+
+        return { success: true, data: { tabId, title: tab.title, url: tab.url } };
+      });
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
+  }
+
+  _createMinimalWs() {
+    return {
+      WebSocket: class {
+        constructor(url) { this.url = url; }
+        send() {}
+        close() {}
+      }
+    };
   }
 
   _closeTargetedBrowserTabs(requested, target, tabQuery, titleTokens) {
