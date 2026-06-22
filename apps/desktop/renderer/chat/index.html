@@ -124,7 +124,7 @@
               <div>
                 <div class="hero-badge">Local Workspace</div>
                 <div class="hero-name" id="settings-hero-name">JARVIS</div>
-                <div class="hero-role" id="settings-hero-title">Desktop Assistant configured for local automation and contact-aware actions.</div>
+                <div class="hero-role" id="settings-hero-title">Desktop Assistant configured for local automation and direct communication actions.</div>
               </div>
             </div>
             <div class="hero-stats">
@@ -137,8 +137,8 @@
                 <div class="hero-stat-value" id="settings-hero-theme">Midnight</div>
               </div>
               <div class="hero-stat">
-                <div class="hero-stat-label">Contacts</div>
-                <div class="hero-stat-value" id="settings-hero-contacts">0 saved</div>
+                <div class="hero-stat-label">Learning</div>
+                <div class="hero-stat-value" id="settings-hero-learning">Enabled</div>
               </div>
               <div class="hero-stat">
                 <div class="hero-stat-label">Access</div>
@@ -315,78 +315,6 @@
               </div>
             </div>
             <div class="mode-grid" id="mode-grid"></div>
-          </section>
-
-          <section class="settings-section" data-settings-section="contacts" id="settings-section-contacts">
-            <div class="section-heading">Learned Contacts</div>
-            <div class="section-note">Contacts learned by the assistant for reliable calls and messages.</div>
-            <div class="contact-layout">
-              <div class="contact-stage">
-                <div class="contact-stage-header">
-                  <div class="contact-stage-title">Saved Contacts</div>
-                  <div class="contact-stage-tools">
-                    <div class="contact-usage" id="contact-usage">0 / 10 saved</div>
-                    <button class="contact-add-btn" id="contact-add-btn" title="Add contact" type="button">+</button>
-                  </div>
-                </div>
-                <div class="contact-list" id="contact-list"></div>
-              </div>
-
-              <div class="contact-stage contact-editor" id="contact-editor-stage">
-                <div class="contact-stage-header">
-                  <div class="contact-stage-title" id="contact-editor-title">Add Contact</div>
-                </div>
-                <div class="field-grid">
-                  <label class="field-wrap">
-                    <span class="field-label">Name</span>
-                    <input class="field" id="contact-name" type="text">
-                  </label>
-                  <label class="field-wrap">
-                    <span class="field-label">Phone</span>
-                    <input class="field" id="contact-phone" type="text">
-                  </label>
-                </div>
-
-                <div class="field-grid single">
-                  <label class="field-wrap">
-                    <span class="field-label">Aliases</span>
-                    <input class="field" id="contact-aliases" type="text" placeholder="dad, father">
-                  </label>
-                </div>
-
-                <div class="field-grid">
-                  <label class="field-wrap">
-                    <span class="field-label">Preferred Messaging</span>
-                    <select class="field-select" id="contact-message-platform">
-                      <option value="">Default</option>
-                      <option value="whatsapp">whatsapp</option>
-                      <option value="phone">phone</option>
-                    </select>
-                  </label>
-                  <label class="field-wrap">
-                    <span class="field-label">Preferred Call</span>
-                    <select class="field-select" id="contact-call-platform">
-                      <option value="">Default</option>
-                      <option value="whatsapp">whatsapp</option>
-                      <option value="phone">phone</option>
-                    </select>
-                  </label>
-                </div>
-
-                <div class="field-grid single">
-                  <label class="field-wrap">
-                    <span class="field-label">WhatsApp Call URI</span>
-                    <input class="field" id="contact-whatsapp-uri" type="text" placeholder="Optional fallback URI">
-                  </label>
-                </div>
-
-                <div class="contact-actions">
-                  <button class="secondary-btn" id="contact-cancel-btn" type="button">Cancel</button>
-                  <button class="primary-btn" id="contact-save-btn" type="button">Save Contact</button>
-                  <button class="danger-btn" id="contact-delete-btn" type="button">Delete Contact</button>
-                </div>
-              </div>
-            </div>
           </section>
 
           <section class="settings-section" id="settings-footer-section">

@@ -64,7 +64,7 @@ Connected controllers are implemented directly in `core/automation/`:
 - `browser.js`: URLs, searches, site searches, results, and browser tabs.
 - `media.js`: playback, search, pause/resume, track navigation, volume, fullscreen, repeat, shuffle, likes, subscriptions, and status.
 - `scheduler.js`: timers, alarms, and reminders.
-- `communications.js`: message drafts, email drafts, and contact-aware calls.
+- `communications.js`: direct-recipient WhatsApp messages, email drafts, and calls without an assistant address book.
 - `system.js`: CPU, memory, battery, disk, processes, calculations, date/time, system insights, and Bluetooth settings.
 - `windows.js`: minimize, maximize, close, lock, sleep, restart, shutdown, hibernate, and session operations.
 - `volume.js` and `brightness.js`: read and change system levels, mute, and unmute.
@@ -111,7 +111,7 @@ Current plugin packages:
 - `plugins/chrome/`: Chrome-specific pages such as browser history.
 - `plugins/discord/`: Discord application integration.
 - `plugins/forms/`: Google Form and generic form understanding/filling.
-- `plugins/communications/`: contacts and WhatsApp Desktop support.
+- `plugins/communications/`: stateless WhatsApp Desktop support.
 - `plugins/sample_plugin/`: minimal plugin API example.
 
 ## Context and learning
@@ -128,7 +128,7 @@ Runtime data is stored under:
 %USERPROFILE%\OpenX_Data\
 ```
 
-`core/assistant/Data.js` owns the data layout, atomic JSON writes, backups, logging helpers, and migration from the legacy `%USERPROFILE%\.jarvis` location. Settings, contacts, learning state, schedules, logs, media state, screenshots, and runtime files share the same managed root.
+`core/assistant/Data.js` owns the data layout, atomic JSON writes, backups, logging helpers, and migration from the legacy `%USERPROFILE%\.jarvis` location. Settings, learning state, schedules, logs, media state, screenshots, and runtime files share the same managed root. OpenX does not maintain a contact store.
 
 ## Desktop application
 
@@ -138,7 +138,7 @@ The Electron application lives in `apps/desktop/`:
 - `electron/security.js`: trusted renderer checks, payload validation, and secure web preferences.
 - `electron/crash-recovery.js`: bounded renderer restart and crash state.
 - `preload.js`: narrow renderer API bridge.
-- `settings.js`: settings, profiles, themes, modes, and contacts.
+- `settings.js`: settings, profiles, themes, and modes.
 - `permissions.js`: permission levels, throttling, and confirmation requirements.
 - `voice/tts.js`: Windows SAPI text-to-speech output.
 - `renderer/chat/`: primary chat and settings interface.

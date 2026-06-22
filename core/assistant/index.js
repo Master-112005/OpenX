@@ -862,6 +862,9 @@ class Assistant extends EventEmitter {
     if (!this.learning?.enabled || !result) {
       return;
     }
+    if (['message.send', 'email.compose', 'call.start'].includes(result.intent)) {
+      return;
+    }
     if (result.success) {
       const interest = this._extractInterestSignal(input, routedInput, result);
       if (interest) {

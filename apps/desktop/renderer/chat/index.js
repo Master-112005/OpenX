@@ -11,12 +11,6 @@ const settingsSections = document.querySelectorAll('[data-settings-section]');
 const settingsFooterSection = document.getElementById('settings-footer-section');
 const quickBtns = document.querySelectorAll('.chip-btn');
 const themeGrid = document.getElementById('theme-grid');
-const contactListEl = document.getElementById('contact-list');
-const contactUsageEl = document.getElementById('contact-usage');
-const contactAddBtn = document.getElementById('contact-add-btn');
-const contactEditorStage = document.getElementById('contact-editor-stage');
-const contactEditorTitleEl = document.getElementById('contact-editor-title');
-const contactDeleteBtn = document.getElementById('contact-delete-btn');
 const settingsStatusEl = document.getElementById('settings-status');
 const modeGridEl = document.getElementById('mode-grid');
 const modeUsageEl = document.getElementById('mode-usage');
@@ -37,7 +31,6 @@ const alarmMessageEl = document.getElementById('alarm-message');
 const alarmTimeEl = document.getElementById('alarm-time');
 const alarmSymbolEl = document.getElementById('alarm-symbol');
 
-const CONTACT_LIMIT = 10;
 const MODE_LIMIT = 5;
 const MODE_APP_LIMIT = 5;
 const SCHEDULE_STORAGE_KEY = 'openx-ui-schedules-v1';
@@ -50,9 +43,7 @@ let isProcessing = false;
 let pendingConfirmation = null;
 let settingsSnapshot = null;
 let selectedThemeId = 'graphite';
-let selectedContactName = null;
 let activeSettingsSection = null;
-let isContactEditorOpen = false;
 let hasRenderedWelcome = false;
 let modeDrafts = [];
 let selectedModeIndex = 0;
@@ -85,13 +76,7 @@ const fieldIds = {
   profileRole: 'profile-role',
   chatMaxHistory: 'chat-max-history',
   glassTint: 'glass-tint',
-  systemPermissionLevel: 'system-permission-level',
-  contactName: 'contact-name',
-  contactPhone: 'contact-phone',
-  contactAliases: 'contact-aliases',
-  contactMessagePlatform: 'contact-message-platform',
-  contactCallPlatform: 'contact-call-platform',
-  contactWhatsappUri: 'contact-whatsapp-uri'
+  systemPermissionLevel: 'system-permission-level'
 };
 
 function getAssistantDisplayName() {
@@ -839,104 +824,6 @@ function setActiveSettingsSection(sectionName) {
   if (settingsContent) settingsContent.scrollTop = 0;
 }
 
-function setContactEditorOpen(isOpen, mode = 'create') {
-  isContactEditorOpen = Boolean(isOpen);
-  contactEditorStage.classList.toggle('open', isContactEditorOpen);
-  contactEditorTitleEl.textContent = mode === 'edit' ? 'Edit Contact' : 'Add Contact';
-  contactDeleteBtn.style.display = mode === 'edit' ? 'inline-flex' : 'none';
-}
-
-function openNewContactEditor() {
-  const contacts = settingsSnapshot?.contacts || [];
-  if (contacts.length >= CONTACT_LIMIT) {
-    setSettingsStatus(`Contact limit reached. Remove one of the ${CONTACT_LIMIT} saved contacts before adding another.`, 'error');
-    return;
-  }
-
-  setWorkspaceView('activity');
-  selectedContactName = null;
-  setFieldValue(fieldIds.contactName, '');
-  setFieldValue(fieldIds.contactPhone, '');
-  setFieldValue(fieldIds.contactAliases, '');
-  setFieldValue(fieldIds.contactMessagePlatform, '');
-  setFieldValue(fieldIds.contactCallPlatform, '');
-  setFieldValue(fieldIds.contactWhatsappUri, '');
-  setContactEditorOpen(true, 'create');
-  renderContacts();
-  document.getElementById(fieldIds.contactName).focus();
-}
-
-function renderContacts() {
-  const contacts = settingsSnapshot?.contacts || [];
-  contactListEl.replaceChildren();
-  contactUsageEl.textContent = `${contacts.length} / ${CONTACT_LIMIT} saved`;
-  contactAddBtn.disabled = contacts.length >= CONTACT_LIMIT;
-
-  if (contacts.length === 0) {
-    const empty = document.createElement('div');
-    empty.className = 'section-note';
-    empty.textContent = `No contacts saved yet. Press + to add one for ${getAssistantDisplayName()}.`;
-    contactListEl.appendChild(empty);
-    updateSettingsSummary();
-    return;
-  }
-
-  contacts.forEach(contact => {
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.className = 'contact-item';
-    if (selectedContactName && selectedContactName.toLowerCase() === contact.name.toLowerCase()) {
-      button.classList.add('active');
-    }
-    const name = document.createElement('span');
-    name.className = 'contact-name';
-    name.textContent = contact.name;
-    const phone = document.createElement('span');
-    phone.className = 'contact-meta';
-    phone.textContent = contact.phone || 'No phone saved';
-    const aliases = document.createElement('span');
-    aliases.className = 'contact-meta';
-    aliases.textContent = (contact.aliases || []).join(', ') || 'No aliases';
-    button.append(name, phone, aliases);
-    button.addEventListener('click', () => fillContactForm(contact));
-    contactListEl.appendChild(button);
-  });
-
-  if (settingsSnapshot) {
-    updateSettingsSummary();
-  }
-}
-
-function clearContactForm(options = {}) {
-  const shouldOpenEditor = Boolean(options.openEditor);
-  selectedContactName = null;
-  setFieldValue(fieldIds.contactName, '');
-  setFieldValue(fieldIds.contactPhone, '');
-  setFieldValue(fieldIds.contactAliases, '');
-  setFieldValue(fieldIds.contactMessagePlatform, '');
-  setFieldValue(fieldIds.contactCallPlatform, '');
-  setFieldValue(fieldIds.contactWhatsappUri, '');
-  setContactEditorOpen(shouldOpenEditor, 'create');
-  renderContacts();
-}
-
-function populateContactForm(contact, options = {}) {
-  const shouldOpenEditor = options.openEditor !== false;
-  selectedContactName = contact.name;
-  setFieldValue(fieldIds.contactName, contact.name);
-  setFieldValue(fieldIds.contactPhone, contact.phone);
-  setFieldValue(fieldIds.contactAliases, (contact.aliases || []).join(', '));
-  setFieldValue(fieldIds.contactMessagePlatform, contact.preferredMessagingPlatform || '');
-  setFieldValue(fieldIds.contactCallPlatform, contact.preferredCallPlatform || '');
-  setFieldValue(fieldIds.contactWhatsappUri, contact.whatsappCallUri || '');
-  setContactEditorOpen(shouldOpenEditor, 'edit');
-}
-
-function fillContactForm(contact) {
-  populateContactForm(contact, { openEditor: true });
-  renderContacts();
-}
-
 function splitInstructionDraft(value) {
   return String(value || '')
     .split(/[\n,]+/)
@@ -1216,17 +1103,6 @@ function collectSettingsPayload() {
   };
 }
 
-function collectContactPayload() {
-  return {
-    name: document.getElementById(fieldIds.contactName).value.trim(),
-    phone: document.getElementById(fieldIds.contactPhone).value.trim(),
-    aliases: document.getElementById(fieldIds.contactAliases).value.trim(),
-    preferredMessagingPlatform: document.getElementById(fieldIds.contactMessagePlatform).value,
-    preferredCallPlatform: document.getElementById(fieldIds.contactCallPlatform).value,
-    whatsappCallUri: document.getElementById(fieldIds.contactWhatsappUri).value.trim()
-  };
-}
-
 function updateBranding() {
   const assistantName = getAssistantDisplayName();
   const assistantTitle = settingsSnapshot?.settings?.assistant?.title || 'Desktop Assistant';
@@ -1240,13 +1116,11 @@ function updateSettingsSummary() {
   const assistantTitle = settingsSnapshot?.settings?.assistant?.title || 'Desktop Assistant';
   const theme = (settingsSnapshot?.availableThemes || []).find(entry => entry.id === selectedThemeId)
     || (settingsSnapshot?.availableThemes || [])[0];
-  const contactCount = settingsSnapshot?.contacts?.length || 0;
-
   document.getElementById('settings-hero-name').textContent = assistantName;
-  document.getElementById('settings-hero-title').textContent = `${assistantTitle} configured for local automation, chat hotkey (${getActivationShortcut()}), profile storage, and contact-aware actions.`;
+  document.getElementById('settings-hero-title').textContent = `${assistantTitle} configured for local automation, chat hotkey (${getActivationShortcut()}), profile storage, and direct communication actions.`;
   document.getElementById('settings-hero-honorific').textContent = settingsSnapshot?.settings?.assistant?.honorific || 'sir';
   document.getElementById('settings-hero-theme').textContent = theme?.label || 'Theme';
-  document.getElementById('settings-hero-contacts').textContent = `${contactCount} / ${CONTACT_LIMIT}`;
+  document.getElementById('settings-hero-learning').textContent = settingsSnapshot?.settings?.activeLearning?.enabled === false ? 'Disabled' : 'Enabled';
   document.getElementById('settings-hero-permission').textContent = settingsSnapshot?.settings?.system?.permissionLevel || 'medium';
 }
 
@@ -1275,24 +1149,14 @@ function setSettingsStatus(message, tone = 'info') {
 
 function applySnapshot(snapshot) {
   settingsSnapshot = snapshot;
-  const selectedContact = settingsSnapshot?.contacts?.find(contact => (
-    selectedContactName && contact.name.toLowerCase() === selectedContactName.toLowerCase()
-  ));
-  if (selectedContact) {
-    populateContactForm(selectedContact, { openEditor: isContactEditorOpen });
-  } else if (!isContactEditorOpen) {
-    clearContactForm();
-  }
   updateBranding();
   populateSettingsForm();
-  renderContacts();
   updateSettingsSummary();
   ensureWelcomeMessage();
 }
 
 function openSettingsPanel() {
   setActiveSettingsSection(activeSettingsSection || 'identity');
-  setContactEditorOpen(false, selectedContactName ? 'edit' : 'create');
   settingsOverlay.classList.add('open');
   setSettingsStatus('Settings are stored locally on this machine.', 'info');
 }
@@ -1310,18 +1174,11 @@ function initializeCompactSettingsLayout() {
   const panelHeader = document.querySelector('.panel-header');
   const panelActions = settingsFooterSection.querySelector('.panel-actions');
   const resetButton = document.getElementById('settings-reset-btn');
-  const contactSection = document.getElementById('settings-section-contacts');
-  const activityScroll = document.querySelector('.activity-scroll');
-
   resetButton.textContent = 'Reset';
   panelActions.classList.add('settings-header-actions');
   panelHeader.insertBefore(panelActions, settingsCloseBtn);
   settingsFooterSection.remove();
 
-  contactSection.className = 'activity-section learning-contacts-section';
-  contactSection.removeAttribute('data-settings-section');
-  contactSection.setAttribute('aria-label', 'Active learning contacts');
-  activityScroll.appendChild(contactSection);
 }
 
 async function saveSettings() {
@@ -1340,57 +1197,11 @@ async function resetSettings() {
   try {
     setSettingsStatus('Resetting settings...', 'info');
     const snapshot = await window.jarvis.resetSettings();
-    selectedContactName = null;
     setActiveSettingsSection(null);
     applySnapshot(snapshot);
-    clearContactForm();
     setSettingsStatus('Settings reset to defaults.', 'success');
   } catch (err) {
     setSettingsStatus('Unable to reset settings.', 'error');
-  }
-}
-
-async function saveContact() {
-  const payload = collectContactPayload();
-  if (!payload.name) {
-    setSettingsStatus('Contact name is required.', 'error');
-    showToast('Name required', 'Add a name before saving this contact.', 'warning');
-    return;
-  }
-
-  try {
-    setSettingsStatus(`Saving contact ${payload.name}...`, 'info');
-    const contacts = await window.jarvis.saveContact(payload);
-    settingsSnapshot.contacts = contacts;
-    selectedContactName = payload.name;
-    renderContacts();
-    fillContactForm(contacts.find(contact => contact.name.toLowerCase() === payload.name.toLowerCase()) || payload);
-    setSettingsStatus(`Contact ${payload.name} saved.`, 'success');
-    showToast('Contact learned', `${payload.name} is now available for calls and messages.`, 'success');
-  } catch (err) {
-    setSettingsStatus(err?.message || 'Unable to save contact.', 'error');
-    showToast('Contact not saved', err?.message || 'Check the contact details and try again.', 'error');
-  }
-}
-
-async function deleteContact() {
-  const name = document.getElementById(fieldIds.contactName).value.trim() || selectedContactName;
-  if (!name) {
-    setSettingsStatus('Select a contact before deleting it.', 'error');
-    showToast('Select a contact', 'Choose a learned contact before removing it.', 'warning');
-    return;
-  }
-
-  try {
-    setSettingsStatus(`Deleting contact ${name}...`, 'info');
-    const contacts = await window.jarvis.deleteContact(name);
-    settingsSnapshot.contacts = contacts;
-    clearContactForm();
-    setSettingsStatus(`Contact ${name} deleted.`, 'success');
-    showToast('Contact removed', `${name} was removed from learned contacts.`, 'info');
-  } catch (err) {
-    setSettingsStatus(err?.message || 'Unable to delete contact.', 'error');
-    showToast('Contact not removed', err?.message || 'Try again.', 'error');
   }
 }
 
@@ -1447,9 +1258,6 @@ settingsNavButtons.forEach(button => {
   button.addEventListener('click', () => {
     const sectionName = button.dataset.sectionTarget;
     setActiveSettingsSection(sectionName);
-    if (sectionName !== 'contacts') {
-      setContactEditorOpen(false, selectedContactName ? 'edit' : 'create');
-    }
   });
 });
 document.getElementById('settings-save-btn').addEventListener('click', saveSettings);
@@ -1465,11 +1273,6 @@ modeAddBtn.addEventListener('click', () => {
   renderModeEditor();
   setActiveSettingsSection('modes');
 });
-contactAddBtn.addEventListener('click', openNewContactEditor);
-document.getElementById('contact-save-btn').addEventListener('click', saveContact);
-document.getElementById('contact-delete-btn').addEventListener('click', deleteContact);
-document.getElementById('contact-cancel-btn').addEventListener('click', () => clearContactForm());
-
 settingsOverlay.addEventListener('click', (event) => {
   if (event.target === settingsOverlay) {
     closeSettingsPanel();
@@ -1500,8 +1303,7 @@ async function initialize() {
         user: { profile: {} },
         modes: []
       },
-      availableThemes: [],
-      contacts: []
+      availableThemes: []
     };
     updateBranding();
     ensureWelcomeMessage();

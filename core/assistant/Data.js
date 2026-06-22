@@ -26,7 +26,6 @@ function buildDataPaths(config = {}) {
   return {
     root,
     settingsPath: path.join(root, 'settings.json'),
-    contactsPath: path.join(root, 'contacts.json'),
     learningPath: path.join(root, 'learning.json'),
     logsDir: path.join(root, 'logs'),
     runtimeDir,
@@ -142,6 +141,23 @@ function readJsonFile(filePath, fallbackValue = {}, options = {}) {
   }
 }
 
+function purgeDeprecatedContactStorage(root) {
+  const sourceRoot = String(root || '').trim();
+  if (!sourceRoot) return [];
+  const resolvedRoot = path.resolve(sourceRoot);
+  if (!fs.existsSync(resolvedRoot)) return [];
+
+  const removed = [];
+  for (const name of fs.readdirSync(resolvedRoot)) {
+    if (!/^contacts\.json(?:\.bak|\.corrupt-.+)?$|^\.contacts\.json\..+\.tmp$/i.test(name)) continue;
+    const target = path.resolve(resolvedRoot, name);
+    if (path.dirname(target) !== resolvedRoot) continue;
+    fs.unlinkSync(target);
+    removed.push(target);
+  }
+  return removed;
+}
+
 function ensureDataRoot(config = {}) {
   const paths = buildDataPaths(config);
   [
@@ -151,6 +167,7 @@ function ensureDataRoot(config = {}) {
     paths.cacheDir,
     paths.mediaProfileDir
   ].forEach(ensureDirectory);
+  purgeDeprecatedContactStorage(paths.root);
   return paths;
 }
 
@@ -185,8 +202,9 @@ function migrateLegacyData(config = {}) {
     return { dataRoot: paths.root, legacyRoot, migrated, skipped };
   }
 
+  purgeDeprecatedContactStorage(legacyRoot);
+
   copyFileIfMissing(path.join(legacyRoot, 'settings.json'), paths.settingsPath, migrated, skipped);
-  copyFileIfMissing(path.join(legacyRoot, 'contacts.json'), paths.contactsPath, migrated, skipped);
   copyFileIfMissing(path.join(legacyRoot, 'learning.json'), paths.learningPath, migrated, skipped);
 
   return { dataRoot: paths.root, legacyRoot, migrated, skipped };
@@ -199,6 +217,7 @@ return {
   resolveLegacyDataRoot,
   buildDataPaths,
   ensureDataRoot,
+  purgeDeprecatedContactStorage,
   readJsonFile,
   writeFileAtomic,
   writeJsonAtomic,

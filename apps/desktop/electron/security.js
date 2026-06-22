@@ -99,15 +99,6 @@ function validateSettings(payload) {
   return validateStructuredPayload(payload, 'settings', 256 * 1024);
 }
 
-function validateContact(payload) {
-  return validateStructuredPayload(payload, 'contact', 32 * 1024);
-}
-
-function validateContactDelete(payload) {
-  requirePlainObject(payload);
-  return { name: requireString(payload.name, 'name', { maxLength: 200 }) };
-}
-
 function validateScheduleAction(payload) {
   requirePlainObject(payload);
   const id = requireString(payload.id, 'id', { maxLength: 200 });
@@ -134,9 +125,6 @@ const IPC_VALIDATORS = Object.freeze({
   'settings:get': validateEmpty,
   'settings:save': validateSettings,
   'settings:reset': validateEmpty,
-  'contacts:list': validateEmpty,
-  'contacts:save': validateContact,
-  'contacts:delete': validateContactDelete,
   'schedule:alertAction': validateScheduleAction,
   'app:quit': validateEmpty
 });

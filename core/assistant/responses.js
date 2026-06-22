@@ -148,9 +148,8 @@ function humanizeError(error) {
   if (lowered.includes('reminder text is required')) return 'I need to know what you want to be reminded about';
   if (lowered.includes('could not schedule')) return 'I could not schedule that right now';
   if (lowered.includes('no form fields or form text')) return 'I can fill forms from your saved details, but I need the active form fields or form text first';
-  if (lowered.includes('contact not found')) return 'I could not find that contact in the assistant contact book';
-  if (lowered.includes('contact does not have a phone number')) return 'That contact does not have a phone number saved';
-  if (lowered.includes('contact does not have an email address')) return 'I found the contact, but there is no email address saved for them';
+  if (lowered.includes('provide a phone number directly')) return 'I need the phone number in the command before I can place a standard call';
+  if (lowered.includes('provide an email address directly')) return 'I need the email address in the command before I can prepare that draft';
   if (lowered.includes('email draft needs')) return message;
   if (lowered.includes('messaging platform not supported')) return 'That messaging platform is not supported yet';
   if (lowered.includes('direct whatsapp calling is not supported')) return 'Direct WhatsApp calling is not available through this assistant yet';

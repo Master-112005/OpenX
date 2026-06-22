@@ -28,7 +28,6 @@ const CONFIG = {
     displayName: 'JARVIS',
     title: 'Desktop Assistant',
     honorific: 'sir',
-    contactsPath: DATA_PATHS.contactsPath,
     userProfile: {
       fullName: '',
       email: '',

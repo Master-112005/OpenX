@@ -228,4 +228,29 @@ describe('Active Learning Store', function() {
     assert.equal(snapshot.feedback[0].verification.status, 'failed');
     assert.equal(snapshot.mistakes[0].verification.check, 'file-exists');
   });
+
+  it('should not persist communication recipients in active-learning records', function() {
+    const { tempDir, store } = createStore();
+
+    assert.equal(store.recordRoutingEvidence({
+      input: 'message daddy saying hello',
+      intent: 'message.send',
+      success: true
+    }), null);
+    assert.equal(store.recordFeedback({
+      input: 'email rakesh@example.com',
+      intent: 'email.compose',
+      success: false
+    }), null);
+    assert.equal(store.learnFromMultiCommand(
+      'open whatsapp and call daddy',
+      ['app.open', 'call.start']
+    ), null);
+
+    store.flush();
+    const persisted = JSON.parse(fs.readFileSync(path.join(tempDir, 'learning.json'), 'utf8'));
+    assert.deepEqual(persisted.routingEvidence, []);
+    assert.deepEqual(persisted.feedback, []);
+    assert.deepEqual(persisted.commandSequences, {});
+  });
 });

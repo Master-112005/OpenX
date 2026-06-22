@@ -38,11 +38,12 @@ describe('Chat Renderer UI', function() {
     assert.match(script, /if \(!isAssistantMuted && spokenText/);
   });
 
-  it('should keep settings compact and move contacts into active learning', function() {
+  it('should keep settings compact without contact-storage controls', function() {
     assert.doesNotMatch(html, /id="minimize-btn"/);
     assert.doesNotMatch(html, /data-section-target="contacts"/);
     assert.match(script, /initializeCompactSettingsLayout/);
-    assert.match(script, /Active learning contacts/);
+    assert.doesNotMatch(html, /settings-section-contacts|contact-save-btn|contact-delete-btn/);
+    assert.doesNotMatch(script, /saveContact|deleteContact|renderContacts/);
     assert.match(glassCss, /Compact in-window settings/);
     assert.match(glassCss, /#settings-overlay\.open/);
   });

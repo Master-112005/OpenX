@@ -9,6 +9,12 @@ const MAX_PROMPTS = 100;
 const MAX_ROUTE_EVIDENCE = 200;
 const MAX_PREFERENCES = 100;
 const MAX_USER_FACTS = 150;
+const PRIVATE_COMMUNICATION_INTENTS = new Set(['message.send', 'email.compose', 'call.start']);
+
+function containsPrivateCommunicationIntent(intentOrList) {
+  const intents = Array.isArray(intentOrList) ? intentOrList : [intentOrList];
+  return intents.some(intent => PRIVATE_COMMUNICATION_INTENTS.has(String(intent || '').trim()));
+}
 const ACCOUNT_SERVICES = [
   'apple',
   'microsoft',
@@ -151,8 +157,9 @@ class ActiveLearningStore {
     this.saveDelayMs = Number(config?.activeLearning?.saveDelayMs || 250);
     this.pendingSaveTimer = null;
     this.storePath = config?.activeLearning?.storePath || buildDataPaths(config).learningPath;
-    this.data = this._sanitize(this._load());
-    if (this._purgeProtectedUserFacts()) {
+    const loadedData = this._load();
+    this.data = this._sanitize(loadedData);
+    if (this._purgeProtectedUserFacts() || this._containsPrivateCommunicationRecords(loadedData)) {
       this._writeNow();
     }
   }
@@ -324,6 +331,9 @@ class ActiveLearningStore {
 
   learnFromMultiCommand(input, commands) {
     if (!this.enabled || !Array.isArray(commands) || commands.length < 2) {
+      return null;
+    }
+    if (containsPrivateCommunicationIntent(commands)) {
       return null;
     }
 
@@ -601,7 +611,7 @@ class ActiveLearningStore {
   }
 
   recordFeedback(entry) {
-    if (!this.enabled) {
+    if (!this.enabled || containsPrivateCommunicationIntent(entry?.intent)) {
       return null;
     }
 
@@ -632,7 +642,7 @@ class ActiveLearningStore {
   }
 
   recordRoutingEvidence(entry = {}) {
-    if (!this.enabled) {
+    if (!this.enabled || containsPrivateCommunicationIntent(entry.intent)) {
       return null;
     }
 
@@ -675,6 +685,9 @@ class ActiveLearningStore {
 
   buildFeedbackKey(entry = {}) {
     const intent = String(entry.intent || '').trim();
+    if (containsPrivateCommunicationIntent(intent)) {
+      return '';
+    }
     const entities = isPlainObject(entry.entities) ? entry.entities : {};
     const target = [
       entities.appName,
@@ -684,7 +697,6 @@ class ActiveLearningStore {
       entities.windowName,
       entities.query,
       entities.mediaQuery,
-      entities.contactName,
       entities.platform,
       entities.target,
       entities.queryApp
@@ -1194,6 +1206,16 @@ class ActiveLearningStore {
     return records;
   }
 
+  _containsPrivateCommunicationRecords(source) {
+    if (!isPlainObject(source)) return false;
+    const lists = ['feedback', 'mistakes', 'feedbackPrompts', 'routingEvidence'];
+    if (lists.some(key => Array.isArray(source[key]) && source[key].some(entry => containsPrivateCommunicationIntent(entry?.intent)))) {
+      return true;
+    }
+    return Object.values(isPlainObject(source.commandSequences) ? source.commandSequences : {})
+      .some(entry => containsPrivateCommunicationIntent(entry?.sequence));
+  }
+
   _sanitize(input) {
     const source = isPlainObject(input) ? input : {};
     const preferences = this._pruneRecordObject(
@@ -1209,11 +1231,13 @@ class ActiveLearningStore {
       preferences,
       userFacts,
       commandRewrites: Array.isArray(source.commandRewrites) ? source.commandRewrites.slice(0, MAX_REWRITES) : [],
-      feedback: Array.isArray(source.feedback) ? source.feedback.slice(0, MAX_EVENTS) : [],
-      mistakes: Array.isArray(source.mistakes) ? source.mistakes.slice(0, MAX_EVENTS) : [],
-      feedbackPrompts: Array.isArray(source.feedbackPrompts) ? source.feedbackPrompts.slice(0, MAX_PROMPTS) : [],
-      routingEvidence: Array.isArray(source.routingEvidence) ? source.routingEvidence.slice(0, MAX_ROUTE_EVIDENCE) : [],
-      commandSequences: isPlainObject(source.commandSequences) ? source.commandSequences : {}
+      feedback: Array.isArray(source.feedback) ? source.feedback.filter(entry => !containsPrivateCommunicationIntent(entry?.intent)).slice(0, MAX_EVENTS) : [],
+      mistakes: Array.isArray(source.mistakes) ? source.mistakes.filter(entry => !containsPrivateCommunicationIntent(entry?.intent)).slice(0, MAX_EVENTS) : [],
+      feedbackPrompts: Array.isArray(source.feedbackPrompts) ? source.feedbackPrompts.filter(entry => !containsPrivateCommunicationIntent(entry?.intent)).slice(0, MAX_PROMPTS) : [],
+      routingEvidence: Array.isArray(source.routingEvidence) ? source.routingEvidence.filter(entry => !containsPrivateCommunicationIntent(entry?.intent)).slice(0, MAX_ROUTE_EVIDENCE) : [],
+      commandSequences: isPlainObject(source.commandSequences)
+        ? Object.fromEntries(Object.entries(source.commandSequences).filter(([, entry]) => !containsPrivateCommunicationIntent(entry?.sequence)))
+        : {}
     };
   }
 }

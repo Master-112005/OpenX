@@ -1,7 +1,4 @@
 const assert = require('assert');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
 
 describe('Communications Controller', function() {
   let CommunicationsController;
@@ -10,196 +7,120 @@ describe('Communications Controller', function() {
     CommunicationsController = require('../../core/automation/communications');
   });
 
-  function createController(contacts) {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-communications-'));
-    const contactsPath = path.join(tempDir, 'contacts.json');
-    fs.writeFileSync(contactsPath, JSON.stringify(contacts, null, 2), 'utf8');
-    const controller = new CommunicationsController({
-      assistant: { contactsPath }
-    });
-    return { controller, contactsPath, tempDir };
+  function createController() {
+    return new CommunicationsController({});
   }
 
-  it('should prepare a whatsapp message draft for a saved contact', async function() {
-    const { controller } = createController({
-      daddy: { phone: '+919876543210', aliases: ['dad'] }
-    });
-    controller.whatsAppDesktop.sendMessage = async (contactName, messageText) => ({
-      success: false,
-      error: 'desktop unavailable',
-      data: { contactName, messageText }
-    });
-    controller.browser.open = (url) => ({ success: true, data: { url } });
-
-    const result = await controller.composeMessage('daddy', 'hi', 'whatsapp');
-
-    assert.equal(result.success, true);
-    assert.equal(result.data.contactName, 'daddy');
-    assert.equal(result.data.platform, 'whatsapp');
-    assert.equal(result.data.url, 'https://wa.me/919876543210?text=hi');
-    assert.equal(result.data.delivery, 'draft');
-  });
-
-  it('should start a phone call for a saved contact', async function() {
-    const { controller } = createController({
-      bunty: { phone: '+911234567890' }
-    });
-    let launchedUri = null;
-    controller._launchUri = (uri) => {
-      launchedUri = uri;
-    };
-
-    const result = await controller.startCall('bunty', 'phone');
-
-    assert.equal(result.success, true);
-    assert.equal(result.data.contactName, 'bunty');
-    assert.equal(launchedUri, 'tel:+911234567890');
-  });
-
-  it('should fail clearly when the contact is missing', async function() {
-    const { controller, contactsPath } = createController({});
-    controller.whatsAppDesktop.sendMessage = async () => ({
-      success: false,
-      error: 'desktop unavailable'
-    });
-    const result = await controller.composeMessage('unknown', 'hello', 'whatsapp');
-
-    assert.equal(result.success, false);
-    assert.ok(result.error.includes('Contact not found'));
-    assert.ok(result.error.includes(contactsPath));
-  });
-
-  it('should send a whatsapp desktop message when the contact book is empty', async function() {
-    const { controller } = createController({});
+  it('should send a WhatsApp desktop message using the supplied chat name', async function() {
+    const controller = createController();
     let captured = null;
     controller.whatsAppDesktop.sendMessage = async (contactName, messageText) => {
       captured = { contactName, messageText };
-      return {
-        success: true,
-        data: {
-          contactName,
-          messageText,
-          platform: 'whatsapp',
-          delivery: 'sent',
-          transport: 'whatsapp-desktop'
-        }
-      };
+      return { success: true, data: { contactName, messageText, platform: 'whatsapp', delivery: 'sent' } };
     };
 
     const result = await controller.composeMessage('daddy', 'call me', 'whatsapp');
 
     assert.equal(result.success, true);
     assert.deepEqual(captured, { contactName: 'daddy', messageText: 'call me' });
-    assert.equal(result.data.delivery, 'sent');
+  });
+
+  it('should fall back to a wa.me draft when a phone number is supplied directly', async function() {
+    const controller = createController();
+    controller.whatsAppDesktop.sendMessage = async () => ({ success: false, error: 'desktop unavailable' });
+    controller.browser.open = url => ({ success: true, data: { url } });
+
+    const result = await controller.composeMessage('+91 98765 43210', 'hi', 'whatsapp');
+
+    assert.equal(result.success, true);
+    assert.equal(result.data.phone, '+919876543210');
+    assert.equal(result.data.url, 'https://wa.me/919876543210?text=hi');
+  });
+
+  it('should return the desktop failure for an unavailable named chat', async function() {
+    const controller = createController();
+    controller.whatsAppDesktop.sendMessage = async () => ({ success: false, error: 'desktop unavailable' });
+
+    const result = await controller.composeMessage('unknown', 'hello', 'whatsapp');
+
+    assert.equal(result.success, false);
+    assert.equal(result.error, 'desktop unavailable');
   });
 
   it('should clean file-send phrases into a shareable file path message', async function() {
-    const { controller } = createController({});
-    controller.files.search = () => ({
-      success: true,
-      data: { results: ['C:\\Users\\rakes\\Desktop\\report.pdf'] }
-    });
+    const controller = createController();
+    controller.files.search = () => ({ success: true, data: { results: ['C:\\Users\\rakes\\Desktop\\report.pdf'] } });
     let captured = null;
     controller.whatsAppDesktop.sendMessage = async (contactName, messageText) => {
       captured = { contactName, messageText };
-      return {
-        success: true,
-        data: {
-          contactName,
-          messageText,
-          platform: 'whatsapp',
-          delivery: 'sent',
-          transport: 'whatsapp-desktop'
-        }
-      };
+      return { success: true, data: { contactName, messageText } };
     };
 
-    const result = await controller.composeMessage('mummy', 'file report.pdf', 'whatsapp');
+    await controller.composeMessage('mummy', 'file report.pdf', 'whatsapp');
 
-    assert.equal(result.success, true);
     assert.deepEqual(captured, {
       contactName: 'mummy',
       messageText: 'File path: C:\\Users\\rakes\\Desktop\\report.pdf'
     });
   });
 
-  it('should start a whatsapp desktop call when the contact book is empty', async function() {
-    const { controller } = createController({});
+  it('should start a WhatsApp desktop call using the supplied chat name', async function() {
+    const controller = createController();
     let captured = null;
-    controller.whatsAppDesktop.startVoiceCall = async (contactName) => {
+    controller.whatsAppDesktop.startVoiceCall = async contactName => {
       captured = contactName;
-      return {
-        success: true,
-        data: {
-          contactName,
-          platform: 'whatsapp',
-          transport: 'whatsapp-desktop'
-        }
-      };
+      return { success: true, data: { contactName, platform: 'whatsapp' } };
     };
 
     const result = await controller.startCall('daddy');
 
     assert.equal(result.success, true);
     assert.equal(captured, 'daddy');
-    assert.equal(result.data.platform, 'whatsapp');
   });
 
-  it('should fall back to stored whatsapp call uri when desktop automation fails', async function() {
-    const { controller } = createController({
-      daddy: {
-        phone: '+919876543210',
-        whatsappCallUri: 'whatsapp://call?phone=919876543210'
-      }
-    });
-    controller.whatsAppDesktop.startVoiceCall = async () => ({
-      success: false,
-      error: 'desktop unavailable'
-    });
-
+  it('should start a standard call when a phone number is supplied directly', async function() {
+    const controller = createController();
     let launchedUri = null;
-    controller._launchUri = (uri) => {
-      launchedUri = uri;
-    };
+    controller._launchUri = uri => { launchedUri = uri; };
 
-    const result = await controller.startCall('daddy', 'whatsapp');
+    const result = await controller.startCall('+91 12345 67890', 'phone');
 
     assert.equal(result.success, true);
-    assert.equal(launchedUri, 'whatsapp://call?phone=919876543210');
+    assert.equal(result.data.phone, '+911234567890');
+    assert.equal(launchedUri, 'tel:+911234567890');
   });
 
-  it('should ask for subject and message when preparing an email with only a contact', async function() {
-    const { controller } = createController({
-      rakesh: { email: 'rakesh@example.com', aliases: ['rakes'] }
-    });
-    let launchedUri = null;
-    controller._launchUri = (uri) => {
-      launchedUri = uri;
-    };
+  it('should require a direct phone number for standard calls', async function() {
+    const controller = createController();
+    const result = await controller.startCall('daddy', 'phone');
+    assert.equal(result.success, false);
+    assert.match(result.error, /phone number directly/i);
+  });
 
-    const result = await controller.composeEmail('rakes', '', '');
-
+  it('should request missing email draft details for a supplied address', async function() {
+    const controller = createController();
+    const result = await controller.composeEmail('rakesh@example.com', '', '');
     assert.equal(result.success, true);
     assert.equal(result.data.needsDetails, true);
-    assert.equal(result.data.contactName, 'rakesh');
     assert.equal(result.data.email, 'rakesh@example.com');
-    assert.equal(launchedUri, null);
   });
 
-  it('should prepare a mailto draft for a saved email contact', async function() {
-    const { controller } = createController({
-      rakesh: { email: 'rakesh@example.com' }
-    });
+  it('should prepare a mailto draft from a supplied email address', async function() {
+    const controller = createController();
     let launchedUri = null;
-    controller._launchUri = (uri) => {
-      launchedUri = uri;
-    };
+    controller._launchUri = uri => { launchedUri = uri; };
 
-    const result = await controller.composeEmail('rakesh', 'Project update', 'The build passed.');
+    const result = await controller.composeEmail('rakesh@example.com', 'Project update', 'The build passed.');
 
     assert.equal(result.success, true);
     assert.equal(result.data.delivery, 'draft');
-    assert.equal(result.data.email, 'rakesh@example.com');
     assert.equal(launchedUri, 'mailto:rakesh%40example.com?subject=Project+update&body=The+build+passed.');
+  });
+
+  it('should reject an email recipient name without storing or resolving it', async function() {
+    const controller = createController();
+    const result = await controller.composeEmail('rakesh', 'Hello', 'Test');
+    assert.equal(result.success, false);
+    assert.match(result.error, /email address directly/i);
   });
 });

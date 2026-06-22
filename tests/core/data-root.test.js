@@ -15,7 +15,6 @@ describe('Assistant Data Root', function() {
 
     assert.equal(path.basename(paths.root), 'OpenX_Data');
     assert.equal(paths.settingsPath, path.join(paths.root, 'settings.json'));
-    assert.equal(paths.contactsPath, path.join(paths.root, 'contacts.json'));
     assert.equal(paths.learningPath, path.join(paths.root, 'learning.json'));
     assert.equal(paths.logsDir, path.join(paths.root, 'logs'));
     assert.equal(paths.mediaProfileDir, path.join(paths.root, 'runtime', 'chrome-media-profile'));
@@ -33,11 +32,21 @@ describe('Assistant Data Root', function() {
     assert.ok(fs.existsSync(paths.mediaProfileDir));
   });
 
+  it('should purge deprecated contact-store files from managed data', function() {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openx-contact-purge-'));
+    fs.writeFileSync(path.join(tempDir, 'contacts.json'), '{"old":true}', 'utf8');
+    fs.writeFileSync(path.join(tempDir, 'contacts.json.bak'), '{"old":true}', 'utf8');
+
+    dataRoot.ensureDataRoot({ app: { dataDir: tempDir } });
+
+    assert.equal(fs.existsSync(path.join(tempDir, 'contacts.json')), false);
+    assert.equal(fs.existsSync(path.join(tempDir, 'contacts.json.bak')), false);
+  });
+
   it('should copy legacy assistant files into the managed data root without overwriting', function() {
     const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openx-data-new-'));
     const legacyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openx-data-legacy-'));
     fs.writeFileSync(path.join(legacyDir, 'settings.json'), '{"assistant":{"displayName":"Old"}}', 'utf8');
-    fs.writeFileSync(path.join(legacyDir, 'contacts.json'), '{"dad":{"phone":"1234567"}}', 'utf8');
     fs.writeFileSync(path.join(legacyDir, 'learning.json'), '{"version":1}', 'utf8');
 
     const result = dataRoot.migrateLegacyData({
@@ -48,9 +57,8 @@ describe('Assistant Data Root', function() {
       }
     });
 
-    assert.equal(result.migrated.length, 3);
+    assert.equal(result.migrated.length, 2);
     assert.ok(fs.existsSync(path.join(dataDir, 'settings.json')));
-    assert.ok(fs.existsSync(path.join(dataDir, 'contacts.json')));
     assert.ok(fs.existsSync(path.join(dataDir, 'learning.json')));
 
     fs.writeFileSync(path.join(legacyDir, 'settings.json'), '{"assistant":{"displayName":"Changed"}}', 'utf8');
@@ -83,13 +91,13 @@ describe('Assistant Data Root', function() {
 
   it('should quarantine corrupt JSON and recreate a fallback when no backup can be used', function() {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openx-json-fallback-'));
-    const filePath = path.join(tempDir, 'contacts.json');
+    const filePath = path.join(tempDir, 'state.json');
 
     fs.writeFileSync(filePath, '{bad json', 'utf8');
-    const recovered = dataRoot.readJsonFile(filePath, { contacts: [] });
+    const recovered = dataRoot.readJsonFile(filePath, { items: [] });
 
-    assert.deepEqual(recovered, { contacts: [] });
-    assert.deepEqual(JSON.parse(fs.readFileSync(filePath, 'utf8')), { contacts: [] });
-    assert.ok(fs.readdirSync(tempDir).some(name => /^contacts\.json\.corrupt-/.test(name)));
+    assert.deepEqual(recovered, { items: [] });
+    assert.deepEqual(JSON.parse(fs.readFileSync(filePath, 'utf8')), { items: [] });
+    assert.ok(fs.readdirSync(tempDir).some(name => /^state\.json\.corrupt-/.test(name)));
   });
 });

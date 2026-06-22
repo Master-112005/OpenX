@@ -21,7 +21,6 @@ describe('Settings Service', function() {
         displayName: 'JARVIS',
         title: 'Desktop Assistant',
         honorific: 'sir',
-        contactsPath: path.join(tempDir, 'contacts.json'),
         userProfile: {}
       },
       voice: {
@@ -43,13 +42,12 @@ describe('Settings Service', function() {
 
     return {
       service: new SettingsService(config),
-      tempDir,
-      contactsPath: config.assistant.contactsPath
+      tempDir
     };
   }
 
   it('should expose default settings and themes', function() {
-    const { service, tempDir, contactsPath } = createService();
+    const { service, tempDir } = createService();
     const snapshot = service.getSnapshot();
 
     assert.equal(snapshot.settings.assistant.displayName, 'JARVIS');
@@ -58,7 +56,6 @@ describe('Settings Service', function() {
     assert.equal(snapshot.dataRoot, tempDir);
     assert.equal(snapshot.dataPaths.settingsPath, path.join(tempDir, 'settings.json'));
     assert.equal(snapshot.dataPaths.learningPath, path.join(tempDir, 'learning.json'));
-    assert.equal(snapshot.contactsPath, contactsPath);
     assert.ok(Array.isArray(snapshot.availableThemes));
     assert.deepEqual(snapshot.availableThemes.map(theme => theme.id), ['graphite', 'white-glass', 'black-glass']);
   });
@@ -201,48 +198,6 @@ describe('Settings Service', function() {
 
     assert.equal(saved.voice.tts.rate, 2);
     assert.equal(saved.voice.tts.volume, 64);
-  });
-
-  it('should create, list, and delete contacts through the service', function() {
-    const { service, contactsPath } = createService();
-
-    service.saveContact({
-      name: 'daddy',
-      phone: '+91 98765 43210',
-      aliases: 'dad, father',
-      preferredMessagingPlatform: 'whatsapp',
-      preferredCallPlatform: 'phone'
-    });
-
-    let snapshot = service.getSnapshot();
-    assert.equal(snapshot.contacts.length, 1);
-    assert.equal(snapshot.contacts[0].name, 'daddy');
-    assert.equal(snapshot.contacts[0].phone, '+919876543210');
-    assert.deepEqual(snapshot.contacts[0].aliases, ['dad', 'father']);
-    assert.ok(fs.existsSync(contactsPath));
-
-    service.deleteContact('daddy');
-    snapshot = service.getSnapshot();
-    assert.equal(snapshot.contacts.length, 0);
-  });
-
-  it('should enforce a maximum of 10 saved contacts', function() {
-    const { service } = createService();
-
-    for (let index = 1; index <= 10; index += 1) {
-      service.saveContact({
-        name: `contact-${index}`,
-        phone: `+91 90000 0000${index}`
-      });
-    }
-
-    assert.throws(
-      () => service.saveContact({ name: 'contact-11', phone: '+91 90000 00011' }),
-      /Contact limit reached/
-    );
-
-    const snapshot = service.getSnapshot();
-    assert.equal(snapshot.contacts.length, 10);
   });
 
   it('should reset settings back to defaults', function() {

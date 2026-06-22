@@ -2,32 +2,20 @@
 
 ## Purpose
 
-This module provides persistent assistant settings for:
-
-- assistant identity and honorifics
-- user profile details for future form-filling workflows
-- chat theme selection
-- contact management
+This module persists assistant identity, user profile details, voice preferences, chat appearance, permission level, and app modes. It does not store contacts.
 
 ## Files
 
 - `apps/desktop/settings.js`
-- `plugins/communications/contact-store.js`
 - `apps/desktop/electron/main.js`
 - `apps/desktop/preload.js`
 - `apps/desktop/renderer/chat/index.html`
 
 ## Workflow
 
-1. Electron starts and builds a runtime config from the base config plus persisted settings.
-2. The assistant and voice manager are initialized from that runtime config.
-3. The chat window loads the settings snapshot through IPC.
-4. The user can update assistant identity, user profile, theme, and contacts from the in-chat settings panel.
-5. Saving settings persists them locally and reloads runtime services when needed.
+1. Electron builds runtime configuration from base configuration and persisted settings.
+2. The assistant and voice manager initialize from that configuration.
+3. The renderer loads a validated settings snapshot through IPC.
+4. Saving settings writes them locally and reloads runtime services when needed.
 
-## Notes
-
-- Settings are stored locally in `%USERPROFILE%\\OpenX_Data\\settings.json`.
-- Contacts continue to live in `%USERPROFILE%\\OpenX_Data\\contacts.json`.
-- Active-learning memory is stored in `%USERPROFILE%\\OpenX_Data\\learning.json`, with logs and runtime data under the same `OpenX_Data` folder.
-- User profile details are stored for deterministic reuse by future automation modules that need personal form data.
+Settings are stored in `%USERPROFILE%\\OpenX_Data\\settings.json`. Active-learning memory uses `learning.json`; there is no contacts file, contact IPC API, or contact editor.

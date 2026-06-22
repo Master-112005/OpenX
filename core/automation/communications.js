@@ -2,8 +2,18 @@ const { Logger } = require('../assistant/Data');
 const BrowserController = require('./browser');
 const FileController = require('./files');
 const { launchTarget } = require('./common/launcher');
-const { ContactStore } = require('../../plugins/communications/contact-store');
 const WhatsAppDesktopController = require('../../plugins/communications/whatsapp-desktop');
+
+function normalizePhoneNumber(value) {
+  const source = String(value || '').trim();
+  const digits = source.replace(/[^\d]/g, '');
+  if (digits.length < 7) return '';
+  return source.startsWith('+') ? `+${digits}` : digits;
+}
+
+function isEmailAddress(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
+}
 
 class CommunicationsController {
   constructor(config) {
@@ -11,7 +21,6 @@ class CommunicationsController {
     this.logger = new Logger(config?.logging || { level: 'info' });
     this.browser = new BrowserController(config);
     this.files = new FileController(config);
-    this.contactStore = new ContactStore(config);
     this.whatsAppDesktop = new WhatsAppDesktopController(config);
   }
 
@@ -25,20 +34,7 @@ class CommunicationsController {
     }
 
     const preparedMessageText = this._prepareOutgoingMessageText(messageText);
-    const contact = this.contactStore.findContact(contactName);
-    if (!contact) {
-      const fallbackResult = await this._composeWhatsAppDesktopMessage(contactName, preparedMessageText, platform);
-      if (fallbackResult?.success) {
-        return fallbackResult;
-      }
-
-      return {
-        success: false,
-        error: `Contact not found: ${contactName}. Add the contact to ${this.contactStore.contactsPath}`
-      };
-    }
-
-    const messagePlatform = this._resolveMessagingPlatform(platform, contact);
+    const messagePlatform = this._resolveMessagingPlatform(platform);
     if (messagePlatform !== 'whatsapp') {
       return {
         success: false,
@@ -46,16 +42,20 @@ class CommunicationsController {
       };
     }
 
-    if (!contact.phone) {
-      return this.whatsAppDesktop.sendMessage(contact.name, preparedMessageText);
-    }
-
-    const desktopMessageResult = await this._composeWhatsAppDesktopMessage(contact.name, preparedMessageText, platform);
+    const phone = normalizePhoneNumber(contactName);
+    const desktopMessageResult = await this._composeWhatsAppDesktopMessage(contactName, preparedMessageText, platform);
     if (desktopMessageResult?.success) {
       return desktopMessageResult;
     }
 
-    const url = this._buildWhatsAppComposeUrl(contact.phone, preparedMessageText);
+    if (!phone) {
+      return desktopMessageResult || {
+        success: false,
+        error: `WhatsApp could not open the chat for ${contactName}`
+      };
+    }
+
+    const url = this._buildWhatsAppComposeUrl(phone, preparedMessageText);
     const result = this.browser.open(url);
     if (!result.success) {
       return result;
@@ -64,10 +64,10 @@ class CommunicationsController {
     return {
       success: true,
       data: {
-        contactName: contact.name,
+        contactName: String(contactName).trim(),
         messageText: preparedMessageText,
         platform: 'whatsapp',
-        phone: contact.phone,
+        phone,
         url,
         delivery: 'draft'
       }
@@ -79,58 +79,31 @@ class CommunicationsController {
       return { success: false, error: 'No contact name provided' };
     }
 
-    const contact = this.contactStore.findContact(contactName);
-    if (!contact) {
-      const fallbackResult = await this._startWhatsAppDesktopCall(contactName, platform);
-      if (fallbackResult?.success) {
-        return fallbackResult;
-      }
-
-      return {
-        success: false,
-        error: `Contact not found: ${contactName}. Add the contact to ${this.contactStore.contactsPath}`
-      };
-    }
-
-    const callPlatform = this._resolveCallPlatform(platform, contact);
+    const requestedPlatform = String(platform || '').trim().toLowerCase();
+    const phone = normalizePhoneNumber(contactName);
+    const callPlatform = requestedPlatform || (phone ? 'phone' : 'whatsapp');
     if (callPlatform === 'whatsapp') {
-      const desktopCallResult = await this._startWhatsAppDesktopCall(contact.name, 'whatsapp');
-      if (desktopCallResult?.success) {
-        return desktopCallResult;
-      }
-
-      if (!contact.whatsappCallUri) {
-        return {
-          success: false,
-          error: `Direct WhatsApp calling is not supported for ${contact.name}. Add whatsappCallUri for that contact or place a standard phone call instead`
-        };
-      }
-
-      this._launchUri(contact.whatsappCallUri);
-      return {
-        success: true,
-        data: {
-          contactName: contact.name,
-          platform: 'whatsapp',
-          phone: contact.phone || null
-        }
-      };
+      return this._startWhatsAppDesktopCall(contactName, 'whatsapp');
     }
 
-    if (!contact.phone) {
+    if (callPlatform !== 'phone') {
       return {
         success: false,
-        error: `Contact does not have a phone number: ${contact.name}`
+        error: `Calling platform not supported: ${callPlatform}`
       };
     }
 
-    this._launchUri(`tel:${contact.phone}`);
+    if (!phone) {
+      return { success: false, error: 'Provide a phone number directly for a standard phone call' };
+    }
+
+    this._launchUri(`tel:${phone}`);
     return {
       success: true,
       data: {
-        contactName: contact.name,
+        contactName: String(contactName).trim(),
         platform: 'phone',
-        phone: contact.phone
+        phone
       }
     };
   }
@@ -140,19 +113,9 @@ class CommunicationsController {
       return { success: false, error: 'No contact name provided' };
     }
 
-    const contact = this.contactStore.findContact(contactName);
-    if (!contact) {
-      return {
-        success: false,
-        error: `Contact not found: ${contactName}. Add the contact to ${this.contactStore.contactsPath}`
-      };
-    }
-
-    if (!contact.email) {
-      return {
-        success: false,
-        error: `Contact does not have an email address: ${contact.name}`
-      };
+    const email = String(contactName).trim();
+    if (!isEmailAddress(email)) {
+      return { success: false, error: 'Provide an email address directly' };
     }
 
     const cleanSubject = String(subject || '').trim();
@@ -160,10 +123,10 @@ class CommunicationsController {
     if (!cleanSubject || !cleanBody) {
       return {
         success: true,
-        error: `Email draft needs ${!cleanSubject && !cleanBody ? 'a subject and message' : !cleanSubject ? 'a subject' : 'a message'} for ${contact.name}`,
+        error: `Email draft needs ${!cleanSubject && !cleanBody ? 'a subject and message' : !cleanSubject ? 'a subject' : 'a message'} for ${email}`,
         data: {
-          contactName: contact.name,
-          email: contact.email,
+          contactName: email,
+          email,
           subject: cleanSubject,
           body: cleanBody,
           needsDetails: true
@@ -171,13 +134,13 @@ class CommunicationsController {
       };
     }
 
-    const url = this._buildMailtoUrl(contact.email, cleanSubject, cleanBody);
+    const url = this._buildMailtoUrl(email, cleanSubject, cleanBody);
     this._launchUri(url);
     return {
       success: true,
       data: {
-        contactName: contact.name,
-        email: contact.email,
+        contactName: email,
+        email,
         subject: cleanSubject,
         body: cleanBody,
         url,
@@ -187,38 +150,13 @@ class CommunicationsController {
     };
   }
 
-  _resolveMessagingPlatform(platform, contact) {
+  _resolveMessagingPlatform(platform) {
     const requestedPlatform = String(platform || '').trim().toLowerCase();
     if (requestedPlatform) {
       return requestedPlatform;
-    }
-
-    if (contact.preferredMessagingPlatform) {
-      return contact.preferredMessagingPlatform;
-    }
-
-    if (contact.platforms.includes('whatsapp')) {
-      return 'whatsapp';
     }
 
     return 'whatsapp';
-  }
-
-  _resolveCallPlatform(platform, contact) {
-    const requestedPlatform = String(platform || '').trim().toLowerCase();
-    if (requestedPlatform) {
-      return requestedPlatform;
-    }
-
-    if (contact.preferredCallPlatform) {
-      return contact.preferredCallPlatform;
-    }
-
-    if (contact.whatsappCallUri) {
-      return 'whatsapp';
-    }
-
-    return 'phone';
   }
 
   _buildWhatsAppComposeUrl(phoneNumber, messageText) {

@@ -1,6 +1,5 @@
 const fs = require('fs');
 const path = require('path');
-const { ContactStore, normalizePhoneNumber } = require('../../plugins/communications/contact-store');
 const { ensureDataRoot, migrateLegacyData, readJsonFile, writeJsonAtomic } = require('../../core/assistant/Data');
 
 const CHAT_THEMES = {
@@ -241,6 +240,13 @@ function sanitizeModes(value) {
   return modes;
 }
 
+function normalizePhoneNumber(value) {
+  const source = String(value || '').trim();
+  const digits = source.replace(/[^\d]/g, '');
+  if (!digits) return '';
+  return source.startsWith('+') ? `+${digits}` : digits;
+}
+
 function normalizeTtsRate(value, fallback) {
   const number = Number(value);
   if (!Number.isFinite(number) || number === -1) {
@@ -262,14 +268,12 @@ class SettingsService {
     this.baseConfig.app.dataDir = this.dataPaths.root;
     this.baseConfig.app.dataPaths = deepClone(this.dataPaths);
     this.baseConfig.assistant = this.baseConfig.assistant || {};
-    this.baseConfig.assistant.contactsPath = this.baseConfig.assistant.contactsPath || this.dataPaths.contactsPath;
     this.baseConfig.activeLearning = this.baseConfig.activeLearning || {};
     this.baseConfig.activeLearning.storePath = this.baseConfig.activeLearning.storePath || this.dataPaths.learningPath;
     this.baseConfig.logging = this.baseConfig.logging || {};
     this.baseConfig.logging.directory = this.baseConfig.logging.directory || this.dataPaths.logsDir;
 
     this.settingsPath = this.dataPaths.settingsPath;
-    this.contactStore = new ContactStore(this.baseConfig);
     this.defaults = {
       assistant: {
         displayName: String(this.baseConfig?.assistant?.displayName || this.baseConfig?.app?.name || 'JARVIS').trim(),
@@ -356,18 +360,8 @@ class SettingsService {
       settings,
       dataRoot: this.dataPaths.root,
       dataPaths: deepClone(this.dataPaths),
-      contacts: this.contactStore.listContacts(),
-      contactsPath: this.contactStore.contactsPath,
       availableThemes: Object.values(CHAT_THEMES)
     };
-  }
-
-  saveContact(contact) {
-    return this.contactStore.saveContact(contact);
-  }
-
-  deleteContact(name) {
-    return this.contactStore.deleteContact(name);
   }
 
   buildRuntimeConfig() {
@@ -383,7 +377,6 @@ class SettingsService {
     runtimeConfig.assistant.title = settings.assistant.title;
     runtimeConfig.assistant.honorific = settings.assistant.honorific;
     runtimeConfig.assistant.userProfile = deepClone(settings.userProfile);
-    runtimeConfig.assistant.contactsPath = this.contactStore.contactsPath;
 
     runtimeConfig.voice = runtimeConfig.voice || {};
     runtimeConfig.voice.tts = runtimeConfig.voice.tts || {};

@@ -34,15 +34,6 @@ contextBridge.exposeInMainWorld('jarvis', {
   resetSettings: () =>
     ipcRenderer.invoke('settings:reset'),
 
-  listContacts: () =>
-    ipcRenderer.invoke('contacts:list'),
-
-  saveContact: (contact) =>
-    ipcRenderer.invoke('contacts:save', contact),
-
-  deleteContact: (name) =>
-    ipcRenderer.invoke('contacts:delete', { name }),
-
   handleScheduleAlert: (id, action, minutes = 5) =>
     ipcRenderer.invoke('schedule:alertAction', { id, action, minutes }),
 

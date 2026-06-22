@@ -97,7 +97,7 @@ Input
 - browser URL opening, web search, site search, first-result handling, tab open/close/list;
 - media play/search/control, fullscreen, volume, shuffle, repeat, favorites, likes, subscriptions, and status;
 - timers, alarms, and reminders;
-- message and email composition plus contact-aware calls;
+- direct-recipient message and email composition plus calls, without persistent contact storage;
 - CPU, RAM, battery, disk, processes, system insights, Bluetooth settings, calculations, time, and date;
 - screenshot capture;
 - volume and brightness reading/control;
@@ -212,7 +212,7 @@ Plugin actions and intents must use `plugin.<id>.*`. A plugin may call a core au
 | `plugins/chrome/` | Chrome-specific navigation, including browser history |
 | `plugins/discord/` | Discord application integration |
 | `plugins/forms/` | Google Form and generic form understanding/filling |
-| `plugins/communications/` | Contacts and WhatsApp Desktop implementation |
+| `plugins/communications/` | Stateless WhatsApp Desktop implementation |
 | `plugins/sample_plugin/` | Trusted example of namespaced action and intent registration |
 
 Plugin loading is enabled in `config.js`, and the default trusted list is `sample_plugin`, `youtube`, `chrome`, and `discord`. The forms and communications packages are composed directly by their owning automation controllers.
@@ -244,7 +244,7 @@ The managed data root is:
 `core/assistant/Data.js` provides:
 
 - data-root and legacy-root resolution;
-- managed paths for settings, contacts, learning, schedules, logs, runtime state, media, screenshots, and backups;
+- managed paths for settings, learning, schedules, logs, runtime state, media, screenshots, and backups;
 - atomic file and JSON writes;
 - optional backup files;
 - migration from `%USERPROFILE%\.jarvis` without overwriting newer OpenX data;
@@ -283,7 +283,7 @@ The preload bridge exposes a narrow API. Renderer code cannot directly access co
 - logging;
 - plugin directory, enablement, and trusted plugin IDs.
 
-`apps/desktop/settings.js` persists user-facing settings, themes, profiles, modes, and contacts under the managed data root.
+`apps/desktop/settings.js` persists user-facing settings, themes, profiles, and modes under the managed data root. Contact storage and its renderer/IPC surface have been removed.
 
 ## 11. Testing and verification
 
@@ -327,7 +327,7 @@ The graph still identifies `ActionRouter` as a god node. This is a maintainabili
 
 - Some command-corpus operations are classified but intentionally reported as unconnected capabilities.
 - Screen capture is connected; full screen recording is not currently connected to a recorder controller.
-- Messaging and call behavior depends on installed applications, saved contacts, and available URI/desktop integration.
+- Messaging and call behavior depends on explicitly supplied chat names, phone numbers, or email addresses and available URI/desktop integration.
 - Browser tab discovery and control depend on visible windows, UI Automation, or an available debugging endpoint.
 - Application-launch observations can vary when a target application is already open.
 - Research and other workspace modes require corresponding user mode configuration to perform useful startup actions.

@@ -113,9 +113,6 @@ const IPC_CHANNELS = [
   'settings:get',
   'settings:save',
   'settings:reset',
-  'contacts:list',
-  'contacts:save',
-  'contacts:delete',
   'schedule:alertAction',
   'app:quit'
 ];
@@ -448,20 +445,6 @@ function setupIPC() {
     settingsService.resetSettings();
     await reloadRuntimeServices();
     return settingsService.getSnapshot();
-  });
-
-  registerIpcHandler('contacts:list', async () => {
-    return settingsService.getSnapshot().contacts;
-  });
-
-  registerIpcHandler('contacts:save', async (_event, contact) => {
-    settingsService.saveContact(contact);
-    return settingsService.getSnapshot().contacts;
-  });
-
-  registerIpcHandler('contacts:delete', async (_event, { name }) => {
-    settingsService.deleteContact(name);
-    return settingsService.getSnapshot().contacts;
   });
 
   registerIpcHandler('schedule:alertAction', async (_event, { id, action, minutes }) => {
