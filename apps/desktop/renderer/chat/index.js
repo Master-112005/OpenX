@@ -43,6 +43,7 @@ const MODE_APP_LIMIT = 5;
 const SCHEDULE_STORAGE_KEY = 'openx-ui-schedules-v1';
 const NOTIFICATION_STORAGE_KEY = 'openx-ui-notifications-v1';
 const MAX_NOTIFICATION_HISTORY = 30;
+const MAX_RENDERED_MESSAGES = 100;
 const ASSISTANT_MUTED_STORAGE_KEY = 'openx-assistant-voice-muted-v1';
 
 let isProcessing = false;
@@ -61,6 +62,8 @@ let scheduleItems = loadStoredList(SCHEDULE_STORAGE_KEY);
 let notificationHistory = loadStoredList(NOTIFICATION_STORAGE_KEY);
 let activeAlarmId = null;
 let isAssistantMuted = localStorage.getItem(ASSISTANT_MUTED_STORAGE_KEY) === 'true';
+let glassTintAnimationFrame = null;
+let pendingGlassTintValue = 42;
 const scheduleTimers = new Map();
 
 const fieldIds = {
@@ -144,6 +147,10 @@ function addMessage(text, type, meta) {
   }
   msg.append(avatar, stack);
   messagesEl.appendChild(msg);
+  const renderedMessages = messagesEl.querySelectorAll('.message');
+  for (let index = 0; index < renderedMessages.length - MAX_RENDERED_MESSAGES; index += 1) {
+    renderedMessages[index].remove();
+  }
   messagesEl.scrollTop = messagesEl.scrollHeight;
   return msg;
 }
@@ -686,6 +693,15 @@ function applyGlassTint(value) {
   });
   const valueEl = document.getElementById('glass-tint-value');
   if (valueEl) valueEl.textContent = `${Math.round(tint)}%`;
+}
+
+function scheduleGlassTintUpdate(value) {
+  pendingGlassTintValue = value;
+  if (glassTintAnimationFrame !== null) return;
+  glassTintAnimationFrame = requestAnimationFrame(() => {
+    glassTintAnimationFrame = null;
+    applyGlassTint(pendingGlassTintValue);
+  });
 }
 
 function renderThemeCards() {
@@ -1386,7 +1402,7 @@ inputBox.addEventListener('keydown', (event) => {
 
 document.getElementById(fieldIds.assistantTtsVolume).addEventListener('input', updateTtsSliderLabels);
 document.getElementById(fieldIds.assistantTtsRate).addEventListener('input', updateTtsSliderLabels);
-document.getElementById(fieldIds.glassTint).addEventListener('input', event => applyGlassTint(event.target.value));
+document.getElementById(fieldIds.glassTint).addEventListener('input', event => scheduleGlassTintUpdate(event.target.value));
 document.querySelectorAll('.permission-option').forEach(button => {
   button.addEventListener('click', () => {
     document.getElementById(fieldIds.systemPermissionLevel).value = button.dataset.permission;

@@ -37,6 +37,7 @@ describe('Electron Security Boundary', function() {
     assert.equal(preferences.contextIsolation, true);
     assert.equal(preferences.sandbox, true);
     assert.equal(preferences.webSecurity, true);
+    assert.equal(preferences.backgroundThrottling, false);
     assert.equal(preferences.allowRunningInsecureContent, false);
     assert.equal(preferences.enableRemoteModule, false);
     assert.equal(preferences.webviewTag, false);

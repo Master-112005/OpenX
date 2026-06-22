@@ -57,4 +57,13 @@ describe('Chat Renderer UI', function() {
     assert.match(script, /glassContrast/);
     assert.match(glassCss, /Tint-aware foreground contrast/);
   });
+
+  it('should bound long-session rendering and coalesce glass tint updates', function() {
+    assert.match(script, /MAX_RENDERED_MESSAGES\s*=\s*100/);
+    assert.match(script, /renderedMessages\[index\]\.remove\(\)/);
+    assert.match(script, /function scheduleGlassTintUpdate\(/);
+    assert.match(script, /requestAnimationFrame\(/);
+    assert.match(glassCss, /GPU and long-session performance/);
+    assert.match(glassCss, /content-visibility:\s*auto/);
+  });
 });

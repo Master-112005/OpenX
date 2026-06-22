@@ -176,6 +176,7 @@ function createSecureWebPreferences(preloadPath) {
     contextIsolation: true,
     sandbox: true,
     webSecurity: true,
+    backgroundThrottling: false,
     allowRunningInsecureContent: false,
     enableRemoteModule: false,
     webviewTag: false,

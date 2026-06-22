@@ -527,3 +527,27 @@ html[data-glass-contrast] #send-btn {
 .alarm-time { color: var(--adaptive-muted, rgba(255,255,255,.7)); }
 .alarm-actions { margin-top: auto; width: 100%; }
 .alarm-actions .primary-btn,.alarm-actions .secondary-btn { min-height: 44px; }
+
+/* GPU and long-session performance */
+#chat-shell {
+  backdrop-filter: blur(18px) saturate(115%);
+  -webkit-backdrop-filter: blur(18px) saturate(115%);
+  contain: layout paint;
+}
+#settings-panel {
+  backdrop-filter: blur(22px) saturate(120%);
+  -webkit-backdrop-filter: blur(22px) saturate(120%);
+  contain: layout paint;
+}
+#settings-overlay { backdrop-filter: none; -webkit-backdrop-filter: none; }
+#header,.message-bubble,.composer-field,.header-btn,.window-btn,.chip-btn,
+.activity-date,.schedule-card,.notice-item,.empty-state,.toast,.alarm-card,
+.panel-header,.settings-hero,.settings-section,.theme-card,.contact-stage,.mode-row,
+.mode-app-row,.contact-item,.field,.field-textarea,.field-select,.primary-btn,
+.secondary-btn,.danger-btn,.icon-btn,.contact-add-btn,.permission-option,.mode-tab,
+.mode-app-tab,.glass-tint-control {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+#workspace,#messages,.settings-content { contain: layout paint style; }
+.message { contain: layout paint; content-visibility: auto; contain-intrinsic-size: 64px; }

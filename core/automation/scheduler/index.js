@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const { spawnSync } = require('child_process');
+const { spawn } = require('child_process');
 const Logger = require('../../shared/index').Logger;
 const IdGenerator = require('../../shared/index').IdGenerator;
 const { EVENTS } = require('../../shared/events');
@@ -315,11 +315,13 @@ class SchedulerController {
   _cleanupLegacyWindowsTasks(config) {
     if (process.platform !== 'win32' || !config?.app?.dataDir || config.app.cleanupLegacySchedules === false) return;
     const script = "Get-ScheduledTask -TaskName 'JARVIS_*' -ErrorAction SilentlyContinue | Unregister-ScheduledTask -Confirm:$false";
-    spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
+    const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
       stdio: 'ignore',
-      timeout: 10000,
+      detached: true,
       windowsHide: true
     });
+    child.once('error', error => this.logger.warn('Could not clean up legacy schedules', error.message));
+    child.unref();
   }
 
   _saveScheduledItems() {

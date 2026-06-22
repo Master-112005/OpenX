@@ -78,3 +78,11 @@ time { color: rgba(255,255,255,.68); font-size: 11px; font-weight: 650; margin-t
 @media (prefers-reduced-motion: reduce) {
   * { transition-duration: .01ms !important; }
 }
+
+/* Keep the transparent alert responsive on integrated GPUs. */
+.alert-shell {
+  backdrop-filter: blur(22px) saturate(120%);
+  -webkit-backdrop-filter: blur(22px) saturate(120%);
+  contain: layout paint;
+}
+.glass-button { backdrop-filter: none; -webkit-backdrop-filter: none; }
