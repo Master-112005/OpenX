@@ -2,17 +2,8 @@
   "name": "Sample Plugin",
   "id": "sample_plugin",
   "version": "1.0.0",
-  "description": "Example plugin showing the JARVIS plugin API",
-  "author": "",
+  "description": "Example plugin showing the OpenX plugin API",
   "trusted": true,
   "permissions": ["low"],
-  "intents": [
-    {
-      "id": "plugin.sample_plugin.hello",
-      "patterns": ["say hello", "hello plugin", "plugin test"],
-      "permissionLevel": "low",
-      "action": "plugin.sample_plugin.hello",
-      "entities": []
-    }
-  ]
+  "usesAutomation": []
 }

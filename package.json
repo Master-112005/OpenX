@@ -56,7 +56,7 @@
 
     "files": [
       "apps/**/*",
-      "config/**/*",
+      "config.js",
       "core/**/*",
       "plugins/**/*",
       "package.json",
