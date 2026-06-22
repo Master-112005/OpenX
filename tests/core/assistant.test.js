@@ -1330,7 +1330,7 @@ describe('Assistant Confirmation Flow', function() {
   });
 
   it('should not ask for feedback repeatedly after the same confident action', async function() {
-    const ActiveLearningStore = require('../../core/assistant/learning/index');
+    const ActiveLearningStore = require('../../core/assistant/Active-learning');
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-learning-'));
     const learning = new ActiveLearningStore({
       app: { dataDir: tempDir },
@@ -1487,7 +1487,7 @@ describe('Assistant Confirmation Flow', function() {
   });
 
   it('should answer remembered personal facts without web search', async function() {
-    const ActiveLearningStore = require('../../core/assistant/learning/index');
+    const ActiveLearningStore = require('../../core/assistant/Active-learning');
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-learning-'));
     const learning = new ActiveLearningStore({
       app: { dataDir: tempDir },
@@ -1526,7 +1526,7 @@ describe('Assistant Confirmation Flow', function() {
   });
 
   it('should reject password memory while still learning safe personal context before routing', async function() {
-    const ActiveLearningStore = require('../../core/assistant/learning/index');
+    const ActiveLearningStore = require('../../core/assistant/Active-learning');
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-learning-'));
     const learning = new ActiveLearningStore({
       app: { dataDir: tempDir },
@@ -1567,7 +1567,7 @@ describe('Assistant Confirmation Flow', function() {
   });
 
   it('should answer broader personal context before routing', async function() {
-    const ActiveLearningStore = require('../../core/assistant/learning/index');
+    const ActiveLearningStore = require('../../core/assistant/Active-learning');
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-learning-'));
     const learning = new ActiveLearningStore({
       app: { dataDir: tempDir },
@@ -1610,7 +1610,7 @@ describe('Assistant Confirmation Flow', function() {
   });
 
   it('should save an explicit compact chat summary for later recall', async function() {
-    const ActiveLearningStore = require('../../core/assistant/learning/index');
+    const ActiveLearningStore = require('../../core/assistant/Active-learning');
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-chat-memory-'));
     const learning = new ActiveLearningStore({
       app: { dataDir: tempDir },

@@ -55,15 +55,12 @@ describe('Mode Engine and Context Intelligence', function() {
       timestamp: 1000
     });
     signalRecorder.emit(signalRecorder.SIGNAL_EVENTS.PROCESS_STARTED, { name: 'Docker Desktop.exe' });
-    signalRecorder.emit(signalRecorder.SIGNAL_EVENTS.AUDIO_DEVICE_CHANGED, { name: 'WH-1000XM4' });
-
     const snapshot = engine.getSnapshot();
     assert.equal(snapshot.activeApp, 'Code.exe');
     assert.equal(snapshot.activeTitle, 'OpenX - Visual Studio Code');
     assert.ok(snapshot.runningApps.includes('Docker Desktop.exe'));
-    assert.equal(snapshot.audioDevice, 'WH-1000XM4');
     assert.equal(snapshot.currentMode, null);
-    assert.ok(snapshot.activityHistory.length >= 3);
+    assert.ok(snapshot.activityHistory.length >= 2);
     engine.stop();
   });
 
@@ -79,7 +76,6 @@ describe('Mode Engine and Context Intelligence', function() {
       activeApp: 'Code.exe',
       activeTitle: 'OpenX - Visual Studio Code',
       runningApps: ['Code.exe', 'Docker Desktop.exe'],
-      audioDevice: 'Speakers',
       fullscreen: false
     });
 
@@ -231,8 +227,7 @@ describe('Mode Engine and Context Intelligence', function() {
     const snapshot = {
       activeApp: 'Spotify.exe',
       activeTitle: 'Spotify',
-      runningApps: ['Spotify.exe'],
-      audioDevice: 'WH-1000XM4'
+      runningApps: ['Spotify.exe']
     };
 
     engine.evaluate(snapshot);

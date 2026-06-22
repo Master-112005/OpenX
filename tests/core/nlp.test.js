@@ -4,8 +4,8 @@ describe('NLP Processor', function() {
   let NlpProcessor, IntentRegistry;
 
   before(function() {
-    NlpProcessor = require('../../core/assistant/nlp/index');
-    IntentRegistry = require('../../core/assistant/intents/index').IntentRegistry;
+    NlpProcessor = require('../../core/assistant/nlp/nlp');
+    IntentRegistry = require('../../core/assistant/intents').IntentRegistry;
   });
 
   it('should normalize compact sports year tokens and classify knowledge questions', function() {

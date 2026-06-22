@@ -1,4 +1,4 @@
-const Normalizer = require('../../shared/index').Normalizer;
+const Normalizer = require('../Data').Normalizer;
 
 const TRUSTED_WEB_TARGETS = {
   chatgpt: { title: 'ChatGPT', url: 'https://chatgpt.com/' },

@@ -7,7 +7,7 @@ describe('Communications Controller', function() {
   let CommunicationsController;
 
   before(function() {
-    CommunicationsController = require('../../core/automation/communications/index');
+    CommunicationsController = require('../../core/automation/communications');
   });
 
   function createController(contacts) {

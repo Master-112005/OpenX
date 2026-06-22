@@ -1,5 +1,5 @@
 const { execFile } = require('child_process');
-const Logger = require('../shared/index').Logger;
+const Logger = require('../assistant/Data').Logger;
 const signals = require('./signals');
 const appRegistry = require('./app-registry');
 

@@ -1,7 +1,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const Normalizer = require('../../shared/index').Normalizer;
+const Normalizer = require('../../assistant/Data').Normalizer;
 
 const DEFAULT_EXCLUDED_SEARCH_DIRECTORIES = new Set([
   '$recycle.bin',

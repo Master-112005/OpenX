@@ -1,6 +1,6 @@
 const { execFileSync } = require('child_process');
-const Logger = require('../../shared/index').Logger;
-const Normalizer = require('../../shared/index').Normalizer;
+const Logger = require('../../assistant/Data').Logger;
+const Normalizer = require('../../assistant/Data').Normalizer;
 
 function escapePowerShell(value) {
   return String(value ?? '').replace(/'/g, "''");

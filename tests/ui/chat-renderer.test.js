@@ -6,7 +6,7 @@ describe('Chat Renderer UI', function() {
   const rendererRoot = path.join(__dirname, '..', '..', 'apps', 'desktop', 'renderer', 'chat');
   const html = fs.readFileSync(path.join(rendererRoot, 'index.html'), 'utf8');
   const css = fs.readFileSync(path.join(rendererRoot, 'index.css'), 'utf8');
-  const glassCss = fs.readFileSync(path.join(rendererRoot, 'liquid-glass.css'), 'utf8');
+  const glassCss = fs.readFileSync(path.join(rendererRoot, 'index.css'), 'utf8');
   const script = fs.readFileSync(path.join(rendererRoot, 'index.js'), 'utf8');
 
   it('should provide dedicated chat, activity, notification, and alarm surfaces', function() {

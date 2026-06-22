@@ -12,8 +12,8 @@ This module handles contact-based communication actions through the shared assis
 
 ## Files
 
-- `core/automation/communications/index.js`
-- `core/automation/communications/contact-store.js`
+- `core/automation/communications.js`
+- `plugins/communications/contact-store.js`
 
 ## Contact Source
 

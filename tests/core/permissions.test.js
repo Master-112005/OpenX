@@ -4,7 +4,7 @@ describe('Permission Validator', function() {
   let PermissionValidator;
 
   before(function() {
-    PermissionValidator = require('../../core/permissions/index');
+    PermissionValidator = require('../../apps/desktop/permissions');
   });
 
   it('should allow low permission actions', function() {

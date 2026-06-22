@@ -1,4 +1,4 @@
-const Logger = require('../shared/index').Logger;
+const Logger = require('../assistant/Data').Logger;
 const signals = require('./signals');
 const contextEngineModule = require('./context-engine');
 
@@ -92,8 +92,7 @@ const MODE_PROFILES = Object.freeze({
     rules: Object.freeze([
       Object.freeze({ activeApps: Object.freeze(['spotify.exe']), score: 55 }),
       Object.freeze({ when: (context, derived) => derived.activeApp === 'chrome.exe' && /\b(youtube|music|spotify)\b/.test(derived.title), score: 50 }),
-      Object.freeze({ runningApps: Object.freeze(['Spotify.exe', 'chrome.exe']), score: 15 }),
-      Object.freeze({ when: context => Boolean(context.audioDevice), score: 10 })
+      Object.freeze({ runningApps: Object.freeze(['Spotify.exe', 'chrome.exe']), score: 15 })
     ]),
     behavior: Object.freeze({
       prioritizeMediaCommands: true,

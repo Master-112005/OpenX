@@ -4,7 +4,7 @@ describe('Response Generator', function() {
   let ResponseGenerator;
 
   before(function() {
-    ResponseGenerator = require('../../core/assistant/responses/index');
+    ResponseGenerator = require('../../core/assistant/responses');
   });
 
   it('should generate success response with interpolation', function() {

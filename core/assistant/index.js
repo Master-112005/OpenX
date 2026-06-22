@@ -4,13 +4,13 @@ const {
   EVENTS,
   Logger,
   Normalizer
-} = require('../shared/index');
-const ActionRouter = require('./router/index');
+} = require('./Data');
+const ActionRouter = require('./router');
 const AutomationEngine = require('../automation/index');
-const ContextManager = require('./context/index');
-const ActiveLearningStore = require('./learning/index');
-const Personality = require('./personality/index');
-const ResponseGenerator = require('./responses/index');
+const ContextManager = require('./context');
+const ActiveLearningStore = require('./Active-learning');
+const Personality = require('./personality');
+const ResponseGenerator = require('./responses');
 
 const CONFIRM_PHRASES = [
   'approve',

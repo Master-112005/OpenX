@@ -4,7 +4,7 @@ describe('Entity Extractor', function() {
   let EntityExtractor;
 
   before(function() {
-    EntityExtractor = require('../../core/assistant/entities/index');
+    EntityExtractor = require('../../core/assistant/entities');
   });
 
   it('should extract numeric value', function() {

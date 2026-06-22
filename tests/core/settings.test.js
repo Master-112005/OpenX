@@ -7,7 +7,7 @@ describe('Settings Service', function() {
   let SettingsService;
 
   before(function() {
-    SettingsService = require('../../core/settings/index').SettingsService;
+    SettingsService = require('../../apps/desktop/settings').SettingsService;
   });
 
   function createService() {

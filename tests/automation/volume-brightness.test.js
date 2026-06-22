@@ -1,7 +1,7 @@
 const assert = require('assert');
 const AutomationEngine = require('../../core/automation/index');
-const VolumeController = require('../../core/automation/volume/index');
-const BrightnessController = require('../../core/automation/brightness/index');
+const VolumeController = require('../../core/automation/volume');
+const BrightnessController = require('../../core/automation/brightness');
 
 describe('Volume and Brightness Control', function() {
   this.timeout(10000); // Allow longer timeout for system operations

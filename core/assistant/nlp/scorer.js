@@ -1,4 +1,4 @@
-const Normalizer = require('../../shared/index').Normalizer;
+const Normalizer = require('../Data').Normalizer;
 
 function countOrderedMatches(inputTokens, patternTokens) {
   let matches = 0;

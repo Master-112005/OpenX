@@ -14,7 +14,7 @@ This module defines how the assistant speaks to the user. The policy is enforced
 
 ## Implementation
 
-- Response templates live in `core/assistant/responses/index.js`
-- Formal address enforcement lives in `core/assistant/responses/style.js`
+- Response templates live in `core/assistant/responses.js`
+- Formal address enforcement lives in `core/assistant/responses.js`
 - Any new response template should return the core sentence only
 - The style layer appends the configured honorific automatically

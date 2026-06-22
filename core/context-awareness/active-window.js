@@ -1,4 +1,4 @@
-const Logger = require('../shared/index').Logger;
+const Logger = require('../assistant/Data').Logger;
 const signals = require('./signals');
 
 const ACTIVE_WINDOW_POLL_MS = 500;

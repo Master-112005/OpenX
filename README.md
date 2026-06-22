@@ -17,7 +17,7 @@ The platform is designed around a layered architecture with intent routing, enti
 * Naturalized Windows SAPI text-to-speech
 * Modular plugin system
 * Event-driven architecture
-* Context signal foundation for active windows, processes, and audio devices
+* Context signal foundation for active windows and processes
 * Adaptive mode engine for development, streaming, gaming, media, work, and focus contexts
 * Centralized assistant memory and runtime data under `%USERPROFILE%\OpenX_Data`
 * Permission-based execution model
@@ -149,12 +149,10 @@ OpenX/
 |   |   |-- volume/
 |   |   `-- windows/
 |   |-- context-awareness/
-|   |-- device-detection/
-|   |-- media-understanding/
+|   |-- media-handling/
 |   |-- permissions/
 |   |-- settings/
 |   |-- shared/
-|   |-- ui/
 |   `-- voice/
 |-- docs/
 |-- graphify-out/
@@ -204,12 +202,6 @@ OpenX/
 * Context Engine
 * Mode Engine
 
-## Device Detection
-
-* Audio Device Manager
-* Headphone Detector
-* Device Event Monitor
-
 ## Assistant Modes
 
 * Development Mode
@@ -235,7 +227,7 @@ OpenX_Data/
 `-- cache/
 ```
 
-`core/shared/data-root.js` owns this layout. It creates required directories, points runtime config to the same managed paths, and safely migrates old `%USERPROFILE%\.jarvis` settings, contacts, and learning files without overwriting newer data.
+`core/assistant/Data.js` owns this layout. It creates required directories, points runtime config to the same managed paths, and safely migrates old `%USERPROFILE%\.jarvis` settings, contacts, and learning files without overwriting newer data.
 
 ## Voice System
 
@@ -263,7 +255,6 @@ OpenX_Data/
 * System monitoring
 * Foreground app and active window detection
 * Running process monitoring
-* Audio output and headphone detection
 
 ## Communication Features
 
@@ -377,9 +368,6 @@ The local context system emits these environmental signal events:
 * active-window-changed
 * process-started
 * process-stopped
-* headphones-connected
-* headphones-disconnected
-* audio-device-changed
 * mode-entered
 * mode-exited
 * mode-changed
@@ -388,7 +376,7 @@ These events are emitted by `core/context-awareness/signals.js` and are designed
 
 ---
 
-# Context Awareness And Device Detection
+# Context Awareness
 
 OpenX can detect local Windows environment state and publish it as deterministic context signals.
 
@@ -398,11 +386,8 @@ Implemented modules:
 | ------ | -------------- |
 | `core/context-awareness/active-window.js` | Polls the foreground window every 500ms using `active-win` and normalizes app, title, path, pid, and timestamp |
 | `core/context-awareness/process-monitor.js` | Uses PowerShell/WMI to track running processes and emit start/stop events |
-| `core/context-awareness/signals.js` | Centralized signal/event emitter for context and device changes |
+| `core/context-awareness/signals.js` | Centralized signal/event emitter for context changes |
 | `core/context-awareness/app-registry.js` | Categorizes known developer, streaming, media, game, and work applications |
-| `core/device-detection/audio-devices.js` | Reads active audio output and enumerates known audio devices locally |
-| `core/device-detection/headphones.js` | Detects headphone and Bluetooth device state |
-| `core/device-detection/device-events.js` | Debounces audio device/headphone changes and emits signal events |
 
 Active window output:
 
@@ -416,18 +401,6 @@ Active window output:
 }
 ```
 
-Audio device output:
-
-```js
-{
-  name: "WH-1000XM4",
-  type: "bluetooth-headphones",
-  active: true,
-  id: "device-id",
-  timestamp: 123456789
-}
-```
-
 This context layer follows the master rules:
 
 * Local only
@@ -436,8 +409,7 @@ This context layer follows the master rules:
 * Deterministic polling and event emission
 * Modular code
 * Clean shutdown through `stop()`
-* Debounced device events
-* Tests for context awareness and device detection
+* Tests for context awareness
 
 ---
 
@@ -481,7 +453,6 @@ Context snapshot:
   activeApp: "Code.exe",
   activeTitle: "OpenX - Visual Studio Code",
   runningApps: ["Code.exe", "Docker Desktop.exe"],
-  audioDevice: "WH-1000XM4",
   fullscreen: false,
   timestamp: 123456789,
   currentMode: "DEV_MODE"
@@ -573,7 +544,6 @@ The project includes dedicated test suites covering:
 * Automation engine
 * Controllers
 * Context awareness
-* Device detection
 * Mode scoring
 * Mode transition stability
 * Permissions
@@ -640,12 +610,12 @@ User: "open calculator"
 
 Command text from chat or any recognition source enters the same deterministic parser, NLP processor, NLU frame parser, intent matcher, entity extractor, permission validator, and action router.
 
-* `core/assistant/nlp/index.js` repairs noisy command text by finding strong actions and known targets inside the sentence.
-* `core/assistant/nlu/index.js` and `core/assistant/router/command-frame.js` extract actionable command frames from natural language.
+* `core/assistant/nlp/nlp.js` repairs noisy command text by finding strong actions and known targets inside the sentence.
+* `core/assistant/nlu.js` and `core/assistant/parser.js` extract actionable command frames from natural language.
 * Multi-command requests such as "stop the video and set vol to 100" are split and executed in order.
 * Contextual follow-ups such as "open it" are resolved from recent command context before routing.
 * Pure conversation is kept out of automation when no actionable frame is found.
-* `core/voice/tts/index.js` uses Windows SAPI with configurable `voice.tts.voiceName`, audible volume clamping, speaking rate control, and SSML pauses when `voice.tts.naturalize` is enabled.
+* `apps/desktop/voice/tts.js` uses Windows SAPI with configurable `voice.tts.voiceName`, audible volume clamping, speaking rate control, and SSML pauses when `voice.tts.naturalize` is enabled.
 
 ---
 

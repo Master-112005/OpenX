@@ -4,7 +4,7 @@ const os = require('os');
 const path = require('path');
 
 const AutomationEngine = require('../../core/automation/index');
-const ActionRouter = require('../../core/assistant/router/index');
+const ActionRouter = require('../../core/assistant/router');
 
 describe('File Management Automation', function() {
   this.timeout(10000);

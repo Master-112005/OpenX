@@ -198,26 +198,18 @@ This layer detects local Windows environment signals and converts them into cont
 - `context-engine.js`: aggregates local context signals into normalized context snapshots and activity history.
 - `mode-engine.js`: scores assistant modes, applies transition safety, and emits mode changes.
 
-### `core/device-detection`
-
-This layer detects local audio output and headphone state.
-
-- `audio-devices.js`: reads active audio output and enumerates known local audio devices.
-- `headphones.js`: detects headphone and Bluetooth device state.
-- `device-events.js`: debounces device changes and emits audio/headphone events.
-
 ### Context mode profiles
 
 Mode scoring and behavior profiles live in `core/context-awareness/mode-engine.js`.
 
-### `core/voice`
+### `apps/desktop/voice`
 
 This layer handles voice interaction:
 
 - Naturalized text-to-speech
 - Windows SAPI voice selection and speaking-rate/volume handling
 
-### `core/permissions`
+### `apps/desktop/permissions.js`
 
 This module validates whether an action is allowed. Permission levels are:
 
@@ -228,11 +220,7 @@ This module validates whether an action is allowed. Permission levels are:
 | High | Requires authentication |
 | Critical | Requires authentication and explicit consent |
 
-### `core/ui`
-
-This layer manages backend-driven UI notifications and overlays.
-
-### `core/shared`
+### `core/assistant/Data.js`
 
 This layer contains common shared utilities, the assistant event bus, and the centralized assistant data-root manager.
 
@@ -252,7 +240,7 @@ OpenX_Data/
 `-- cache/
 ```
 
-`core/shared/data-root.js` builds this layout, creates required directories, and safely migrates existing `%USERPROFILE%\.jarvis` settings, contacts, and learning files without overwriting newer `OpenX_Data` files.
+`core/assistant/Data.js` builds this layout, creates required directories, and safely migrates existing `%USERPROFILE%\.jarvis` settings, contacts, and learning files without overwriting newer `OpenX_Data` files.
 
 ### `apps/desktop`
 
@@ -261,7 +249,7 @@ This contains the Electron desktop application:
 - `electron/main.js`: Electron main process entry point.
 - `electron/security.js`: trusted-renderer checks, hardened web preferences, and channel-specific IPC payload validation.
 - `electron/crash-recovery.js`: persisted bounded relaunch policy that prevents startup crash loops.
-- `preload/index.js`: preload bridge.
+- `preload.js`: preload bridge.
 - `renderer/chat/index.html`: chat window.
 - `renderer/settings/index.html`: settings UI.
 
@@ -279,11 +267,11 @@ The test suite covers assistant core logic, automation controllers, and voice be
 - Renderer navigation and popups are denied unless they remain on the expected local application view.
 - Every IPC channel validates both the sender origin and a bounded payload schema; forbidden object keys are rejected before settings or command handling.
 - Renderer crashes are recovered with a bounded restart budget. Fatal main-process failures write crash evidence, clean up services, and use a persisted crash-loop policy before relaunching.
-- `core/shared/index.js` writes redacted JSON Lines application/error/crash logs with 10 MB size rotation and five-file retention. File logging is enabled by the production logging configuration and remains off for unconfigured unit instances.
+- `core/assistant/Data.js` writes redacted JSON Lines application/error/crash logs with 10 MB size rotation and five-file retention. File logging is enabled by the production logging configuration and remains off for unconfigured unit instances.
 
 ## 10. Event System
 
-OpenX uses a shared event bus through `core/shared/events.js`. The event system coordinates voice, assistant processing, automation, responses, and UI state.
+OpenX uses a shared event bus through `core/assistant/Data.js`. The event system coordinates voice, assistant processing, automation, responses, and UI state.
 
 Important lifecycle events include:
 
@@ -305,9 +293,6 @@ The local context system emits these signal events:
 - `active-window-changed`
 - `process-started`
 - `process-stopped`
-- `headphones-connected`
-- `headphones-disconnected`
-- `audio-device-changed`
 - `mode-entered`
 - `mode-exited`
 - `mode-changed`
@@ -330,7 +315,7 @@ User says wake word
   -> Naturalized SAPI text-to-speech speaks response
 ```
 
-The current repository keeps voice output in `core/voice/tts/index.js`, backed by Windows SAPI text-to-speech. Chat and any recognized command text enter the same deterministic assistant pipeline. `core/assistant/nlp/index.js`, `core/assistant/nlu/index.js`, and `core/assistant/router/command-frame.js` now perform command-frame extraction, typo/noise repair, multi-command splitting, and semantic routing. This allows examples such as "ope chrome", "sglkn open lsg chrome", "sglkn increse lsg volum", "stop the video and set vol to 100", and "I was just talking but please open Chrome now" to resolve to executable commands while leaving pure conversation unexecuted. `core/assistant/index.js` resolves contextual follow-ups such as "open it" from recent command entities before routing.
+The current repository keeps voice output in `apps/desktop/voice/tts.js`, backed by Windows SAPI text-to-speech. Chat and any recognized command text enter the same deterministic assistant pipeline. `core/assistant/nlp/nlp.js`, `core/assistant/nlu.js`, and `core/assistant/parser.js` now perform command-frame extraction, typo/noise repair, multi-command splitting, and semantic routing. This allows examples such as "ope chrome", "sglkn open lsg chrome", "sglkn increse lsg volum", "stop the video and set vol to 100", and "I was just talking but please open Chrome now" to resolve to executable commands while leaving pure conversation unexecuted. `core/assistant/index.js` resolves contextual follow-ups such as "open it" from recent command entities before routing.
 
 TTS now prefers configurable natural Windows voices, defaults to a slightly slower rate, keeps volume audible, and can speak SSML with short punctuation pauses through `voice.tts.naturalize`.
 
@@ -373,10 +358,6 @@ Context capabilities:
 - Active app executable path and process id detection.
 - Running process monitoring.
 - Known process category mapping.
-- Active audio output detection.
-- Bluetooth/wired headphone detection.
-- Audio device switching events.
-- Debounced device event emission.
 - Activity mode detection for development, streaming, gaming, media, work, and focus sessions.
 - Adaptive assistant behavior profiles based on current context.
 
@@ -455,7 +436,6 @@ The project contains tests for:
 - Voice pipeline
 - Wake word behavior
 - Context awareness
-- Device detection
 - Mode scoring
 - Mode transition stability
 - Electron IPC and BrowserWindow security
@@ -470,7 +450,7 @@ npm test
 
 Latest complete verification result: 465 passing, with repository-wide ESLint passing.
 
-## 17. Context Awareness And Device Detection
+## 17. Context Awareness
 
 Goal: make OpenX aware of the local Windows environment.
 
@@ -487,14 +467,10 @@ Implemented deliverables:
 | Running process monitor | Complete |
 | Process start/stop events | Complete |
 | Central signal emitter | Complete |
-| Audio device manager | Complete |
-| Headphone detection helpers | Complete |
-| Bluetooth device helper | Complete |
-| Debounced device events | Complete |
 | Local-only deterministic implementation | Complete |
 | Tests | Complete |
 
-Context and device modules:
+Context modules:
 
 | File | Purpose |
 | --- | --- |
@@ -502,9 +478,6 @@ Context and device modules:
 | `core/context-awareness/process-monitor.js` | Running process monitor using local PowerShell/WMI |
 | `core/context-awareness/signals.js` | Signal/event emitter for context changes |
 | `core/context-awareness/app-registry.js` | Known application category registry |
-| `core/device-detection/audio-devices.js` | Active audio output and audio device metadata |
-| `core/device-detection/headphones.js` | Headphone and Bluetooth detection helpers |
-| `core/device-detection/device-events.js` | Debounced audio/headphone event monitor |
 
 Active window normalized output:
 
@@ -514,18 +487,6 @@ Active window normalized output:
   title: "OpenX - Visual Studio Code",
   path: "C:\\Program Files\\Microsoft VS Code\\Code.exe",
   pid: 1234,
-  timestamp: 123456789
-}
-```
-
-Audio device normalized output:
-
-```js
-{
-  name: "WH-1000XM4",
-  type: "bluetooth-headphones",
-  active: true,
-  id: "device-id",
   timestamp: 123456789
 }
 ```
@@ -594,7 +555,6 @@ Context snapshot format:
   activeApp: "Code.exe",
   activeTitle: "OpenX - Visual Studio Code",
   runningApps: ["Code.exe", "Docker Desktop.exe"],
-  audioDevice: "WH-1000XM4",
   fullscreen: false,
   timestamp: 123456789,
   currentMode: "DEV_MODE"
@@ -674,7 +634,6 @@ Main detected communities include:
 | Community 0 | Action router and command execution coordination |
 | Community 1 | Assistant, context manager, personality, and text compaction |
 | Community 2 | Event bus, plugins, notification management, mode engine, and TTS |
-| Community 3 | Audio device and headphone/device event detection |
 | Community 4 | File/folder automation and path/search utilities |
 | Community 5 | Media controller and Windows session helpers |
 | Community 6 | Settings service, data-root management, runtime config, and UI startup helpers |
@@ -827,11 +786,7 @@ OpenX/
 |   |   |-- mode-engine.js
 |   |   |-- process-monitor.js
 |   |   `-- signals.js
-|   |-- device-detection/
-|   |   |-- audio-devices.js
-|   |   |-- device-events.js
-|   |   `-- headphones.js
-|   |-- media-understanding/
+|   |-- media-handling/
 |   |   |-- media-router.js
 |   |   |-- parser.js
 |   |   |-- phonetic.js
@@ -844,11 +799,6 @@ OpenX/
 |   |   |-- data-root.js
 |   |   |-- events.js
 |   |   `-- index.js
-|   |-- ui/
-|   |   |-- notifications/
-|   |   |   `-- index.js
-|   |   `-- overlay/
-|   |       `-- index.js
 |   `-- voice/
 |       `-- tts/
 |           `-- index.js
@@ -909,10 +859,8 @@ OpenX/
     |   |-- router.test.js
     |   |-- security-critical.test.js
     |   `-- settings.test.js
-    |-- device-detection/
-    |   `-- device-detection.test.js
-    `-- media-understanding/
-        `-- media-understanding.test.js
+    `-- media-handling/
+        `-- media-handling.test.js
 ```
 
 ## 22. Important Entry Points
@@ -922,32 +870,31 @@ OpenX/
 | `apps/desktop/electron/main.js` | Electron application startup |
 | `apps/desktop/electron/security.js` | Trusted renderer boundary, hardened web preferences, and IPC schema validation |
 | `apps/desktop/electron/crash-recovery.js` | Persisted bounded restart and crash-loop suppression policy |
-| `apps/desktop/preload/index.js` | Renderer preload bridge |
+| `apps/desktop/preload.js` | Renderer preload bridge |
 | `core/assistant/index.js` | Assistant module entry |
-| `core/assistant/router/index.js` | Command routing and execution coordination |
-| `core/assistant/router/command-frame.js` | Word/frame-level command parsing support |
-| `core/assistant/nlu/index.js` | Natural-language routing and command frame interpretation |
-| `core/assistant/learning/index.js` | Active-learning memory, preferences, facts, corrections, and routing evidence |
-| `core/assistant/intents/index.js` | Intent registry |
-| `core/assistant/entities/index.js` | Entity extraction |
+| `core/assistant/router.js` | Command routing and execution coordination |
+| `core/assistant/parser.js` | Word/frame-level command parsing support |
+| `core/assistant/nlu.js` | Natural-language routing and command frame interpretation |
+| `core/assistant/Active-learning.js` | Active-learning memory, preferences, facts, corrections, and routing evidence |
+| `core/assistant/intents.js` | Intent registry |
+| `core/assistant/entities.js` | Entity extraction |
 | `core/automation/index.js` | Automation engine entry |
 | `core/automation/common/action-verifier.js` | Shared action result validation helpers |
-| `core/automation/forms/index.js` | Form automation entry |
-| `core/automation/forms/understanding.js` | Form field understanding and validation |
-| `core/automation/screenshot/index.js` | Screenshot automation |
-| `core/media-understanding/parser.js` | Media command parsing |
-| `core/media-understanding/media-router.js` | Media intent routing |
+| `plugins/forms/index.js` | Form automation entry |
+| `plugins/forms/understanding.js` | Form field understanding and validation |
+| `core/automation/screenshot-recording.js` | Screenshot automation |
+| `core/automation/media.js` | Media command parsing |
+| `core/automation/media.js` | Media intent routing |
 | `core/context-awareness/active-window.js` | Active window monitor |
 | `core/context-awareness/context-engine.js` | Context aggregation and snapshots |
 | `core/context-awareness/mode-engine.js` | Mode scoring and transition control |
 | `core/context-awareness/process-monitor.js` | Process monitor |
 | `core/context-awareness/signals.js` | Context signal emitter |
-| `core/device-detection/device-events.js` | Audio/headphone event monitor |
-| `core/voice/tts/index.js` | Windows SAPI text-to-speech |
-| `core/shared/data-root.js` | Centralized `OpenX_Data` layout, directory creation, and legacy migration |
-| `core/shared/events.js` | Shared event bus |
-| `plugins/index.js` | Plugin manager |
-| `config/index.js` | Project configuration |
+| `apps/desktop/voice/tts.js` | Windows SAPI text-to-speech |
+| `core/assistant/Data.js` | Centralized `OpenX_Data` layout, directory creation, and legacy migration |
+| `core/assistant/Data.js` | Shared event bus |
+| `plugins/plugin-controller.js` | Plugin manager |
+| `config.js` | Project configuration |
 
 ## 23. Strengths
 
@@ -955,7 +902,7 @@ OpenX/
 - Good separation between assistant logic, automation, voice, UI, settings, permissions, and plugins.
 - Deterministic command matching is easier to test and reason about than LLM-based routing.
 - Permission validation is part of the command path.
-- Tests exist across core, automation, settings, NLU, media-understanding, context-awareness, and device-detection areas.
+- Tests exist across core, automation, settings, NLU, media handling, and context-awareness areas.
 - NLU and routing tests cover command-frame extraction from conversational speech, noisy command repair, pure-conversation rejection, contextual pronoun resolution, multi-command execution, active-learning feedback records, and centralized data-root storage.
 - Documentation exists for architecture, setup, modules, workflows, and plugins.
 - Graphify knowledge graph exists and gives useful insight into central abstractions.

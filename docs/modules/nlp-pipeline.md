@@ -6,7 +6,7 @@ The NLP pipeline turns inconsistent natural language input into a stable command
 
 ## Modules
 
-- `core/assistant/parser/index.js`
+- `core/assistant/parser.js`
   Handles wake-word detection, raw command preservation, and polite lead-in stripping.
 - `core/assistant/nlp/constants.js`
   Stores filler words, phrase replacements, and domain vocabulary.
@@ -14,7 +14,7 @@ The NLP pipeline turns inconsistent natural language input into a stable command
   Normalizes commands, strips polite prefixes, applies phrase rewrites, and collapses repeated tokens.
 - `core/assistant/nlp/scorer.js`
   Scores command patterns using overlap, order, bigrams, and string similarity.
-- `core/assistant/nlp/index.js`
+- `core/assistant/nlp/nlp.js`
   Coordinates vocabulary building, spelling correction, and scoring.
 
 ## Design Notes

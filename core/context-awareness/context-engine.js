@@ -1,14 +1,10 @@
-const Logger = require('../shared/index').Logger;
+const Logger = require('../assistant/Data').Logger;
 const signals = require('./signals');
 
 const ACTIVITY_HISTORY_LIMIT = 200;
 
 function processNameFromPayload(payload = {}) {
   return payload.name || payload.app || payload.processName || null;
-}
-
-function audioNameFromPayload(payload = {}) {
-  return payload.name || payload.audioDevice || null;
 }
 
 class ContextEngine {
@@ -26,7 +22,6 @@ class ContextEngine {
       activePath: null,
       activePid: null,
       runningApps: [],
-      audioDevice: null,
       microphoneActive: false,
       fullscreen: false,
       currentMode: null,
@@ -44,9 +39,6 @@ class ContextEngine {
       this.signals.subscribe(events.ACTIVE_WINDOW_CHANGED, envelope => this._handleActiveWindow(envelope.payload)),
       this.signals.subscribe(events.PROCESS_STARTED, envelope => this._handleProcessStarted(envelope.payload)),
       this.signals.subscribe(events.PROCESS_STOPPED, envelope => this._handleProcessStopped(envelope.payload)),
-      this.signals.subscribe(events.AUDIO_DEVICE_CHANGED, envelope => this._handleAudioDeviceChanged(envelope.payload)),
-      this.signals.subscribe(events.HEADPHONES_CONNECTED, envelope => this._handleAudioDeviceChanged(envelope.payload)),
-      this.signals.subscribe(events.HEADPHONES_DISCONNECTED, () => this._handleAudioDeviceChanged(null)),
       this.signals.subscribe(events.MICROPHONE_ACTIVITY_CHANGED, envelope => this._handleMicrophoneActivityChanged(envelope.payload)),
       this.signals.subscribe(events.MODE_CHANGED, envelope => this.updateMode(envelope.payload?.to ?? envelope.payload?.currentMode))
     ];
@@ -115,7 +107,6 @@ class ContextEngine {
       activeApp: this.state.activeApp,
       activeTitle: this.state.activeTitle,
       runningApps: [...this.state.runningApps],
-      audioDevice: this.state.audioDevice,
       microphoneActive: this.state.microphoneActive,
       fullscreen: this.state.fullscreen,
       timestamp: this.state.timestamp,
@@ -155,11 +146,6 @@ class ContextEngine {
     this.update({
       runningApps: this.state.runningApps.filter(app => app.toLowerCase() !== processName.toLowerCase())
     }, 'process-stopped');
-  }
-
-  _handleAudioDeviceChanged(payload = {}) {
-    const audioDevice = payload ? audioNameFromPayload(payload) : null;
-    this.update({ audioDevice }, 'audio-device');
   }
 
   _handleMicrophoneActivityChanged(payload = {}) {

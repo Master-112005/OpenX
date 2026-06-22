@@ -1,5 +1,5 @@
 const assert = require('assert');
-const AppCommandLanguage = require('../../core/assistant/app-language');
+const { AppCommandLanguage } = require('../../core/assistant/nlu');
 
 describe('App Command Language', function() {
   const language = new AppCommandLanguage();

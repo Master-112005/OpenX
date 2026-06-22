@@ -1,536 +1,301 @@
-MASTER RULES & DEVELOPMENT PRINCIPLES
-FOR THE WINDOWS ASSISTANT PLATFORM
+# OpenX Core Engineering Principles
 
-These rules are designed to guide:
+## RULE 1 — EVERYTHING MUST BE MODULAR
 
-AI coding agents
-developers
-contributors
-future maintainers
-automation systems
+Every feature shall exist as an independent module with isolated logic, tests, documentation, and interfaces.
 
-These are SYSTEM-LEVEL RULES for the assistant architecture, behavior, engineering quality, scalability, and development workflow.
+Modules must be designed for independent development, maintenance, and replacement.
 
-1. ASSISTANT BEHAVIOR RULES
-RULE 1 — USER RESPECT PROTOCOL
+---
 
-The assistant must always treat the user formally and respectfully.
+## RULE 2 — SINGLE RESPONSIBILITY PRINCIPLE
 
-Allowed addressing:
+Each module shall have one clearly defined responsibility.
 
-sir
-master
-boss (optional configurable)
-commander (optional configurable)
+A module must not perform unrelated operations or assume responsibilities belonging to other modules.
 
-Default:
+---
 
-sir
+## RULE 3 — UI MUST NEVER EXECUTE AUTOMATION DIRECTLY
+
+User interface components are strictly presentation layers.
+
+All actions must pass through:
+
+UI → Intent Engine → Validation → Router → Automation Layer
+
+Direct execution from the UI is prohibited.
+
+---
+
+## RULE 4 — AUTOMATION LAYER MUST NOT KNOW UI EXISTS
+
+Automation modules must operate independently of user interface implementations.
+
+Automation logic shall not import, reference, or depend on renderer, overlay, orb, or UI components.
+
+---
+
+## RULE 5 — SHARED EXECUTION PIPELINE
+
+All interaction methods must use the same execution path.
+
+Voice, chat, API, plugins, and future integrations shall process commands through:
+
+Input → Intent → Validation → Router → Execution → Response
+
+---
+
+## RULE 6 — CLEAN DIRECTORY STRUCTURE
+
+The codebase shall maintain a predictable and scalable directory hierarchy.
+
+Folder names must clearly communicate purpose and ownership.
+
+Developers should be able to understand system organization without additional guidance.
+
+---
+
+## RULE 7 — NEVER PLACE RANDOM LOGIC
+
+Logic must be placed within its appropriate module.
+
+Generic dumping grounds, oversized utility files, and unrelated helper collections are prohibited.
+
+---
+
+## RULE 8 — USE TYPE SAFETY
+
+All internal contracts shall use explicit schemas, interfaces, or type definitions.
+
+Inputs, outputs, entities, commands, and configuration objects must be validated and structured.
+
+---
+
+## RULE 9 — NO MAGIC VALUES
+
+Hardcoded values are prohibited.
+
+Constants, thresholds, limits, and configuration values must be declared using descriptive identifiers.
+
+---
+
+## RULE 10 — INTENTS MUST BE EXPLICIT
+
+Every executable action must be represented by a well-defined intent.
 
 Examples:
 
-"Good evening, sir."
-"Task completed, sir."
-"Awaiting your command, sir."
+* app.open
+* file.delete
+* volume.up
+* browser.search
 
-The assistant must NEVER:
+Ambiguous actions are not permitted.
 
-act like a friend
-use slang
-use emojis
-behave casually
-make jokes unless explicitly enabled
-RULE 2 — TASK ORIENTED COMMUNICATION
+---
 
-The assistant must:
-
-stay concise
-stay operational
-stay professional
-
-BAD:
-
-"Haha done bro!"
-
-GOOD:
-
-"Operation completed successfully, sir."
-RULE 3 — NEVER PRETEND
-
-If the assistant cannot perform an action:
-
-clearly explain failure
-never fake execution
-never hallucinate results
-
-BAD:
-
-"File deleted successfully."
-
-(when file delete failed)
-
-GOOD:
-
-"Unable to delete the file, sir. Access was denied."
-RULE 4 — ALWAYS CONFIRM DANGEROUS ACTIONS
-
-Before dangerous actions:
-
-ask confirmation
-explain consequences
-
-Examples:
-
-"This operation will permanently delete 542 files.
-Shall I proceed, sir?"
-RULE 5 — NEVER EXECUTE RAW USER TEXT
-
-All commands must go through:
-
-intent
-→ validation
-→ permissions
-→ execution
-
-NEVER:
-
-execute(userText)
-2. ARCHITECTURE RULES
-RULE 6 — EVERYTHING MUST BE MODULAR
-
-Every feature must:
-
-exist independently
-have isolated logic
-have isolated tests
-have isolated documentation
-
-BAD:
-
-main.ts handles everything
-
-GOOD:
-
-automation/files/
-automation/system/
-automation/browser/
-RULE 7 — SINGLE RESPONSIBILITY PRINCIPLE
-
-Every module should do ONE thing only.
-
-BAD:
-
-voice module controlling files
-
-GOOD:
-
-voice module
-→ only handles voice
-RULE 8 — UI MUST NEVER EXECUTE AUTOMATION DIRECTLY
-
-BAD:
-
-button click
-→ delete file
-
-GOOD:
-
-button click
-→ intent engine
-→ router
-→ automation module
-RULE 9 — AUTOMATION LAYER MUST NOT KNOW UI EXISTS
-
-Automation modules must work independently.
-
-Meaning:
-
-no orb logic
-no UI imports
-no renderer dependencies
-
-This allows:
-
-CLI support later
-API support later
-mobile support later
-RULE 10 — SHARED EXECUTION PIPELINE
-
-Voice and chat MUST use:
-
-same intent engine
-same router
-same permissions
-same automation modules
-
-BAD:
-
-voice system logic
-chat system logic
-
-GOOD:
-
-voice/chat
-→ shared pipeline
-3. CODEBASE RULES
-RULE 11 — CLEAN DIRECTORY STRUCTURE
-
-A developer must instantly understand:
-
-what each folder does
-where features belong
-how workflows operate
-
-Folder names must be:
-
-predictable
-descriptive
-scalable
-RULE 12 — NEVER PLACE RANDOM LOGIC
-
-BAD:
-
-utils.ts containing 500 functions
-
-GOOD:
-
-volume/
-brightness/
-files/
-folders/
-RULE 13 — EVERY FEATURE NEEDS ITS OWN MODULE
-
-Example:
-
-feature:
-screenshot support
-
-Must create:
-
-automation/screenshots/
-intents/screenshot.intent.ts
-RULE 14 — USE TYPE SAFETY
-
-All commands should use strict schemas.
-
-Example:
-
-interface Command {
-  intent: string;
-  entities: Record<string, any>;
-  confidence: number;
-  requiresConfirmation: boolean;
-}
-RULE 15 — NO MAGIC VALUES
-
-BAD:
-
-if(volume > 80)
-
-GOOD:
-
-MAX_SAFE_VOLUME
-4. INTENT ENGINE RULES
-RULE 16 — INTENTS MUST BE EXPLICIT
-
-BAD:
-
-"do something"
-
-GOOD:
-
-volume.up
-file.delete
-app.open
-RULE 17 — EVERY INTENT NEEDS:
-patterns
-entities
-permissions
-tests
-responses
-RULE 18 — ENTITY EXTRACTION MUST BE STRUCTURED
-
-BAD:
-
-"delete notes"
-
-GOOD:
-
-{
-  "intent": "file.delete",
-  "filename": "notes.txt"
-}
-RULE 19 — INTENT CONFIDENCE SYSTEM
-
-Each intent should include confidence scoring.
-
-Example:
-
-{
-  "intent": "volume.up",
-  "confidence": 0.94
-}
-
-Low confidence:
-
-ask clarification
-5. SECURITY RULES
-RULE 20 — PERMISSION SYSTEM IS MANDATORY
-
-Every action must define:
-
-low
-medium
-high
-critical
-RULE 21 — SYSTEM ACTIONS REQUIRE VALIDATION
-
-Examples:
-
-shutdown
-delete
-kill process
-
-Must validate:
-
-permissions
-targets
-risk
-RULE 22 — NEVER TOUCH SYSTEM FILES WITHOUT SAFETY CHECKS
-
-Protected paths:
-
-C:\Windows
-C:\Program Files
-Registry
-System32
-
-Must require:
-
-admin permission
-confirmation
-warnings
-RULE 23 — LOG ALL IMPORTANT ACTIONS
-
-Log:
-
-timestamp
-action
-result
-errors
-
-Useful for:
-
-debugging
-recovery
-auditing
-6. UI RULES
-RULE 24 — ORB MUST BE LIGHTWEIGHT
-
-Orb requirements:
-
-low CPU usage
-smooth animations
-minimal memory usage
-RULE 25 — ORB STATES MUST BE CLEAR
-
-States:
-
-idle
-listening
-processing
-success
-error
-
-Each state must have:
-
-distinct animation
-distinct color
-clear feedback
-RULE 26 — CHAT WINDOW MUST SUPPORT SILENT OPERATION
-
-The assistant must always work:
-
-without voice
-without microphone
-in libraries/offices
-RULE 27 — UI MUST NEVER FREEZE
-
-Long operations:
-
-async
-background tasks
-status indicators
-7. PERFORMANCE RULES
-RULE 28 — ASSISTANT MUST START FAST
-
-Target:
-
-startup under 3 seconds
-RULE 29 — LOW RESOURCE USAGE
-
-Idle target:
-
-low RAM
-low CPU
-minimal disk access
-RULE 30 — LAZY LOAD HEAVY MODULES
-
-Load plugins/modules only when needed.
-
-RULE 31 — NO BLOCKING OPERATIONS
-
-Use:
-
-async workflows
-worker threads
-queues
-8. PLUGIN SYSTEM RULES
-RULE 32 — PLUGINS MUST BE ISOLATED
-
-A broken plugin must NOT crash the assistant.
-
-RULE 33 — PLUGINS MUST REGISTER CAPABILITIES
-
-Each plugin defines:
-
-intents
-permissions
-actions
-RULE 34 — PLUGINS MUST FOLLOW SAME PIPELINE
-
-Plugins must use:
-
-intent
-→ validation
-→ router
-→ execution
-9. TESTING RULES
-RULE 35 — EVERY FEATURE NEEDS TESTS
-
-Required tests:
-
-intent tests
-entity extraction tests
-automation tests
-permission tests
-UI tests
-RULE 36 — TEST FAILURE CASES
-
-Examples:
-
-missing file
-invalid app
-access denied
-unsupported action
-RULE 37 — NEVER MERGE UNTESTED FEATURES
-
-All features must pass:
-
-unit tests
-integration tests
-manual validation
-10. DOCUMENTATION RULES
-RULE 38 — EVERY MODULE NEEDS DOCUMENTATION
-
-Each module must explain:
-
-purpose
-inputs
-outputs
-dependencies
-workflow
-RULE 39 — DOCUMENT ALL INTENTS
+## RULE 11 — EVERY INTENT NEEDS DEFINITION
 
 Every intent must define:
 
-name
-patterns
-entities
-examples
-permissions
-RULE 40 — KEEP ARCHITECTURE DIAGRAMS UPDATED
+* Purpose
+* Patterns
+* Entities
+* Permission Level
+* Responses
+* Validation Rules
+* Tests
 
-Whenever architecture changes:
+---
 
-update diagrams
-update docs
-update workflows
-11. DEVELOPMENT WORKFLOW RULES
-RULE 41 — FEATURE DEVELOPMENT PROCESS
+## RULE 12 — ENTITY EXTRACTION MUST BE STRUCTURED
 
-Every new feature must follow:
+Natural language inputs must be converted into structured data before execution.
 
-1. Define capability
-2. Define interaction mode
-3. Define intent
-4. Define entities
-5. Create automation module
-6. Register router
-7. Add permissions
-8. Add responses
-9. Add tests
-10. Update docs
-RULE 42 — NEVER BUILD RANDOMLY
+Example:
 
-All features must:
+{
+"intent": "file.delete",
+"filename": "notes.txt"
+}
 
-fit architecture
-follow modularity
-respect pipelines
-RULE 43 — THINK PLATFORM, NOT PROJECT
+Automation modules must never depend on raw user text.
 
-The assistant is:
+---
 
-a platform
-an ecosystem
-a framework
+## RULE 13 — INTENT CONFIDENCE SYSTEM
 
-NOT:
+Intent matching shall produce confidence scores.
 
-a toy app
-a chatbot
-a single script
-12. FUTURE SCALABILITY RULES
-RULE 44 — DESIGN FOR FUTURE MODULES
+Low-confidence matches must trigger clarification rather than execution.
 
-Future support:
+Deterministic execution is preferred over assumption-based behavior.
 
-WhatsApp
-Spotify
-smart home
-workflows
-automation chains
+---
 
-Must NOT require rewriting core systems.
+## RULE 14 — PERMISSION SYSTEM IS MANDATORY
 
-RULE 45 — CORE SYSTEMS MUST REMAIN STABLE
+Every executable action must declare a permission level.
 
-Core systems:
+Minimum levels:
 
-intents
-router
-permissions
-automation pipeline
+* Low
+* Medium
+* High
+* Critical
 
-Should remain stable while features expand.
+Permission requirements must be enforced before execution.
 
-FINAL MASTER RULE
-RULE 46 — THE ASSISTANT MUST ALWAYS PRIORITIZE:
-modularity
-maintainability
-security
-deterministic execution
-developer readability
-scalability
-offline functionality
-clean architecture
-performance
+---
 
-Over:
+## RULE 15 — SYSTEM ACTIONS REQUIRE VALIDATION
 
-quick hacks
-hardcoded logic
-random scripts
-messy workflows
-unsafe execution
+Sensitive operations must validate:
+
+* Intent
+* Target
+* Risk Level
+* Permissions
+* Preconditions
+
+Validation failures must stop execution.
+
+---
+
+## RULE 16 — PROTECTED SYSTEM AREAS REQUIRE SAFETY CHECKS
+
+Operations affecting critical operating system resources require additional safeguards.
+
+Examples include:
+
+* System directories
+* Registry modifications
+* Administrative operations
+* Security-sensitive resources
+
+High-risk actions must require confirmation and validation.
+
+---
+
+## RULE 17 — LOG ALL IMPORTANT ACTIONS
+
+The platform shall maintain structured logs for significant operations.
+
+Logs should contain:
+
+* Timestamp
+* Action
+* Result
+* Errors
+* Relevant Metadata
+
+Logging must support auditing, debugging, and recovery.
+
+---
+
+## RULE 18 — PLUGINS MUST BE ISOLATED
+
+Plugin failures must never compromise platform stability.
+
+Plugins operate within controlled boundaries and may not crash core systems.
+
+---
+
+## RULE 19 — PLUGINS MUST REGISTER CAPABILITIES
+
+Every plugin shall explicitly declare:
+
+* Intents
+* Permissions
+* Actions
+* Dependencies
+
+Capabilities must be discoverable and validated during registration.
+
+---
+
+## RULE 20 — PLUGINS MUST FOLLOW THE PIPELINE
+
+Plugins must integrate into the same execution architecture as native modules.
+
+Plugin execution path:
+
+Intent → Validation → Router → Execution
+
+Bypassing the platform pipeline is prohibited.
+
+---
+
+## RULE 21 — EVERY FEATURE NEEDS TESTS
+
+Each feature must include:
+
+* Unit Tests
+* Integration Tests
+* Permission Tests
+* Failure Case Tests
+
+Untested functionality is considered incomplete.
+
+---
+
+## RULE 22 — EVERY MODULE NEEDS DOCUMENTATION
+
+Every module shall document:
+
+* Purpose
+* Inputs
+* Outputs
+* Dependencies
+* Workflows
+* Extension Points
+
+Documentation must remain synchronized with implementation.
+
+---
+
+## RULE 23 — NEVER BUILD RANDOMLY
+
+New functionality must align with platform architecture.
+
+Features that violate modularity, security, scalability, or execution standards shall not be introduced.
+
+---
+
+## RULE 24 — THINK PLATFORM, NOT PROJECT
+
+OpenX is a platform architecture, not a single-purpose application.
+
+Design decisions must prioritize extensibility, maintainability, and long-term evolution.
+
+---
+
+## RULE 25 — CORE SYSTEMS MUST REMAIN STABLE
+
+The following systems are foundational:
+
+* Intent Engine
+* Router
+* Permission System
+* Automation Pipeline
+
+Feature growth must not require redesigning these core systems.
+
+---
+
+## RULE 26 — FINAL MASTER RULE
+
+Every engineering decision shall prioritize:
+
+* Modularity
+* Maintainability
+* Security
+* Deterministic Execution
+* Developer Readability
+* Scalability
+* Offline Functionality
+* Clean Architecture
+* Performance
+
+These priorities always take precedence over quick fixes, hardcoded solutions, unsafe execution paths, or short-term convenience.

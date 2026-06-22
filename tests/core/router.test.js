@@ -5,7 +5,7 @@ describe('Action Router', function() {
   let ActionRouter, AutomationEngine;
 
   before(function() {
-    ActionRouter = require('../../core/assistant/router/index');
+    ActionRouter = require('../../core/assistant/router');
     AutomationEngine = require('../../core/automation/index');
   });
 
@@ -1695,7 +1695,7 @@ describe('Action Router', function() {
     assert.equal(result.entities.mediaPlatform, 'youtube');
   });
 
-  it('should preserve voice media playback names through media understanding', async function() {
+  it('should preserve voice media playback names through media handling', async function() {
     const config = {
       permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
     };
@@ -1713,7 +1713,7 @@ describe('Action Router', function() {
     assert.equal(Object.prototype.hasOwnProperty.call(result.entities, 'artist'), false);
   });
 
-  it('should route open youtube and play genre requests through media understanding', async function() {
+  it('should route open youtube and play genre requests through media handling', async function() {
     const config = {
       permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
     };
@@ -2198,7 +2198,7 @@ describe('Action Router', function() {
   });
 
   it('should apply learned personal photo library preference during routing', async function() {
-    const ActiveLearningStore = require('../../core/assistant/learning/index');
+    const ActiveLearningStore = require('../../core/assistant/Active-learning');
     const config = {
       permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
     };

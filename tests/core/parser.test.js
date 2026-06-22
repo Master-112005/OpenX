@@ -4,7 +4,7 @@ describe('Input Parser', function() {
   let InputParser;
 
   before(function() {
-    InputParser = require('../../core/assistant/parser/index');
+    InputParser = require('../../core/assistant/parser');
   });
 
   it('should parse a simple command', function() {

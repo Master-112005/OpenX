@@ -1,19 +1,19 @@
-const Logger = require('../shared/index').Logger;
-const Normalizer = require('../shared/index').Normalizer;
-const VolumeController = require('./volume/index');
-const BrightnessController = require('./brightness/index');
-const FileController = require('./files/index');
-const FolderController = require('./folders/index');
-const AppController = require('./apps/index');
-const BrowserController = require('./browser/index');
-const MediaController = require('./media/index');
-const CommunicationsController = require('./communications/index');
-const SystemController = require('./system/index');
-const WindowsController = require('./windows/index');
-const SchedulerController = require('./scheduler/index');
-const ScreenshotController = require('./screenshot/index');
-const FormAutomation = require('./forms/index');
-const ActionVerifier = require('./common/action-verifier');
+const Logger = require('../assistant/Data').Logger;
+const Normalizer = require('../assistant/Data').Normalizer;
+const VolumeController = require('./volume');
+const BrightnessController = require('./brightness');
+const FileController = require('./files');
+const FolderController = require('./folders');
+const AppController = require('./apps');
+const BrowserController = require('./browser');
+const MediaController = require('./media');
+const CommunicationsController = require('./communications');
+const SystemController = require('./system');
+const WindowsController = require('./windows');
+const SchedulerController = require('./scheduler');
+const ScreenshotController = require('./screenshot-recording');
+const FormAutomation = require('../../plugins/forms');
+const ActionVerifier = require('./common/action-verification');
 
 class AutomationEngine {
   constructor(config) {

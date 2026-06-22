@@ -11,10 +11,10 @@ This module provides persistent assistant settings for:
 
 ## Files
 
-- `core/settings/index.js`
-- `core/automation/communications/contact-store.js`
+- `apps/desktop/settings.js`
+- `plugins/communications/contact-store.js`
 - `apps/desktop/electron/main.js`
-- `apps/desktop/preload/index.js`
+- `apps/desktop/preload.js`
 - `apps/desktop/renderer/chat/index.html`
 
 ## Workflow

@@ -3,7 +3,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const { Logger } = require('../../core/shared/index');
+const { Logger } = require('../../core/assistant/Data');
 
 describe('Structured Logger', function() {
   let directory;

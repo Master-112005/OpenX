@@ -3,12 +3,12 @@ const path = require('path');
 const fs = require('fs');
 const os = require('os');
 
-const BASE_CONFIG = require('../../../config/index');
+const BASE_CONFIG = require('../../../config');
 const Assistant = require('../../../core/assistant/index');
-const TextToSpeech = require('../../../core/voice/tts/index');
-const { SettingsService } = require('../../../core/settings/index');
-const { AssistantEventBus, EVENTS, Logger } = require('../../../core/shared/index');
-const { ensureDataRoot, migrateLegacyData } = require('../../../core/shared/data-root');
+const TextToSpeech = require('../voice/tts');
+const { SettingsService } = require('../settings');
+const { AssistantEventBus, EVENTS, Logger } = require('../../../core/assistant/Data');
+const { ensureDataRoot, migrateLegacyData } = require('../../../core/assistant/Data');
 const CrashRecoveryPolicy = require('./crash-recovery');
 const {
   IPC_VALIDATORS,
@@ -19,7 +19,7 @@ const {
 } = require('./security');
 
 const RENDERER_ROOT = path.resolve(__dirname, '..', 'renderer');
-const PRELOAD_PATH = path.join(__dirname, '..', 'preload', 'index.js');
+const PRELOAD_PATH = path.join(__dirname, '..', 'preload.js');
 const MAX_RENDERER_RESTARTS = 3;
 const RENDERER_RESTART_WINDOW_MS = 60 * 1000;
 const RENDERER_RESTART_DELAY_MS = 1000;

@@ -4,7 +4,7 @@ describe('Browser Controller', function() {
   let BrowserController;
 
   before(function() {
-    BrowserController = require('../../core/automation/browser/index');
+    BrowserController = require('../../core/automation/browser');
   });
 
   it('should search in the background by default', async function() {

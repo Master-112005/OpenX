@@ -3,7 +3,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const SchedulerController = require('../../core/automation/scheduler/index');
+const SchedulerController = require('../../core/automation/scheduler');
 
 describe('Scheduler Alert Delivery', function() {
   it('should persist schedules and publish due events without terminal scripts', async function() {

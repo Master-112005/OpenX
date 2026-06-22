@@ -4,7 +4,7 @@ describe('Intent Registry', function() {
   let IntentRegistry;
 
   before(function() {
-    IntentRegistry = require('../../core/assistant/intents/index').IntentRegistry;
+    IntentRegistry = require('../../core/assistant/intents').IntentRegistry;
   });
 
   it('should initialize with all intents', function() {

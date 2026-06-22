@@ -69,7 +69,7 @@
 - Window minimize/maximize/close
 - Hibernate and logoff
 
-## Voice (`core/voice/`)
+## Voice (`apps/desktop/voice/`)
 
 ### Wake Word Detector
 - Listens for activation phrase
@@ -86,7 +86,7 @@
 - Configurable voice, rate, volume
 - Available voice enumeration
 
-## Permissions (`core/permissions/`)
+## Permissions (`apps/desktop/permissions.js`)
 
 - Level-based permission system (low → critical)
 - Confirmation required for medium+

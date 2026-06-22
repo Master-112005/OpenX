@@ -4,7 +4,7 @@ describe('App Controller', function() {
   let AppController;
 
   before(function() {
-    AppController = require('../../core/automation/apps/index');
+    AppController = require('../../core/automation/apps');
   });
 
   it('should match packaged WhatsApp process names when closing apps', function() {
@@ -382,7 +382,7 @@ describe('App Controller', function() {
     const fs = require('fs');
     const originalExecFileSync = childProcess.execFileSync;
     const originalExistsSync = fs.existsSync;
-    const appsPath = require.resolve('../../core/automation/apps/index');
+    const appsPath = require.resolve('../../core/automation/apps');
     const launcherPath = require.resolve('../../core/automation/common/launcher');
     const previousApps = require.cache[appsPath];
     const previousLauncher = require.cache[launcherPath];
@@ -412,7 +412,7 @@ describe('App Controller', function() {
         return originalExecFileSync(command, args);
       };
 
-      const FreshAppController = require('../../core/automation/apps/index');
+      const FreshAppController = require('../../core/automation/apps');
       const controller = new FreshAppController({});
       controller._getRunningProcessDetails = () => [];
       let startMenuUsed = false;
@@ -490,7 +490,7 @@ describe('App Controller', function() {
 
   it('should launch Chrome with an explicit new-window argument', function() {
     const fs = require('fs');
-    const appsPath = require.resolve('../../core/automation/apps/index');
+    const appsPath = require.resolve('../../core/automation/apps');
     const launcherPath = require.resolve('../../core/automation/common/launcher');
     const previousApps = require.cache[appsPath];
     const previousLauncher = require.cache[launcherPath];
@@ -510,7 +510,7 @@ describe('App Controller', function() {
         }
       };
       fs.existsSync = target => String(target).toLowerCase().endsWith('chrome.exe') || originalExistsSync(target);
-      const FreshAppController = require('../../core/automation/apps/index');
+      const FreshAppController = require('../../core/automation/apps');
       const controller = new FreshAppController({});
       const counts = [1, 2];
       controller._countAppWindows = () => counts.shift() ?? 2;
@@ -533,7 +533,7 @@ describe('App Controller', function() {
   });
 
   it('should launch another VS Code window through the command instead of Start menu', function() {
-    const appsPath = require.resolve('../../core/automation/apps/index');
+    const appsPath = require.resolve('../../core/automation/apps');
     const launcherPath = require.resolve('../../core/automation/common/launcher');
     const previousApps = require.cache[appsPath];
     const previousLauncher = require.cache[launcherPath];
@@ -551,7 +551,7 @@ describe('App Controller', function() {
           }
         }
       };
-      const FreshAppController = require('../../core/automation/apps/index');
+      const FreshAppController = require('../../core/automation/apps');
       const controller = new FreshAppController({});
       const counts = [1, 2];
       controller._countAppWindows = () => counts.shift() ?? 2;

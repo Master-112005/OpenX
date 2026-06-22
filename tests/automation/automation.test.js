@@ -46,7 +46,7 @@ describe('Automation Engine', function() {
   });
 
   it('should parse alarm times that include today', function() {
-    const SchedulerController = require('../../core/automation/scheduler/index');
+    const SchedulerController = require('../../core/automation/scheduler');
     const scheduler = new SchedulerController({});
 
     const timeThenToday = scheduler._parseTimeExpression('2:43 pm today');
@@ -84,7 +84,7 @@ describe('Automation Engine', function() {
   });
 
   it('should fill blank text form templates from saved personal context', async function() {
-    const FormAutomation = require('../../core/automation/forms/index');
+    const FormAutomation = require('../../plugins/forms');
     const forms = new FormAutomation({});
     const result = await forms.fill({
       userFacts: {
@@ -102,7 +102,7 @@ describe('Automation Engine', function() {
   });
 
   it('should inspect a Google Form and open a prefilled URL', async function() {
-    const FormAutomation = require('../../core/automation/forms/index');
+    const FormAutomation = require('../../plugins/forms');
     const opened = [];
     const forms = new FormAutomation({}, {
       browser: {
@@ -522,7 +522,7 @@ describe('Automation Engine', function() {
   });
 
   it('should execute visible app listing separately from process count', async function() {
-    const SystemController = require('../../core/automation/system/index');
+    const SystemController = require('../../core/automation/system');
     const system = new SystemController({});
     system.getRunningApps = (entities) => ({
       success: true,
@@ -755,7 +755,7 @@ describe('Automation Engine', function() {
   });
 
   it('should parse human reminder day phrases', function() {
-    const SchedulerController = require('../../core/automation/scheduler/index');
+    const SchedulerController = require('../../core/automation/scheduler');
     const scheduler = new SchedulerController({});
 
     const tomorrow = scheduler._parseTimeExpression('tomorrow 10pm');

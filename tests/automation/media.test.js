@@ -4,7 +4,7 @@ describe('Media Controller', function() {
   let MediaController;
 
   before(function() {
-    MediaController = require('../../core/automation/media/index');
+    MediaController = require('../../core/automation/media');
   });
 
   function createController() {

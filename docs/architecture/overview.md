@@ -19,32 +19,38 @@ Wake Word / Chat Input
   -> UI State Synchronization
 ```
 
+## Stable module entry points
+
+The assistant architecture is implemented through flat, role-based modules in `core/assistant/`:
+
+- `nlp/nlp.js` normalizes input and repairs language.
+- `nlu.js` builds semantic context.
+- `parser.js` creates command frames and entities.
+- `router.js` selects intents and routes actions.
+- `nle.js` delegates resolved actions to the automation engine.
+- `context.js`, `contest.js`, `entities.js`, and `intents.js` provide command understanding state.
+- `Active-learning.js`, `personality.js`, `responses.js`, and `Data.js` provide learning, presentation, and persistence boundaries.
+
+System-side capabilities are implemented directly by the flat modules in `core/automation/`. Validation, verification, and confirmation are separated under `core/automation/common/`.
+
+Desktop integration is exposed through `apps/desktop/preload.js`, `settings.js`, `permissions.js`, and `voice/tts.js`. External integrations continue through `plugins/plugin-controller.js` and isolated plugin packages.
+
 ## Layer Definitions
 
 ### 1. Input Layer
-- Voice input (`core/voice/`)
+- Voice output (`apps/desktop/voice/tts.js`)
 - Chat input (`apps/desktop/renderer/chat/`)
-
-Voice flow now follows:
-`wake word -> spoken acknowledgement -> active listener session -> local Whisper STT -> shared assistant pipeline`
-with Windows Speech Recognition kept only as a fallback backend.
-
-Key voice modules:
-- `core/voice/state/`: explicit speech lifecycle state machine
-- `core/voice/listener/`: active listening session control
-- `core/voice/vad/`: deterministic speech activity gate
-- `core/voice/buffering/`: pre-roll and utterance buffering
 
 ### 2. Processing Layer (`core/assistant/`)
 - **Parser**: normalizes input and strips lead-ins
 - **Intent Matcher**: deterministically maps commands to intents
 - **Entity Extractor**: extracts structured values, names, paths, and targets
 
-### 3. Security Layer (`core/permissions/`)
+### 3. Security Layer (`apps/desktop/permissions.js`)
 - Validates permission levels
 - Requires confirmation for dangerous actions
 
-### 4. Routing Layer (`core/assistant/router/`)
+### 4. Routing Layer (`core/assistant/router.js`)
 - Maps intents to actions
 - Orchestrates the shared command pipeline
 
@@ -54,12 +60,12 @@ Key voice modules:
 - System monitoring
 - Windows OS commands
 
-### 6. Response Layer (`core/assistant/responses/`)
+### 6. Response Layer (`core/assistant/responses.js`)
 - Template-based responses
 - Personality integration
 - Deterministic response generation
 
-### 7. Event Layer (`core/shared/events.js`)
+### 7. Data and Event Layer (`core/assistant/Data.js`)
 - Shared event bus for voice, assistant, and UI modules
 - Standard lifecycle events including:
   - `wakeword.detected`
@@ -72,8 +78,8 @@ Key voice modules:
   - `response.generated`
   - `ui.state.changed`
 
-### 8. UI Synchronization Layer (`core/ui/state/`)
-- Backend state drives orb state changes
+### 8. Desktop UI Layer (`apps/desktop/renderer/`)
+- Electron renderer surfaces own chat, settings, notifications, and schedule alerts
 - UI never executes automation directly
 - Voice and chat stay as presentation surfaces over the same backend
 

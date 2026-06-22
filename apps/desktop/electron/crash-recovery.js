@@ -1,4 +1,4 @@
-const { readJsonFile, writeJsonAtomic } = require('../../../core/shared/data-root');
+const { readJsonFile, writeJsonAtomic } = require('../../../core/assistant/Data');
 
 class CrashRecoveryPolicy {
   constructor(options = {}) {

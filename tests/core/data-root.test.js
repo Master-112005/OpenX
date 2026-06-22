@@ -7,7 +7,7 @@ describe('Assistant Data Root', function() {
   let dataRoot;
 
   before(function() {
-    dataRoot = require('../../core/shared/data-root');
+    dataRoot = require('../../core/assistant/Data');
   });
 
   it('should default assistant-owned data to OpenX_Data', function() {

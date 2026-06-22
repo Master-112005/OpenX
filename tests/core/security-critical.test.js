@@ -4,7 +4,7 @@ const os = require('os');
 const path = require('path');
 
 const Assistant = require('../../core/assistant/index');
-const PluginManager = require('../../plugins/index');
+const PluginManager = require('../../plugins/plugin-controller');
 
 describe('Critical Security Regressions', function() {
   it('should reject forged confirmation payloads and use pending entities only', async function() {

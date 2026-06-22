@@ -21,7 +21,7 @@ npm start
 
 ## Configuration
 
-Edit `config/index.js` to customize:
+Edit `config.js` to customize:
 - Wake word
 - Orb appearance
 - Voice settings

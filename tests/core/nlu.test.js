@@ -11,11 +11,11 @@ describe('Natural Language Router', function() {
   let ActiveLearningStore;
 
   before(function() {
-    NaturalLanguageRouter = require('../../core/assistant/nlu/index');
-    NlpProcessor = require('../../core/assistant/nlp/index');
-    EntityExtractor = require('../../core/assistant/entities/index');
-    IntentRegistry = require('../../core/assistant/intents/index').IntentRegistry;
-    ActiveLearningStore = require('../../core/assistant/learning/index');
+    NaturalLanguageRouter = require('../../core/assistant/nlu');
+    NlpProcessor = require('../../core/assistant/nlp/nlp');
+    EntityExtractor = require('../../core/assistant/entities');
+    IntentRegistry = require('../../core/assistant/intents').IntentRegistry;
+    ActiveLearningStore = require('../../core/assistant/Active-learning');
   });
 
   function createRouter() {
