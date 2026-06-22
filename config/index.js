@@ -67,7 +67,8 @@ const CONFIG = {
     maxDisplayMessages: 100,
     fontSize: 14,
     fontFamily: 'Segoe UI, sans-serif',
-    activeTheme: 'midnight',
+    activeTheme: 'graphite',
+    glassTint: 42,
     theme: {
       dark: {
         background: '#1a1a2e',

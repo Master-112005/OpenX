@@ -1,13 +1,19 @@
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const { spawnSync } = require('child_process');
 const Logger = require('../../shared/index').Logger;
 const IdGenerator = require('../../shared/index').IdGenerator;
+const { EVENTS } = require('../../shared/events');
 
 class SchedulerController {
   constructor(config) {
     this.logger = new Logger(config?.logging || { level: 'info' });
+    this.eventBus = config?.eventBus || null;
+    this.schedulePath = path.join(config?.app?.dataDir || process.cwd(), 'schedules.json');
+    this.scheduledItems = this._loadScheduledItems();
+    this.timers = new Map();
+    this._cleanupLegacyWindowsTasks(config);
+    this.scheduledItems.filter(item => item.status === 'scheduled').forEach(item => this._arm(item));
   }
 
   setTimer(durationMinutes) {
@@ -267,23 +273,25 @@ class SchedulerController {
   _scheduleNotification({ kind, title, message, dueAt }) {
     try {
       const taskName = `JARVIS_${kind}_${IdGenerator.short()}`;
-      const scriptPath = this._writeNotificationScript(taskName, title, message);
-      const registerScript = this._buildRegisterTaskScript(taskName, scriptPath, dueAt);
-
-      execFileSync('powershell.exe', [
-        '-NoProfile',
-        '-Command',
-        registerScript
-      ], {
-        timeout: 15000,
-        stdio: 'ignore'
-      });
+      const item = {
+        id: taskName,
+        taskName,
+        kind,
+        title,
+        message,
+        dueAt: dueAt.toISOString(),
+        status: 'scheduled',
+        createdAt: new Date().toISOString()
+      };
+      this.scheduledItems.push(item);
+      this._saveScheduledItems();
+      this._arm(item);
 
       return {
         success: true,
         data: {
           taskName,
-          dueAt: dueAt.toISOString(),
+          dueAt: item.dueAt,
           kind
         }
       };
@@ -293,29 +301,82 @@ class SchedulerController {
     }
   }
 
-  _writeNotificationScript(taskName, title, message) {
-    const safeTitle = String(title || '').replace(/'/g, "''");
-    const safeMessage = String(message || '').replace(/'/g, "''");
-    const scriptPath = path.join(os.tmpdir(), `${taskName}.ps1`);
-    const script = [
-      "Add-Type -AssemblyName PresentationFramework",
-      `[System.Windows.MessageBox]::Show('${safeMessage}','${safeTitle}') | Out-Null`
-    ].join('\r\n');
-
-    fs.writeFileSync(scriptPath, script, 'utf8');
-    return scriptPath;
+  _loadScheduledItems() {
+    try {
+      if (!fs.existsSync(this.schedulePath)) return [];
+      const parsed = JSON.parse(fs.readFileSync(this.schedulePath, 'utf8'));
+      return Array.isArray(parsed) ? parsed : [];
+    } catch (error) {
+      this.logger.warn('Could not load persisted schedules', error.message);
+      return [];
+    }
   }
 
-  _buildRegisterTaskScript(taskName, scriptPath, dueAt) {
-    const safeTaskName = String(taskName || '').replace(/'/g, "''");
-    const safeScriptPath = String(scriptPath || '').replace(/'/g, "''");
-    const safeDate = String(dueAt.toISOString()).replace(/'/g, "''");
+  _cleanupLegacyWindowsTasks(config) {
+    if (process.platform !== 'win32' || !config?.app?.dataDir || config.app.cleanupLegacySchedules === false) return;
+    const script = "Get-ScheduledTask -TaskName 'JARVIS_*' -ErrorAction SilentlyContinue | Unregister-ScheduledTask -Confirm:$false";
+    spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
+      stdio: 'ignore',
+      timeout: 10000,
+      windowsHide: true
+    });
+  }
 
-    return [
-      `$action = New-ScheduledTaskAction -Execute 'powershell.exe' -Argument '-NoProfile -ExecutionPolicy Bypass -File "${safeScriptPath}"'`,
-      `$trigger = New-ScheduledTaskTrigger -Once -At ([datetime]'${safeDate}')`,
-      `Register-ScheduledTask -TaskName '${safeTaskName}' -Action $action -Trigger $trigger -Force | Out-Null`
-    ].join('; ');
+  _saveScheduledItems() {
+    const directory = path.dirname(this.schedulePath);
+    if (!fs.existsSync(directory)) fs.mkdirSync(directory, { recursive: true });
+    fs.writeFileSync(this.schedulePath, JSON.stringify(this.scheduledItems.slice(-100), null, 2), 'utf8');
+  }
+
+  _arm(item) {
+    if (!item?.id || item.status !== 'scheduled') return;
+    const existing = this.timers.get(item.id);
+    if (existing) clearTimeout(existing);
+    const remaining = new Date(item.dueAt).getTime() - Date.now();
+    if (!Number.isFinite(remaining)) return;
+    const delay = Math.max(0, Math.min(remaining, 2147483647));
+    const timer = setTimeout(() => {
+      this.timers.delete(item.id);
+      if (remaining > 2147483647) {
+        this._arm(item);
+        return;
+      }
+      this._publishDue(item);
+    }, delay);
+    this.timers.set(item.id, timer);
+  }
+
+  _publishDue(item) {
+    if (!item || item.status !== 'scheduled') return;
+    item.status = 'due';
+    this._saveScheduledItems();
+    this.eventBus?.publish?.(EVENTS.SCHEDULE_DUE, { ...item });
+  }
+
+  snooze(id, minutes = 5) {
+    const item = this.scheduledItems.find(entry => entry.id === id || entry.taskName === id);
+    if (!item) return { success: false, error: 'Schedule not found' };
+    item.status = 'scheduled';
+    item.dueAt = new Date(Date.now() + (Math.max(1, Number(minutes) || 5) * 60 * 1000)).toISOString();
+    this._saveScheduledItems();
+    this._arm(item);
+    return { success: true, data: { ...item } };
+  }
+
+  complete(id) {
+    const item = this.scheduledItems.find(entry => entry.id === id || entry.taskName === id);
+    if (!item) return { success: false, error: 'Schedule not found' };
+    const timer = this.timers.get(item.id);
+    if (timer) clearTimeout(timer);
+    this.timers.delete(item.id);
+    item.status = 'completed';
+    this._saveScheduledItems();
+    return { success: true, data: { ...item } };
+  }
+
+  destroy() {
+    for (const timer of this.timers.values()) clearTimeout(timer);
+    this.timers.clear();
   }
 }
 

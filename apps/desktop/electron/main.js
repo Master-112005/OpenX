@@ -7,7 +7,7 @@ const BASE_CONFIG = require('../../../config/index');
 const Assistant = require('../../../core/assistant/index');
 const TextToSpeech = require('../../../core/voice/tts/index');
 const { SettingsService } = require('../../../core/settings/index');
-const { AssistantEventBus, Logger } = require('../../../core/shared/index');
+const { AssistantEventBus, EVENTS, Logger } = require('../../../core/shared/index');
 const { ensureDataRoot, migrateLegacyData } = require('../../../core/shared/data-root');
 const CrashRecoveryPolicy = require('./crash-recovery');
 const {
@@ -83,7 +83,7 @@ const crashRecoveryPolicy = new CrashRecoveryPolicy({
 });
 
 let chatWindow = null;
-let settingsWindow = null;
+let alertWindow = null;
 let tray = null;
 let assistant = null;
 let textToSpeech = null;
@@ -106,6 +106,7 @@ const IPC_CHANNELS = [
   'command:confirm',
   'assistant:status',
   'tts:speak',
+  'tts:stop',
   'window:openChat',
   'window:openSettings',
   'config:get',
@@ -115,6 +116,7 @@ const IPC_CHANNELS = [
   'contacts:list',
   'contacts:save',
   'contacts:delete',
+  'schedule:alertAction',
   'app:quit'
 ];
 
@@ -252,8 +254,10 @@ function createChatWindow() {
   }
 
   chatWindow = new BrowserWindow({
-    width: 380,
-    height: 520,
+    width: 400,
+    height: 560,
+    minWidth: 340,
+    minHeight: 460,
     transparent: true,
     frame: false,
     resizable: true,
@@ -283,32 +287,57 @@ function createChatWindow() {
 }
 
 function createSettingsWindow() {
-  if (settingsWindow && !settingsWindow.isDestroyed()) {
-    settingsWindow.focus();
+  const chatWasOpen = Boolean(chatWindow && !chatWindow.isDestroyed());
+  createChatWindow();
+  const openSettings = () => {
+    if (chatWindow && !chatWindow.isDestroyed()) {
+      chatWindow.webContents.send('settings:open');
+    }
+  };
+  if (chatWasOpen) {
+    openSettings();
+  } else {
+    chatWindow.webContents.once('did-finish-load', openSettings);
+  }
+}
+
+function presentScheduleAlert(schedule) {
+  if (alertWindow && !alertWindow.isDestroyed()) {
+    alertWindow.show();
+    alertWindow.focus();
+    alertWindow.webContents.send('schedule:due', schedule);
     return;
   }
 
-  settingsWindow = new BrowserWindow({
-    width: 600,
-    height: 500,
-    resizable: true,
-    frame: true,
+  alertWindow = new BrowserWindow({
+    width: 420,
+    height: 440,
+    transparent: true,
+    frame: false,
+    resizable: false,
+    alwaysOnTop: true,
+    skipTaskbar: false,
+    hasShadow: true,
     webPreferences: createSecureWebPreferences(PRELOAD_PATH)
   });
-
-  const settingsFile = path.join(RENDERER_ROOT, 'settings', 'index.html');
-  secureWindow(settingsWindow, {
-    windowType: 'settings',
-    expectedFile: settingsFile,
-    createWindow: createSettingsWindow
+  const alertFile = path.join(RENDERER_ROOT, 'alert', 'index.html');
+  secureWindow(alertWindow, {
+    windowType: 'schedule-alert',
+    expectedFile: alertFile,
+    createWindow: () => presentScheduleAlert(schedule)
   });
-  settingsWindow.loadFile(settingsFile).catch(error => {
-    mainLogger.error('Failed to load settings renderer', { error: error.message });
+  alertWindow.loadFile(alertFile).then(() => {
+    if (alertWindow && !alertWindow.isDestroyed()) {
+      alertWindow.center();
+      alertWindow.webContents.send('schedule:due', schedule);
+      alertWindow.show();
+      alertWindow.focus();
+    }
+  }).catch(error => {
+    mainLogger.error('Failed to load schedule alert renderer', { error: error.message });
   });
-  settingsWindow.setMenu(null);
-
-  settingsWindow.on('closed', () => {
-    settingsWindow = null;
+  alertWindow.on('closed', () => {
+    alertWindow = null;
   });
 }
 
@@ -386,6 +415,13 @@ function setupIPC() {
     return { success: true };
   });
 
+  registerIpcHandler('tts:stop', async () => {
+    if (textToSpeech) {
+      textToSpeech.stop();
+    }
+    return { success: true };
+  });
+
   registerIpcHandler('window:openChat', async () => {
     createChatWindow();
   });
@@ -426,6 +462,15 @@ function setupIPC() {
   registerIpcHandler('contacts:delete', async (_event, { name }) => {
     settingsService.deleteContact(name);
     return settingsService.getSnapshot().contacts;
+  });
+
+  registerIpcHandler('schedule:alertAction', async (_event, { id, action, minutes }) => {
+    const scheduler = assistant?.automation?.scheduler;
+    const result = action === 'snooze'
+      ? scheduler?.snooze(id, minutes)
+      : scheduler?.complete(id);
+    if (alertWindow && !alertWindow.isDestroyed()) alertWindow.close();
+    return result || { success: false, error: 'Scheduler unavailable' };
   });
 
   registerIpcHandler('app:quit', async () => {
@@ -521,7 +566,7 @@ async function cleanupRuntime() {
     await destroyAssistantInstance();
     eventBus?.removeAllListeners?.();
     if (chatWindow && !chatWindow.isDestroyed()) chatWindow.destroy();
-    if (settingsWindow && !settingsWindow.isDestroyed()) settingsWindow.destroy();
+    if (alertWindow && !alertWindow.isDestroyed()) alertWindow.destroy();
     if (tray) {
       tray.destroy();
       tray = null;
@@ -616,9 +661,6 @@ async function reloadRuntimeServices() {
     chatWindow.webContents.send('settings:changed', settingsService.getSnapshot());
   }
 
-  if (settingsWindow?.webContents) {
-    settingsWindow.webContents.send('settings:changed', settingsService.getSnapshot());
-  }
 }
 
 function normalizeError(reason) {
@@ -706,6 +748,7 @@ app.whenReady().then(async () => {
   settingsService = new SettingsService(BASE_CONFIG);
   runtimeConfig = settingsService.buildRuntimeConfig();
   eventBus = new AssistantEventBus();
+  eventBus.subscribe(EVENTS.SCHEDULE_DUE, envelope => presentScheduleAlert(envelope.payload));
   setupIPC();
   createTray();
   await initializeAssistant();

@@ -66,10 +66,10 @@ describe('Electron Security Boundary', function() {
 
   it('should provide a validator for every registered IPC channel', function() {
     const expectedChannels = [
-      'command:process', 'command:confirm', 'assistant:status', 'tts:speak',
+      'command:process', 'command:confirm', 'assistant:status', 'tts:speak', 'tts:stop',
       'window:openChat', 'window:openSettings', 'config:get', 'settings:get',
       'settings:save', 'settings:reset', 'contacts:list', 'contacts:save',
-      'contacts:delete', 'app:quit'
+      'contacts:delete', 'schedule:alertAction', 'app:quit'
     ];
 
     assert.deepEqual(Object.keys(IPC_VALIDATORS).sort(), expectedChannels.sort());

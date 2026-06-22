@@ -35,7 +35,8 @@ describe('Settings Service', function() {
       },
       chat: {
         activationShortcut: 'Alt+Space',
-        activeTheme: 'midnight',
+        activeTheme: 'graphite',
+        glassTint: 42,
         maxHistory: 500
       }
     };
@@ -52,13 +53,14 @@ describe('Settings Service', function() {
     const snapshot = service.getSnapshot();
 
     assert.equal(snapshot.settings.assistant.displayName, 'JARVIS');
-    assert.equal(snapshot.settings.chat.themeId, 'midnight');
+    assert.equal(snapshot.settings.chat.themeId, 'graphite');
+    assert.equal(snapshot.settings.chat.glassTint, 42);
     assert.equal(snapshot.dataRoot, tempDir);
     assert.equal(snapshot.dataPaths.settingsPath, path.join(tempDir, 'settings.json'));
     assert.equal(snapshot.dataPaths.learningPath, path.join(tempDir, 'learning.json'));
     assert.equal(snapshot.contactsPath, contactsPath);
     assert.ok(Array.isArray(snapshot.availableThemes));
-    assert.ok(snapshot.availableThemes.length >= 1);
+    assert.deepEqual(snapshot.availableThemes.map(theme => theme.id), ['graphite', 'white-glass', 'black-glass']);
   });
 
   it('should persist assistant profile and user details', function() {
@@ -82,7 +84,8 @@ describe('Settings Service', function() {
       },
       chat: {
         activationShortcut: 'control + shift + j',
-        themeId: 'forest',
+        themeId: 'white-glass',
+        glassTint: 68,
         maxHistory: 900
       },
       system: {
@@ -112,7 +115,8 @@ describe('Settings Service', function() {
     assert.equal(saved.voice.tts.volume, 72);
     assert.equal(saved.userProfile.fullName, 'Rakesh');
     assert.equal(saved.userProfile.phone, '+919876543210');
-    assert.equal(saved.chat.themeId, 'forest');
+    assert.equal(saved.chat.themeId, 'white-glass');
+    assert.equal(saved.chat.glassTint, 68);
     assert.equal(saved.chat.maxHistory, 900);
     assert.equal(saved.system.permissionLevel, 'critical');
     assert.equal(saved.activeLearning.enabled, false);
@@ -136,7 +140,8 @@ describe('Settings Service', function() {
     assert.equal(runtimeConfig.voice.tts.rate, 4);
     assert.equal(runtimeConfig.voice.tts.volume, 72);
     assert.equal(runtimeConfig.assistant.userProfile.email, 'rakesh@example.com');
-    assert.equal(runtimeConfig.chat.activeTheme, 'forest');
+    assert.equal(runtimeConfig.chat.activeTheme, 'white-glass');
+    assert.equal(runtimeConfig.chat.glassTint, 68);
     assert.equal(runtimeConfig.system.permissionLevel, 'critical');
     assert.equal(runtimeConfig.activeLearning.enabled, false);
     assert.equal(runtimeConfig.activeLearning.askForFeedback, false);
@@ -250,6 +255,6 @@ describe('Settings Service', function() {
 
     const reset = service.resetSettings();
     assert.equal(reset.assistant.displayName, 'JARVIS');
-    assert.equal(reset.chat.themeId, 'midnight');
+    assert.equal(reset.chat.themeId, 'graphite');
   });
 });

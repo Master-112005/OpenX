@@ -108,6 +108,15 @@ function validateContactDelete(payload) {
   return { name: requireString(payload.name, 'name', { maxLength: 200 }) };
 }
 
+function validateScheduleAction(payload) {
+  requirePlainObject(payload);
+  const id = requireString(payload.id, 'id', { maxLength: 200 });
+  const action = requireString(payload.action, 'action', { maxLength: 20 });
+  if (!['snooze', 'stop'].includes(action)) throw new TypeError('schedule action is not supported');
+  const minutes = Math.max(1, Math.min(60, Number(payload.minutes) || 5));
+  return { id, action, minutes };
+}
+
 function validateEmpty(payload) {
   if (payload !== undefined) throw new TypeError('This channel does not accept a payload');
   return undefined;
@@ -118,6 +127,7 @@ const IPC_VALIDATORS = Object.freeze({
   'command:confirm': validateConfirmation,
   'assistant:status': validateEmpty,
   'tts:speak': validateSpeech,
+  'tts:stop': validateEmpty,
   'window:openChat': validateEmpty,
   'window:openSettings': validateEmpty,
   'config:get': validateEmpty,
@@ -127,6 +137,7 @@ const IPC_VALIDATORS = Object.freeze({
   'contacts:list': validateEmpty,
   'contacts:save': validateContact,
   'contacts:delete': validateContactDelete,
+  'schedule:alertAction': validateScheduleAction,
   'app:quit': validateEmpty
 });
 

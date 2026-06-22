@@ -13,6 +13,7 @@ const EVENTS = Object.freeze({
   RESPONSE_GENERATED: 'response.generated',
   RESPONSE_STARTED: 'response.started',
   RESPONSE_COMPLETED: 'response.completed',
+  SCHEDULE_DUE: 'schedule.due',
   UI_STATE_CHANGED: 'ui.state.changed',
   VOICE_STATE_CHANGED: 'voice.state.changed',
   VOICE_SESSION_STARTED: 'voice.sessionStarted',

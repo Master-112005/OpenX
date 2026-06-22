@@ -4,56 +4,43 @@ const { ContactStore, normalizePhoneNumber } = require('../automation/communicat
 const { ensureDataRoot, migrateLegacyData, readJsonFile, writeJsonAtomic } = require('../shared/data-root');
 
 const CHAT_THEMES = {
-  midnight: {
-    id: 'midnight',
-    label: 'Midnight',
-    colors: {
-      panel: 'rgba(20, 20, 40, 0.92)',
-      surface: 'rgba(22, 33, 62, 0.7)',
-      surfaceStrong: 'rgba(15, 52, 96, 0.7)',
-      border: 'rgba(255, 255, 255, 0.08)',
-      text: '#e0e0e0',
-      muted: 'rgba(255, 255, 255, 0.55)',
-      accent: 'rgba(68, 136, 255, 0.9)'
-    }
-  },
-  dawn: {
-    id: 'dawn',
-    label: 'Dawn',
-    colors: {
-      panel: 'rgba(48, 28, 32, 0.94)',
-      surface: 'rgba(108, 58, 52, 0.72)',
-      surfaceStrong: 'rgba(181, 92, 68, 0.72)',
-      border: 'rgba(255, 226, 201, 0.16)',
-      text: '#fff4ea',
-      muted: 'rgba(255, 244, 234, 0.62)',
-      accent: 'rgba(255, 148, 92, 0.95)'
-    }
-  },
-  forest: {
-    id: 'forest',
-    label: 'Forest',
-    colors: {
-      panel: 'rgba(18, 42, 36, 0.94)',
-      surface: 'rgba(28, 69, 58, 0.74)',
-      surfaceStrong: 'rgba(40, 110, 88, 0.78)',
-      border: 'rgba(214, 255, 234, 0.12)',
-      text: '#ecfff6',
-      muted: 'rgba(236, 255, 246, 0.6)',
-      accent: 'rgba(92, 214, 165, 0.95)'
-    }
-  },
   graphite: {
     id: 'graphite',
     label: 'Graphite',
     colors: {
-      panel: 'rgba(34, 36, 44, 0.95)',
-      surface: 'rgba(57, 62, 74, 0.72)',
-      surfaceStrong: 'rgba(86, 93, 112, 0.78)',
-      border: 'rgba(255, 255, 255, 0.12)',
+      panel: 'rgba(34, 36, 44, 0.68)',
+      surface: 'rgba(255, 255, 255, 0.09)',
+      surfaceStrong: 'rgba(255, 255, 255, 0.16)',
+      border: 'rgba(255, 255, 255, 0.16)',
       text: '#f1f3f7',
-      muted: 'rgba(241, 243, 247, 0.58)',
-      accent: 'rgba(120, 179, 255, 0.95)'
+      muted: 'rgba(241, 243, 247, 0.7)',
+      accent: 'rgba(255, 255, 255, 0.92)'
+    }
+  },
+  'white-glass': {
+    id: 'white-glass',
+    label: 'White Glass',
+    colors: {
+      panel: 'rgba(255, 255, 255, 0.34)',
+      surface: 'rgba(255, 255, 255, 0.2)',
+      surfaceStrong: 'rgba(255, 255, 255, 0.34)',
+      border: 'rgba(255, 255, 255, 0.48)',
+      text: '#171719',
+      muted: 'rgba(20, 20, 22, 0.66)',
+      accent: 'rgba(255, 255, 255, 0.94)'
+    }
+  },
+  'black-glass': {
+    id: 'black-glass',
+    label: 'Black Glass',
+    colors: {
+      panel: 'rgba(0, 0, 0, 0.46)',
+      surface: 'rgba(255, 255, 255, 0.07)',
+      surfaceStrong: 'rgba(255, 255, 255, 0.13)',
+      border: 'rgba(255, 255, 255, 0.16)',
+      text: '#ffffff',
+      muted: 'rgba(255, 255, 255, 0.7)',
+      accent: 'rgba(255, 255, 255, 0.92)'
     }
   }
 };
@@ -319,7 +306,8 @@ class SettingsService {
       },
       chat: {
         activationShortcut: normalizeActivationShortcut(this.baseConfig?.chat?.activationShortcut, 'Alt+Space'),
-        themeId: String(this.baseConfig?.chat?.activeTheme || 'midnight').trim(),
+        themeId: CHAT_THEMES[this.baseConfig?.chat?.activeTheme] ? this.baseConfig.chat.activeTheme : 'graphite',
+        glassTint: clampNumber(this.baseConfig?.chat?.glassTint, 0, 100, 42),
         maxHistory: clampNumber(this.baseConfig?.chat?.maxHistory, 50, 2000, 500)
       },
       modes: []
@@ -421,6 +409,7 @@ class SettingsService {
     runtimeConfig.chat.activationFallbackShortcuts = this.baseConfig?.chat?.activationFallbackShortcuts || [];
     runtimeConfig.chat.maxHistory = settings.chat.maxHistory;
     runtimeConfig.chat.activeTheme = settings.chat.themeId;
+    runtimeConfig.chat.glassTint = settings.chat.glassTint;
     runtimeConfig.modes = deepClone(settings.modes);
 
     return runtimeConfig;
@@ -475,6 +464,7 @@ class SettingsService {
           this.defaults.chat.activationShortcut
         ),
         themeId,
+        glassTint: clampNumber(source.chat?.glassTint, 0, 100, this.defaults.chat.glassTint),
         maxHistory: clampNumber(source.chat?.maxHistory, 50, 2000, this.defaults.chat.maxHistory)
       },
       modes: sanitizeModes(source.modes)

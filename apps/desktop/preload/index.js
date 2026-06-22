@@ -13,6 +13,9 @@ contextBridge.exposeInMainWorld('jarvis', {
   speak: (text) =>
     ipcRenderer.invoke('tts:speak', { text }),
 
+  stopSpeaking: () =>
+    ipcRenderer.invoke('tts:stop'),
+
   openChat: () =>
     ipcRenderer.invoke('window:openChat'),
 
@@ -40,6 +43,9 @@ contextBridge.exposeInMainWorld('jarvis', {
   deleteContact: (name) =>
     ipcRenderer.invoke('contacts:delete', { name }),
 
+  handleScheduleAlert: (id, action, minutes = 5) =>
+    ipcRenderer.invoke('schedule:alertAction', { id, action, minutes }),
+
   quit: () =>
     ipcRenderer.invoke('app:quit'),
 
@@ -50,5 +56,23 @@ contextBridge.exposeInMainWorld('jarvis', {
     const handler = (_event, data) => callback(data);
     ipcRenderer.on('settings:changed', handler);
     return () => ipcRenderer.removeListener('settings:changed', handler);
+  },
+
+  onOpenSettings: (callback) => {
+    if (typeof callback !== 'function') {
+      throw new TypeError('Settings open listener must be a function');
+    }
+    const handler = () => callback();
+    ipcRenderer.on('settings:open', handler);
+    return () => ipcRenderer.removeListener('settings:open', handler);
+  },
+
+  onScheduleDue: (callback) => {
+    if (typeof callback !== 'function') {
+      throw new TypeError('Schedule listener must be a function');
+    }
+    const handler = (_event, schedule) => callback(schedule);
+    ipcRenderer.on('schedule:due', handler);
+    return () => ipcRenderer.removeListener('schedule:due', handler);
   }
 });

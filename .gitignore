@@ -6,3 +6,4 @@ graphify-out/
 models/whisper/*.bin
 dist/
 build/
+.playwright-mcp/

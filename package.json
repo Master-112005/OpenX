@@ -1,7 +1,7 @@
 {
   "name": "openx",
   "productName": "OpenX",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "Intelligent Windows Desktop Assistant Platform - Offline chat-driven deterministic automation engine",
   "main": "apps/desktop/electron/main.js",
   "author": "OpenX Team",

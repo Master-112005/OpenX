@@ -5,51 +5,121 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; style-src-attr 'unsafe-inline'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'">
   <title>Assistant Chat</title>
+  <link rel="icon" href="data:,">
   <link rel="stylesheet" href="./index.css">
+  <link rel="stylesheet" href="./liquid-glass.css">
 </head>
 <body>
   <div id="chat-shell">
     <div id="header">
       <div id="header-info">
-        <div id="header-title">Assistant Chat</div>
-        <div id="header-subtitle">Profile and theme controls live here</div>
+        <div class="brand-mark" aria-hidden="true"><span></span></div>
+        <div class="brand-copy">
+          <div id="header-title">Assistant</div>
+          <div id="header-subtitle"><span class="presence-dot"></span>Ready for local commands</div>
+        </div>
       </div>
       <div id="header-actions">
-        <button class="header-btn" id="settings-btn" title="Settings">Settings</button>
-        <button class="header-btn" id="minimize-btn" title="Minimize">Hide</button>
-        <button class="header-btn" id="close-btn" title="Close">Close</button>
+        <button class="header-btn view-tab active" id="chat-view-btn" type="button" aria-pressed="true">Chat</button>
+        <button class="header-btn view-tab" id="activity-view-btn" type="button" aria-pressed="false">
+          Activity <span id="activity-badge" hidden>0</span>
+        </button>
+        <button class="window-btn voice-btn" id="assistant-mute-btn" type="button" title="Mute assistant voice" aria-label="Mute assistant voice" aria-pressed="false">
+          <span class="voice-icon" aria-hidden="true">&#128266;</span>
+        </button>
+        <button class="window-btn" id="settings-btn" title="Settings" aria-label="Settings">&#9881;</button>
+        <button class="window-btn close" id="close-btn" title="Close" aria-label="Close">&#10005;</button>
       </div>
     </div>
 
-    <div id="messages"></div>
+    <main id="workspace">
+      <section class="workspace-view active" id="conversation-view" aria-label="Conversation">
+        <div id="messages" role="log" aria-live="polite"></div>
 
-    <div id="input-area">
-      <div id="input-row">
-        <input type="text" id="input-box" placeholder="Type a command..." autocomplete="off">
-        <button id="send-btn" title="Send">Send</button>
-      </div>
-      <div id="quick-actions">
-        <button class="chip-btn" data-cmd="Open Downloads">Open Downloads</button>
-        <button class="chip-btn" data-cmd="Increase Volume">Volume Up</button>
-        <button class="chip-btn" data-cmd="Launch Chrome">Chrome</button>
-        <button class="chip-btn" data-cmd="System Status">Status</button>
-        <button class="chip-btn" data-cmd="Help">Help</button>
+        <div id="input-area">
+          <div id="input-row">
+            <div class="composer-field">
+              <span class="composer-spark" aria-hidden="true">&#10022;</span>
+              <input type="text" id="input-box" placeholder="Ask or control your PC..." autocomplete="off" aria-label="Command">
+            </div>
+            <button id="send-btn" title="Send command" aria-label="Send command"><span>Send</span><b aria-hidden="true">&#8593;</b></button>
+          </div>
+          <div id="quick-actions" aria-label="Suggested commands">
+            <button class="chip-btn" data-cmd="Open Downloads">Downloads</button>
+            <button class="chip-btn" data-cmd="Increase Volume">Volume up</button>
+            <button class="chip-btn" data-cmd="Open Chrome">Chrome</button>
+            <button class="chip-btn" data-cmd="System Status">System status</button>
+            <button class="chip-btn" data-cmd="Help">What can you do?</button>
+          </div>
+          <div id="composer-hint"><span>Enter to send</span><span>Alt+Space to show</span></div>
+        </div>
+      </section>
+
+      <section class="workspace-view" id="activity-view" aria-label="Activity and reminders" hidden>
+        <div class="activity-scroll">
+          <header class="activity-hero">
+            <div>
+              <div class="eyebrow">Your day</div>
+              <h1>Activity</h1>
+              <p>Upcoming alarms, timers, reminders, and recent assistant notices.</p>
+            </div>
+            <div class="activity-date" id="activity-date"></div>
+          </header>
+
+          <section class="activity-section" aria-labelledby="upcoming-title">
+            <div class="activity-section-heading">
+              <div>
+                <span class="section-kicker">Schedule</span>
+                <h2 id="upcoming-title">Upcoming</h2>
+              </div>
+              <span class="count-pill" id="schedule-count">0</span>
+            </div>
+            <div class="schedule-list" id="schedule-list"></div>
+          </section>
+
+          <section class="activity-section" aria-labelledby="notice-title">
+            <div class="activity-section-heading">
+              <div>
+                <span class="section-kicker">Updates</span>
+                <h2 id="notice-title">Notifications</h2>
+              </div>
+              <button class="text-btn" id="clear-notifications-btn" type="button">Clear</button>
+            </div>
+            <div class="notification-list" id="notification-list"></div>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <div id="toast-region" aria-live="polite" aria-label="Assistant notifications"></div>
+
+    <div id="alarm-overlay" role="dialog" aria-modal="true" aria-labelledby="alarm-title" hidden>
+      <div class="alarm-card">
+        <div class="alert-symbol" id="alarm-symbol" aria-hidden="true">&#9200;</div>
+        <div class="alarm-kind" id="alarm-kind">Reminder</div>
+        <h2 id="alarm-title">It is time</h2>
+        <p id="alarm-message"></p>
+        <div class="alarm-time" id="alarm-time"></div>
+        <div class="alarm-actions">
+          <button class="secondary-btn" id="alarm-snooze-btn" type="button">Snooze 5 min</button>
+          <button class="primary-btn" id="alarm-dismiss-btn" type="button">Stop</button>
+        </div>
       </div>
     </div>
-
-    <div id="status-bar">Press Enter to send. Open Settings to manage profile, theme, and contacts.</div>
 
     <div id="settings-overlay">
       <aside id="settings-panel">
         <div class="panel-header">
           <div>
-            <div class="panel-title">Assistant Settings</div>
-            <div class="panel-subtitle">Assistant identity, user profile, theme, and contacts</div>
+            <div class="panel-eyebrow">OpenX preferences</div>
+            <div class="panel-title">Settings</div>
+            <div class="panel-subtitle">Personalize how your assistant looks, sounds, and works.</div>
           </div>
-          <button class="icon-btn" id="settings-close-btn" title="Close settings">X</button>
+          <button class="icon-btn" id="settings-close-btn" title="Close settings" aria-label="Close settings">&#10005;</button>
         </div>
 
         <div class="panel-scroll">
+          <div class="settings-sidebar">
           <section class="settings-hero">
             <div class="hero-top">
               <div>
@@ -99,12 +169,10 @@
               <span class="nav-label">Modes</span>
               <span class="nav-hint">Create up to 5 app launch modes.</span>
             </button>
-            <button class="settings-nav-chip" data-section-target="contacts" type="button">
-              <span class="nav-label">Contacts</span>
-              <span class="nav-hint">Manage up to 10 saved contacts from one compact list.</span>
-            </button>
+          </div>
           </div>
 
+          <div class="settings-content">
           <section class="settings-section" data-settings-section="identity" id="settings-section-identity">
             <div class="section-heading">Assistant Identity</div>
             <div class="field-grid">
@@ -214,23 +282,26 @@
 
           <section class="settings-section" data-settings-section="theme" id="settings-section-theme">
             <div class="section-heading">Theme</div>
+            <label class="glass-tint-control" for="glass-tint">
+              <span class="glass-tint-heading"><span>Glass tint</span><strong id="glass-tint-value">42%</strong></span>
+              <input class="range-input" id="glass-tint" type="range" min="0" max="100" step="1" value="42">
+              <span class="glass-tint-ends"><span>Full transparency</span><span>Tinted glass</span></span>
+            </label>
             <div class="theme-grid" id="theme-grid"></div>
           </section>
 
           <section class="settings-section" data-settings-section="access" id="settings-section-access">
             <div class="section-heading">Permission Scale</div>
             <div class="section-note">Lower levels block more risky actions. Critical is full access and skips confirmation for allowed actions.</div>
-            <div class="field-grid single">
-              <label class="field-wrap">
-                <span class="field-label">Automation Permission</span>
-                <select class="field-select" id="system-permission-level">
-                  <option value="low">Low - safe actions only</option>
-                  <option value="medium">Medium - confirm risky actions</option>
-                  <option value="high">High - allow advanced actions with confirmation</option>
-                  <option value="critical">Critical - full access, no confirmation</option>
-                </select>
-              </label>
+            <div class="permission-scale" role="radiogroup" aria-label="Automation permission">
+              <button class="permission-option" type="button" role="radio" data-permission="low"><strong>Safe</strong><span>Basic actions</span></button>
+              <button class="permission-option" type="button" role="radio" data-permission="medium"><strong>Balanced</strong><span>Confirm risk</span></button>
+              <button class="permission-option" type="button" role="radio" data-permission="high"><strong>Advanced</strong><span>More control</span></button>
+              <button class="permission-option" type="button" role="radio" data-permission="critical"><strong>Full</strong><span>No prompts</span></button>
             </div>
+            <select class="visually-hidden" id="system-permission-level" aria-hidden="true" tabindex="-1">
+              <option value="low">Safe</option><option value="medium">Balanced</option><option value="high">Advanced</option><option value="critical">Full</option>
+            </select>
           </section>
 
           <section class="settings-section" data-settings-section="modes" id="settings-section-modes">
@@ -241,15 +312,15 @@
               </div>
               <div class="contact-stage-tools">
                 <span class="contact-usage" id="mode-usage">0 / 5 saved</span>
-                <button class="contact-add-btn" id="mode-add-btn" type="button" title="Add mode">+</button>
+                <button class="contact-add-btn mode-add-btn" id="mode-add-btn" type="button" title="Add mode"><span>+</span> Mode</button>
               </div>
             </div>
             <div class="mode-grid" id="mode-grid"></div>
           </section>
 
           <section class="settings-section" data-settings-section="contacts" id="settings-section-contacts">
-            <div class="section-heading">Contacts</div>
-            <div class="section-note">Save family, friends, and work contacts here so call and message commands resolve reliably. Maximum 10 contacts are stored locally.</div>
+            <div class="section-heading">Learned Contacts</div>
+            <div class="section-note">Contacts learned by the assistant for reliable calls and messages.</div>
             <div class="contact-layout">
               <div class="contact-stage">
                 <div class="contact-stage-header">
@@ -321,11 +392,12 @@
 
           <section class="settings-section" id="settings-footer-section">
             <div class="panel-actions">
-              <button class="primary-btn" id="settings-save-btn" type="button">Save Settings</button>
+              <button class="primary-btn" id="settings-save-btn" type="button">Save</button>
               <button class="secondary-btn" id="settings-reset-btn" type="button">Reset Defaults</button>
             </div>
             <div id="settings-status"></div>
           </section>
+          </div>
         </div>
       </aside>
     </div>

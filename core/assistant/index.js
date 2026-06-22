@@ -80,7 +80,7 @@ class Assistant extends EventEmitter {
       ...(config || {}),
       learningStore: this.learning
     };
-    this.automation = dependencies.automation || new AutomationEngine(config);
+    this.automation = dependencies.automation || new AutomationEngine({ ...(config || {}), eventBus: this.eventBus });
     this.router = dependencies.router || new ActionRouter(routerConfig, this.automation);
     if (this.router && !this.router.learningStore) {
       this.router.learningStore = this.learning;
