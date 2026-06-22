@@ -361,6 +361,7 @@ const DOMAIN_VOCABULARY = [
   'result',
   'results',
   'run',
+  'research',
   'search',
   'screenshot',
   'capture',

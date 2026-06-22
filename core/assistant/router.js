@@ -211,7 +211,11 @@ class ActionRouter {
 
   _resolveIntent(rawCommandText, preparedInput, source) {
     if (this._isIncompleteCommand(rawCommandText, preparedInput)) {
-      return null;
+      return this._resolveCapabilityCommandIntent(
+        rawCommandText,
+        preparedInput,
+        { allowGeneric: true }
+      );
     }
 
     return (
@@ -580,7 +584,7 @@ class ActionRouter {
       return null;
     }
 
-    const genericOperation = text.match(/\b(?:add|adjust|answer|archive|backup|bookmark|cancel|capture|change|check|clean|clear|close|compress|connect|copy|create|delete|disable|dismiss|display|duplicate|edit|enable|end|export|extract|fast[\s-]+forward|find|generate|import|install|jump|kill|launch|lock|make|mark|maximize|merge|minimize|move|mute|open|organize|pause|play|record|reject|remove|rename|reset|restore|resume|save|search|send|set|share|show|shut|sign|sort|start|stop|switch|sync|take|turn|unarchive|unmute|verify|zip)\b/i);
+    const genericOperation = text.match(/\b(?:add|adjust|answer|archive|backup|bookmark|cancel|capture|change|check|clean|clear|close|compress|connect|copy|create|delete|disable|dismiss|display|duplicate|edit|enable|end|export|extract|fast[\s-]+forward|find|generate|import|install|jump|kill|launch|lock|make|mark|maximize|merge|minimize|move|mute|notify|open|organize|pause|play|prepare|record|reject|remove|rename|reset|restore|resume|save|search|send|set|share|show|shut|sign|sort|start|stop|switch|sync|take|turn|unarchive|unmute|verify|zip)\b/i);
     if (genericOperation && raw.split(/\s+/).filter(Boolean).length >= 2) {
       return {
         capability: 'desktop-automation',
@@ -2099,6 +2103,7 @@ class ActionRouter {
       { modeName: 'development', pattern: /\b(?:coding|development|developer|project)\b/ },
       { modeName: 'work', pattern: /\b(?:work\s+setup|workspace|work\s+session)\b/ },
       { modeName: 'study', pattern: /\b(?:study\s+session|study\s+setup)\b/ },
+      { modeName: 'research', pattern: /\b(?:research\s+session|research\s+setup|computer\s+for\s+research)\b/ },
       { modeName: 'focus', pattern: /\b(?:focus\s+mode|close\s+distractions|prepare\s+my\s+workspace)\b/ },
       { modeName: 'communication', pattern: /\b(?:communication\s+apps?|chat\s+apps?|messaging\s+apps?)\b/ },
       { modeName: 'daily', pattern: /\b(?:apps?\s+i\s+use\s+daily|daily\s+apps?)\b/ }

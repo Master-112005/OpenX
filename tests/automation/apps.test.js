@@ -415,6 +415,7 @@ describe('App Controller', function() {
       const FreshAppController = require('../../core/automation/apps');
       const controller = new FreshAppController({});
       controller._getRunningProcessDetails = () => [];
+      controller.windowSession.findWindow = () => null;
       let startMenuUsed = false;
       controller._launchStartApp = () => {
         startMenuUsed = true;
