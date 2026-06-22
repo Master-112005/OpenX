@@ -1,242 +1,348 @@
-# OpenX
+# OpenX Current Implementation Report
 
-OpenX is a Windows desktop assistant built with Electron and Node.js. It provides deterministic, local-first natural-language routing for desktop automation, browser control, files and folders, media, scheduling, communications, system information, and external application plugins.
+**Project:** OpenX
 
-The product name is **OpenX**. The default configurable assistant display name remains **JARVIS**.
+**Package version:** 1.0.2
 
-## Current status
+**Platform:** Windows desktop
 
-- Flat production architecture; the previous directory-per-controller implementation has been removed.
-- NLP, NLU, parsing, validation, routing, NLE, verification, confirmation, responses, context, learning, and data management are connected in one command pipeline.
-- `commands.md` is the authoritative language regression corpus and currently contains **2,102 commands**.
-- Every command in the corpus is classified in a sandbox test without performing real desktop actions.
-- Incomplete commands request clarification and do not execute.
-- Recognized operations without a connected controller are reported as unsupported; OpenX does not claim they ran.
-- Chrome, YouTube, Discord, forms, and communication adapters are isolated under `plugins/`.
+**Runtime:** Electron 28 and Node.js
 
-## Command pipeline
+**Report date:** 2026-06-22
+
+## 1. Executive summary
+
+OpenX is a deterministic, local-first Windows desktop assistant. The current implementation uses a flat production architecture with dedicated assistant-language layers, domain automation controllers, context awareness, active learning, secured Electron integration, and restricted external plugins.
+
+The previous directory-per-controller architecture has been removed. Implementations now live directly in the files documented below; there are no compatibility facades pointing back to the removed core structure.
+
+The assistant processes commands through NLP, NLU, parsing, entity extraction, intent resolution, validation, permissions, Natural Language Execution (NLE), automation, verification, confirmation, response generation, context, and active learning. The language regression corpus contains **2,102 commands**, all of which are classified by the sandbox corpus test.
+
+Classification does not mean every requested operating-system feature is implemented. OpenX explicitly distinguishes successful execution, clarification, and recognized-but-unconnected capabilities.
+
+## 2. Objectives
+
+The implementation is designed to provide:
+
+- predictable Windows automation from conversational language;
+- typo, spelling, filler-word, abbreviation, and noisy-input handling;
+- multi-command planning and sequential execution;
+- clear intent and entity boundaries;
+- validation before execution and verification after execution;
+- permission-aware confirmation for sensitive actions;
+- bounded context and privacy-conscious active learning;
+- external integrations through isolated, restricted plugins;
+- one consistent response contract across chat and voice-derived text;
+- testable routing without real desktop side effects.
+
+## 3. Current architecture
 
 ```text
-Chat or voice-derived text
-  -> NLP normalization and spelling/noise repair
-  -> NLU and context interpretation
-  -> parser and entity extraction
+Input
+  -> NLP
+  -> NLU and context
+  -> parser and entities
   -> intent resolution
-  -> required-entity validation
-  -> permission and confirmation check
-  -> NLE delegation
-  -> automation controller
+  -> action validation
+  -> permission/confirmation gate
+  -> NLE
+  -> automation or plugin action
   -> postcondition verification
   -> action confirmation
-  -> response and personality
-  -> context and active-learning record
-  -> OpenX_Data persistence
+  -> response/personality
+  -> context and active learning
+  -> OpenX_Data
 ```
 
-The main implementation files are:
+### 3.1 Assistant layer
 
-| Layer | File | Responsibility |
-|---|---|---|
-| Assistant entry | `core/assistant/index.js` | Conversation state, clarification, confirmation, learning, and response lifecycle |
-| NLP | `core/assistant/nlp/nlp.js` | Normalization, spelling repair, command preparation, and caching |
-| NLP preprocessing | `core/assistant/nlp/preprocessor.js` | Phrase repair, token correction, filler removal, and vocabulary |
-| NLU | `core/assistant/nlu.js` | Semantic frames, app/browser language, and context interpretation |
-| Parser | `core/assistant/parser.js` | Input parsing and word-level command frames |
-| Entities | `core/assistant/entities.js` | Structured values, paths, apps, contacts, times, and targets |
-| Intents | `core/assistant/intents.js` | Intent definitions, patterns, permissions, and action mapping |
-| Router | `core/assistant/router.js` | Multi-command planning, intent completion, routing, and safe fallback classification |
-| Validation | `core/automation/common/action-velidation.js` | Required-entity validation before execution |
-| NLE | `core/assistant/nle.js` | The assistant-to-automation execution boundary |
-| Verification | `core/automation/common/action-verification.js` | Result validation and postcondition verification |
-| Confirmation | `core/automation/common/action-confirm.js` | Normalized completion evidence |
-| Context | `core/assistant/context.js`, `core/assistant/contest.js` | Session history and context-engine access |
-| Learning | `core/assistant/Active-learning.js` | Corrections, preferences, user facts, feedback, and routing evidence |
-| Responses | `core/assistant/responses.js`, `core/assistant/personality.js` | Human-readable responses and configurable address style |
-| Data | `core/assistant/Data.js` | Logging, events, normalization utilities, atomic JSON storage, and data-root management |
+| File | Current responsibility |
+|---|---|
+| `core/assistant/index.js` | Public assistant API, conversation lifecycle, pending clarification/confirmation, learning, events, plugins, and responses |
+| `core/assistant/nlp/nlp.js` | Cached preparation, normalization, spell repair, noisy-command repair, and semantic hints |
+| `core/assistant/nlp/preprocessor.js` | Vocabulary, phrase replacements, token corrections, repeated-token handling, filler removal, and lead-in removal |
+| `core/assistant/nlp/scorer.js` | Ordered token and intent-pattern scoring |
+| `core/assistant/nlp/web-targets.js` | Trusted web-target normalization |
+| `core/assistant/nlu.js` | Semantic frame construction plus integrated app/browser command languages |
+| `core/assistant/parser.js` | Input parser plus integrated word-level command-frame parser |
+| `core/assistant/entities.js` | Entity extraction and target normalization |
+| `core/assistant/intents.js` | Intent registry, patterns, action IDs, required entities, and permission levels |
+| `core/assistant/router.js` | Multi-command planning, specific intent resolvers, validation, permissions, NLE delegation, and response result assembly |
+| `core/assistant/nle.js` | Single assistant-to-automation execution boundary |
+| `core/assistant/context.js` | Session command and conversation history |
+| `core/assistant/contest.js` | Compatibility name from the requested design; exposes context and context-engine types |
+| `core/assistant/Active-learning.js` | Corrections, preferences, user facts, feedback, command sequences, and routing evidence |
+| `core/assistant/personality.js` | Configurable assistant presentation style |
+| `core/assistant/responses.js` | Deterministic response templates and formal address |
+| `core/assistant/Data.js` | Logger, events, normalizer, validator, IDs, atomic persistence, data-root layout, and migration |
 
-## Automation capabilities
+### 3.2 Context-awareness layer
 
-Connected controllers are implemented directly in `core/automation/`:
+| File | Responsibility |
+|---|---|
+| `core/context-awareness/active-window.js` | Active-window observation |
+| `core/context-awareness/app-registry.js` | Known applications and category mapping |
+| `core/context-awareness/context-engine.js` | Context signal aggregation |
+| `core/context-awareness/mode-engine.js` | Mode profile interpretation |
+| `core/context-awareness/process-monitor.js` | Running-process snapshots |
+| `core/context-awareness/signals.js` | Context signal definitions |
 
-- `apps.js`: open, focus, switch, close, and create new application tabs/windows.
-- `files.js`: create, open, delete, rename, copy, move, search, list, and smart discovery.
-- `folders.js`: create, open, delete, and move folders.
-- `browser.js`: URLs, searches, site searches, results, and browser tabs.
-- `media.js`: playback, search, pause/resume, track navigation, volume, fullscreen, repeat, shuffle, likes, subscriptions, and status.
-- `scheduler.js`: timers, alarms, and reminders.
-- `communications.js`: message drafts, email drafts, and contact-aware calls.
-- `system.js`: CPU, memory, battery, disk, processes, calculations, date/time, system insights, and Bluetooth settings.
-- `windows.js`: minimize, maximize, close, lock, sleep, restart, shutdown, hibernate, and session operations.
-- `volume.js` and `brightness.js`: read and change system levels, mute, and unmute.
-- `screenshot-recording.js`: connected screenshot capture. Screen-recording language is recognized separately when no recorder is connected.
-- `index.js`: action registry, controller composition, modes, execution, and verification.
+### 3.3 Automation layer
 
-## Command behavior
+`core/automation/index.js` owns the action registry and controller composition. Connected actions include:
 
-OpenX distinguishes three outcomes:
+- application open, close, switch, new tab/window, and modes;
+- file create, open, delete, rename, copy, move, search, list, and smart discovery;
+- folder create, open, delete, and move;
+- browser URL opening, web search, site search, first-result handling, tab open/close/list;
+- media play/search/control, fullscreen, volume, shuffle, repeat, favorites, likes, subscriptions, and status;
+- timers, alarms, and reminders;
+- message and email composition plus contact-aware calls;
+- CPU, RAM, battery, disk, processes, system insights, Bluetooth settings, calculations, time, and date;
+- screenshot capture;
+- volume and brightness reading/control;
+- window minimize, maximize, close, and Windows power/session operations;
+- form filling through the forms plugin package.
 
-1. **Executable** — the intent has a connected automation action and all required entities; it proceeds through permissions, NLE, and verification.
-2. **Needs clarification** — the intent is understood but required values are missing; `needsClarification` is returned and nothing executes.
-3. **Recognized but unsupported** — the domain and operation are understood but no controller is connected; the assistant returns `assistant.capability` with an explicit limitation message.
-
-This contract prevents broad language coverage from becoming false execution reporting.
-
-## Multi-command handling
-
-The router splits actionable clauses, preserves verbs across compatible follow-up clauses, executes steps in sequence, stops for required confirmation, and resumes remaining steps after confirmation. It avoids splitting ordinary phrases that contain “and” but represent a single target.
-
-Examples:
+Domain implementations are flat files:
 
 ```text
-Open Chrome, search for Java tutorials, and open the first result.
-Close Chrome and set the volume to 50.
-Create a project folder, create a file inside it, and open the file.
+core/automation/
+├── apps.js
+├── brightness.js
+├── browser.js
+├── communications.js
+├── files.js
+├── folders.js
+├── index.js
+├── media.js
+├── scheduler.js
+├── screenshot-recording.js
+├── system.js
+├── volume.js
+├── windows.js
+└── common/
+    ├── action-confirm.js
+    ├── action-velidation.js
+    ├── action-verification.js
+    ├── launcher.js
+    ├── path-utils.js
+    └── windows-session.js
 ```
 
-## Plugins
+The filename `action-velidation.js` intentionally follows the requested project structure. Its class and behavior use the correct term `ActionValidation`.
 
-Plugin loading is managed by `plugins/plugin-controller.js`.
+## 4. Command processing details
 
-Loadable plugins must:
+### 4.1 NLP
 
-- have a trusted manifest;
-- use `plugin.<id>.*` action and intent namespaces;
-- declare permission levels;
-- declare each core automation action they may call through `usesAutomation`;
-- remain within the configured plugin directory.
+NLP normalizes case and spacing, applies explicit phrase repairs, corrects known token sequences, preserves domain vocabulary, and uses bounded fuzzy matching for likely spelling errors. It also identifies action/query structure and caches prepared inputs and intent patterns.
 
-Current plugin packages:
+The vocabulary explicitly preserves valid words that could otherwise be mistaken for commands. For example, “research” remains “research” rather than being repaired to “search.”
 
-- `plugins/youtube/`: YouTube-specific navigation backed by browser/media automation.
-- `plugins/chrome/`: Chrome-specific pages such as browser history.
-- `plugins/discord/`: Discord application integration.
-- `plugins/forms/`: Google Form and generic form understanding/filling.
-- `plugins/communications/`: contacts and WhatsApp Desktop support.
-- `plugins/sample_plugin/`: minimal plugin API example.
+### 4.2 NLU and parsing
 
-## Context and learning
+NLU produces semantic frames containing action, domain, target, values, question state, locality, and token roles. The parser separately produces command frames for deterministic action/target handling. App and browser language handlers are integrated into `nlu.js`; command-frame parsing is integrated into `parser.js`.
 
-OpenX tracks recent commands, searches, applications, conversation topics, and clarification/confirmation state. Active learning can retain corrections, preferences, non-sensitive user facts, feedback, routing evidence, and reusable command sequences.
+### 4.3 Routing
 
-Learning never bypasses permission checks, validation, or verification. Sensitive credentials are rejected from learned user facts.
+The router prioritizes explicit and domain-specific resolvers before exact intent matching and general capability classification. This order protects precise commands from broad fallbacks.
 
-## Data storage
+Multi-command planning occurs before generic capability fallback. This prevents a broad verb such as “open” or “close” from swallowing later clauses.
 
-Runtime data is stored under:
+### 4.4 Validation and clarification
+
+`ActionValidation` checks required intent entities before NLE. Missing values return:
+
+- the resolved intent;
+- extracted entities;
+- missing entity names;
+- `needsClarification: true`;
+- no automation execution.
+
+Standalone incomplete phrases such as “open” and “search for” remain rejected rather than inventing targets.
+
+### 4.5 Permissions and confirmation
+
+Intent permission levels pass through `apps/desktop/permissions.js`. Sensitive actions can require user confirmation. Confirmations use the stored pending intent and entities rather than trusting a forged renderer payload.
+
+Multi-command execution can pause at a protected step and resume its remaining commands after confirmation.
+
+### 4.6 NLE, verification, and confirmation evidence
+
+`core/assistant/nle.js` is the sole execution delegate used by the router. It passes the resolved action and entities to the automation engine with command context.
+
+The automation engine applies `action-verification.js`, which validates results and verifies observable postconditions where supported. `action-confirm.js` normalizes completion evidence returned with the assistant result.
+
+### 4.7 Safe fallback
+
+Commands with a recognizable desktop operation but no connected action are routed to `assistant.capability`. The generated response states that the request was understood but the capability is not connected.
+
+This improves language coverage without simulating success or performing an unrelated web search.
+
+## 5. Command corpus
+
+`commands.md` is the authoritative natural-language regression corpus. It currently contains **2,102 numbered commands** spanning:
+
+- simple and conversational commands;
+- incomplete requests;
+- spelling and grammar variations;
+- files, folders, applications, browser, media, system, scheduling, and communications;
+- contextual and workspace requests;
+- multi-command workflows;
+- operations that are recognized but not yet connected.
+
+`tests/core/command-corpus.test.js` loads `commands.md`, removes numbering, and processes each command using a sandbox automation engine. The test asserts that every command resolves to an intent. It does not permit real application launches, file changes, messages, calls, power actions, or settings changes.
+
+The corpus result should be interpreted as **100% classification coverage**, not 100% operating-system feature implementation.
+
+## 6. Plugins
+
+### 6.1 Plugin controller
+
+`plugins/plugin-controller.js` validates manifests, trusted IDs, plugin paths, permissions, namespaces, and declared automation dependencies.
+
+Plugin actions and intents must use `plugin.<id>.*`. A plugin may call a core automation action only when it appears in the manifest’s `usesAutomation` list. This prevents a low-scope plugin from invoking arbitrary desktop operations.
+
+### 6.2 Current packages
+
+| Package | Purpose |
+|---|---|
+| `plugins/youtube/` | YouTube navigation backed by declared browser/media actions |
+| `plugins/chrome/` | Chrome-specific navigation, including browser history |
+| `plugins/discord/` | Discord application integration |
+| `plugins/forms/` | Google Form and generic form understanding/filling |
+| `plugins/communications/` | Contacts and WhatsApp Desktop implementation |
+| `plugins/sample_plugin/` | Trusted example of namespaced action and intent registration |
+
+Plugin loading is enabled in `config.js`, and the default trusted list is `sample_plugin`, `youtube`, `chrome`, and `discord`. The forms and communications packages are composed directly by their owning automation controllers.
+
+## 7. Active learning and personality
+
+Active learning stores:
+
+- user-approved corrections;
+- preferences;
+- non-sensitive personal facts;
+- command sequences;
+- feedback and feedback prompts;
+- routing evidence;
+- learned entity adaptations.
+
+Sensitive credential-like fields are rejected. Writes are sanitized, pruned, and atomic. Learning never bypasses required-entity validation, permissions, or postcondition verification.
+
+Personality applies configurable titles and honorifics to deterministic responses. It changes presentation, not intent or permission decisions.
+
+## 8. Data and persistence
+
+The managed data root is:
 
 ```text
 %USERPROFILE%\OpenX_Data\
 ```
 
-`core/assistant/Data.js` owns the data layout, atomic JSON writes, backups, logging helpers, and migration from the legacy `%USERPROFILE%\.jarvis` location. Settings, contacts, learning state, schedules, logs, media state, screenshots, and runtime files share the same managed root.
+`core/assistant/Data.js` provides:
 
-## Desktop application
+- data-root and legacy-root resolution;
+- managed paths for settings, contacts, learning, schedules, logs, runtime state, media, screenshots, and backups;
+- atomic file and JSON writes;
+- optional backup files;
+- migration from `%USERPROFILE%\.jarvis` without overwriting newer OpenX data;
+- redacting structured logging;
+- shared event names and event bus;
+- normalization, validation, and ID utilities.
 
-The Electron application lives in `apps/desktop/`:
+## 9. Electron application and security
 
-- `electron/main.js`: lifecycle, IPC, tray, shortcuts, windows, and assistant initialization.
-- `electron/security.js`: trusted renderer checks, payload validation, and secure web preferences.
-- `electron/crash-recovery.js`: bounded renderer restart and crash state.
-- `preload.js`: narrow renderer API bridge.
-- `settings.js`: settings, profiles, themes, modes, and contacts.
-- `permissions.js`: permission levels, throttling, and confirmation requirements.
-- `voice/tts.js`: Windows SAPI text-to-speech output.
-- `renderer/chat/`: primary chat and settings interface.
-- `renderer/alert/`: dedicated timer/reminder alert window.
+The desktop application is implemented in `apps/desktop/`.
 
-Renderer code cannot execute automation directly. Commands and confirmations cross validated IPC boundaries.
+Security properties include:
 
-## Installation
+- context isolation;
+- disabled Node integration in renderers;
+- sandboxed web preferences;
+- trusted local renderer URL checks;
+- structured IPC payload validation;
+- confirmation payload validation;
+- bounded renderer restart policy;
+- bounded UI history and rendering;
+- plugin trust and namespace enforcement;
+- safe user-path validation for file operations.
 
-Requirements:
+The preload bridge exposes a narrow API. Renderer code cannot directly access controllers or execute operating-system actions.
 
-- Windows 10 or Windows 11
-- Node.js 18 or newer
-- npm
+## 10. Settings and configuration
 
-```powershell
-npm install
-npm start
-```
+`config.js` contains runtime defaults for:
 
-Development mode:
+- OpenX data paths;
+- JARVIS display name and honorific;
+- TTS voice, rate, volume, and naturalization;
+- active learning and feedback;
+- permission levels;
+- logging;
+- plugin directory, enablement, and trusted plugin IDs.
 
-```powershell
-npm run dev
-```
+`apps/desktop/settings.js` persists user-facing settings, themes, profiles, modes, and contacts under the managed data root.
 
-## Testing
+## 11. Testing and verification
+
+Available commands:
 
 ```powershell
 npm test
 npm run test:core
 npm run test:automation
 npm run lint
-```
-
-The command corpus can be tested directly:
-
-```powershell
 npx mocha tests/core/command-corpus.test.js --reporter dot
 ```
 
-The corpus uses a sandbox automation engine. It tests interpretation and routing without opening applications, modifying files, changing settings, or triggering power operations.
+Current verification evidence:
 
-## Packaging
+- ESLint completes successfully.
+- The 2,102-command sandbox corpus passes with every command classified.
+- Router, assistant, architecture, security, UI, media, settings, and plugin tests pass in focused runs.
+- The latest full run reached 512 passing tests and exposed one environment-dependent app-launch test because a real Chrome window was visible. That test was isolated from live window state and its focused rerun passes.
+- `git diff --check` completes without whitespace errors.
 
-```powershell
-npm run build
-```
+The full test suite intentionally logs expected errors for negative tests such as unknown actions, unsafe paths, and invalid plugins.
 
-The Windows x64 NSIS configuration packages `apps/`, `core/`, `plugins/`, and `package.json` into an ASAR application. Tests, documentation, graph output, and development metadata are excluded.
+## 12. Knowledge graph
 
-## Project structure
+The graphify graph was rebuilt after the implementation changes. The latest recorded update contains:
 
-```text
-OpenX/
-├── apps/desktop/
-│   ├── electron/
-│   ├── renderer/
-│   ├── voice/tts.js
-│   ├── preload.js
-│   ├── permissions.js
-│   └── settings.js
-├── core/
-│   ├── assistant/
-│   │   ├── nlp/
-│   │   ├── Active-learning.js
-│   │   ├── Data.js
-│   │   ├── context.js
-│   │   ├── contest.js
-│   │   ├── entities.js
-│   │   ├── index.js
-│   │   ├── intents.js
-│   │   ├── nle.js
-│   │   ├── nlu.js
-│   │   ├── parser.js
-│   │   ├── personality.js
-│   │   ├── responses.js
-│   │   └── router.js
-│   ├── automation/
-│   │   ├── common/
-│   │   └── flat domain controllers
-│   └── context-awareness/
-├── plugins/
-├── tests/
-├── commands.md
-├── config.js
-├── package.json
-└── report.md
-```
+- **1,218 nodes**;
+- **2,650 edges**;
+- **84 communities**.
 
-## Documentation
+The highest-connectivity abstractions remain `ActionRouter`, `Assistant`, `MediaController`, `ContextManager`, `EntityExtractor`, `AppController`, `ActiveLearningStore`, and `SystemController`.
 
-- `report.md`: detailed current implementation report.
-- `docs/architecture/overview.md`: command and system architecture.
-- `docs/workflows/command-execution.md`: execution workflow.
-- `docs/plugins/development.md`: plugin authoring and restrictions.
-- `graphify-out/GRAPH_REPORT.md`: generated knowledge-graph analysis.
+The graph still identifies `ActionRouter` as a god node. This is a maintainability risk, but splitting it must preserve resolver precedence, multi-command behavior, clarification, and fallback semantics.
 
-## License
+## 13. Packaging
 
-MIT
+`npm run build` invokes Electron Builder for Windows x64 and creates an NSIS installer. The package includes application, core, and plugin code inside an ASAR archive. Tests, docs, graph output, and development metadata are excluded.
+
+## 14. Known limitations
+
+- Some command-corpus operations are classified but intentionally reported as unconnected capabilities.
+- Screen capture is connected; full screen recording is not currently connected to a recorder controller.
+- Messaging and call behavior depends on installed applications, saved contacts, and available URI/desktop integration.
+- Browser tab discovery and control depend on visible windows, UI Automation, or an available debugging endpoint.
+- Application-launch observations can vary when a target application is already open.
+- Research and other workspace modes require corresponding user mode configuration to perform useful startup actions.
+- The router remains large and should only be decomposed with resolver-precedence regression coverage.
+
+## 15. Recommended next work
+
+1. Connect high-value recognized capabilities from `commands.md` to real controllers, prioritizing screen recording, update management, archives/backups, notifications, and richer communication controls.
+2. Add explicit corpus expectations for executable, clarification, and unsupported outcomes instead of checking intent classification alone.
+3. Decompose `ActionRouter` into domain resolver modules while retaining one orchestrator and the current ordering contract.
+4. Add plugin-specific integration tests for Chrome, YouTube, and Discord actions.
+5. Add deterministic mocks for all tests that can observe live Windows applications.
+
+## 16. Conclusion
+
+OpenX now has the requested flat architecture and a connected assistant execution pipeline. It provides broad natural-language classification, deterministic automation for connected actions, safe clarification for missing details, explicit unsupported responses, restricted plugins, active learning, secured Electron IPC, managed persistence, and a large sandbox command corpus.
+
+The next engineering priority is not broader generic recognition; it is converting the most valuable recognized capabilities into verified, real automation controllers while preserving the current safety contract.
