@@ -141,7 +141,8 @@ class PluginManager {
     return action;
   }
 
-  _createAutomationFacade(pluginId) {
+  _createAutomationFacade(pluginId, manifest = {}) {
+    const allowedActions = new Set(Array.isArray(manifest.usesAutomation) ? manifest.usesAutomation : []);
     return Object.freeze({
       registerAction: (actionId, handler) => {
         const action = this._assertPluginAction(pluginId, actionId);
@@ -150,6 +151,16 @@ class PluginManager {
       unregisterAction: actionId => {
         const action = this._assertPluginAction(pluginId, actionId);
         return this.automation.unregisterAction(action);
+      },
+      execute: (actionId, entities = {}) => {
+        const action = String(actionId || '').trim();
+        const allowed = [...allowedActions].some(entry => (
+          action === entry || (entry.endsWith('.*') && action.startsWith(entry.slice(0, -1)))
+        ));
+        if (!allowed) {
+          throw new Error(`Plugin ${pluginId} cannot execute undeclared automation action ${action}`);
+        }
+        return this.automation.execute(action, entities);
       }
     });
   }

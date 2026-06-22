@@ -1,0 +1,1 @@
+{"id":"chrome","name":"Chrome","version":"1.0.0","trusted":true,"permissions":["low"],"usesAutomation":["app.*","browser.*"]}

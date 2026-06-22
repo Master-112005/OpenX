@@ -72,6 +72,7 @@ const LEAD_IN_PATTERNS = [
 ];
 
 const PHRASE_REPLACEMENTS = [
+  { from: /\bun\s+mute\b/g, to: 'unmute' },
   { from: /\b(?:fresh|another|one\s+more)\s+chrome\s+tab\b/g, to: 'new chrome tab' },
   { from: /\b(?:fresh|another|one\s+more)\s+tab\b/g, to: 'new tab' },
   { from: /\bturn it up\b/g, to: 'increase volume' },

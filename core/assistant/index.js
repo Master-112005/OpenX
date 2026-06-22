@@ -11,6 +11,7 @@ const ContextManager = require('./context');
 const ActiveLearningStore = require('./Active-learning');
 const Personality = require('./personality');
 const ResponseGenerator = require('./responses');
+const PluginManager = require('../../plugins/plugin-controller');
 
 const CONFIRM_PHRASES = [
   'approve',
@@ -88,6 +89,15 @@ class Assistant extends EventEmitter {
     this.context = new ContextManager(config);
     this.personality = new Personality(config);
     this.responses = new ResponseGenerator(config);
+    this.pluginManager = null;
+    this.pluginsReady = Promise.resolve([]);
+    if (config?.plugins?.enabled === true && this.automation && this.router?.intentRegistry) {
+      this.pluginManager = new PluginManager(config, this.automation, this.router.intentRegistry);
+      this.pluginsReady = this.pluginManager.loadAll().catch(error => {
+        this.logger.warn('Plugin loading failed', error.message);
+        return [];
+      });
+    }
     this.isProcessing = false;
     this.pendingConfirmation = null;
     this.pendingClarification = null;
@@ -103,6 +113,8 @@ class Assistant extends EventEmitter {
         source
       };
     }
+
+    await this.pluginsReady;
 
     this.isProcessing = true;
     this.eventBus.publish(EVENTS.COMMAND_RECEIVED, { input, source });
@@ -327,6 +339,12 @@ class Assistant extends EventEmitter {
     this.pendingClarification = null;
     this.pendingFeedback = null;
     this.pendingLearningCorrection = null;
+
+    if (this.pluginManager) {
+      for (const plugin of this.pluginManager.getLoaded()) {
+        await this.pluginManager.unload(plugin.name);
+      }
+    }
 
     try {
       this.learning?.flush?.();

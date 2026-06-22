@@ -35,6 +35,25 @@ System-side capabilities are implemented directly by the flat modules in `core/a
 
 Desktop integration is exposed through `apps/desktop/preload.js`, `settings.js`, `permissions.js`, and `voice/tts.js`. External integrations continue through `plugins/plugin-controller.js` and isolated plugin packages.
 
+## Command execution contract
+
+Every command follows the same deterministic pipeline:
+
+`NLP correction -> NLU/context -> parser/entities -> intent -> validation -> permission -> NLE -> automation -> verification -> confirmation -> response/personality -> context/learning/Data`
+
+- Required information is validated before NLE. Missing values produce `needsClarification: true` and never execute an action.
+- NLE is the only assistant layer that delegates a resolved action to automation.
+- Automation attaches postcondition validation and verification evidence.
+- The confirmation layer records whether execution completed successfully.
+- Active learning records routing outcomes and adapts future entity resolution without bypassing validation or permissions.
+- Commands describing an unconnected operation are classified as `assistant.capability`; the response states that the operation is understood but not connected instead of claiming false execution.
+
+`commands.md` is the authoritative natural-language regression corpus. Its test executes all commands against a sandbox automation engine, so coverage cannot trigger real desktop side effects.
+
+## External plugins
+
+Forms, YouTube, Chrome, Discord, and communication-specific adapters live under `plugins/`. Loadable plugins declare trust, permission levels, and every core automation action they are allowed to call. Plugin actions and intents must remain inside their own `plugin.<id>.*` namespace.
+
 ## Layer Definitions
 
 ### 1. Input Layer

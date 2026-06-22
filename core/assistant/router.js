@@ -5,6 +5,9 @@ const IntentRegistry = require('./intents').IntentRegistry;
 const InputParser = require('./parser');
 const EntityExtractor = require('./entities');
 const PermissionValidator = require('../../apps/desktop/permissions');
+const NaturalLanguageExecution = require('./nle');
+const ActionValidation = require('../automation/common/action-velidation');
+const ActionConfirmation = require('../automation/common/action-confirm');
 const NlpProcessor = require('./nlp/nlp');
 const { normalizeWebTarget } = require('./nlp/web-targets');
 const { MediaCommandRouter } = require('../automation/media');
@@ -58,6 +61,9 @@ class ActionRouter {
     this.entityExtractor = new EntityExtractor(config);
     this.permissionValidator = new PermissionValidator(config);
     this.automationEngine = automationEngine;
+    this.nle = new NaturalLanguageExecution(automationEngine);
+    this.actionValidation = new ActionValidation();
+    this.actionConfirmation = new ActionConfirmation();
     this.nlp = new NlpProcessor(this.intentRegistry);
     this.commandFrameParser = new CommandFrameParser();
     this.naturalLanguageRouter = new NaturalLanguageRouter({
@@ -113,6 +119,14 @@ class ActionRouter {
     preparedInput.browserLanguage = this.browserCommandLanguage.parse(rawCommandText, preparedInput.correctedText);
 
     if (this._isIncompleteCommand(rawCommandText, preparedInput)) {
+      const capability = this._resolveCapabilityCommandIntent(
+        rawCommandText,
+        preparedInput,
+        { allowGeneric: true }
+      );
+      if (capability) {
+        return this._completeIntent(commandId, capability, rawCommandText, source, preparedInput);
+      }
       return {
         commandId,
         success: false,
@@ -241,9 +255,10 @@ class ActionRouter {
       this._resolveExplicitSearchIntent(rawCommandText, preparedInput) ||
       this._resolveBareKnowledgeSearchIntent(rawCommandText, preparedInput) ||
       this._resolveGeneralQuestionSearchIntent(rawCommandText, preparedInput) ||
+      this._matchIntent(preparedInput) ||
       this._resolveCapabilityCommandIntent(rawCommandText, preparedInput) ||
       this._resolveSemanticFrameIntent(rawCommandText, preparedInput) ||
-      this._matchIntent(preparedInput)
+      null
     );
   }
 
@@ -470,7 +485,7 @@ class ActionRouter {
       /\b(?:open|show|launch|start|find|locate|search|move|copy|rename|delete|create)\b/.test(text);
   }
 
-  _resolveCapabilityCommandIntent(rawText, preparedInput = {}) {
+  _resolveCapabilityCommandIntent(rawText, preparedInput = {}, options = {}) {
     const intent = this.intentRegistry.get('assistant.capability');
     if (!intent) {
       return null;
@@ -479,7 +494,9 @@ class ActionRouter {
     const raw = String(rawText || '').trim();
     const input = Normalizer.normalizeText(preparedInput?.correctedText || raw);
     const original = raw || input;
-    const capability = this._classifyCapabilityCommand(input, original);
+    const capability = this._classifyCapabilityCommand(input, original, {
+      allowGeneric: options.allowGeneric !== false
+    });
     if (!capability) {
       return null;
     }
@@ -496,7 +513,7 @@ class ActionRouter {
     };
   }
 
-  _classifyCapabilityCommand(input, rawText = '') {
+  _classifyCapabilityCommand(input, rawText = '', options = {}) {
     const text = `${String(input || '').trim().toLowerCase()} ${String(rawText || '').trim().toLowerCase()}`
       .replace(/\s+/g, ' ')
       .trim();
@@ -553,6 +570,23 @@ class ActionRouter {
           target: raw
         };
       }
+    }
+
+    if (options.allowGeneric !== true) {
+      return null;
+    }
+
+    if (/^(?:show\s+me|search\s+for|open|close|find|create|delete|move|copy|rename|send|set|play|start|stop)[.!?]*$/i.test(raw)) {
+      return null;
+    }
+
+    const genericOperation = text.match(/\b(?:add|adjust|answer|archive|backup|bookmark|cancel|capture|change|check|clean|clear|close|compress|connect|copy|create|delete|disable|dismiss|display|duplicate|edit|enable|end|export|extract|fast[\s-]+forward|find|generate|import|install|jump|kill|launch|lock|make|mark|maximize|merge|minimize|move|mute|open|organize|pause|play|record|reject|remove|rename|reset|restore|resume|save|search|send|set|share|show|shut|sign|sort|start|stop|switch|sync|take|turn|unarchive|unmute|verify|zip)\b/i);
+    if (genericOperation && raw.split(/\s+/).filter(Boolean).length >= 2) {
+      return {
+        capability: 'desktop-automation',
+        operation: genericOperation[0].toLowerCase(),
+        target: raw
+      };
     }
 
     return null;
@@ -956,7 +990,8 @@ class ActionRouter {
         source
       });
     }
-    const missingRequired = this._checkRequiredEntities(intentResult.intent, entities);
+    const actionValidation = this.actionValidation.validate(intentResult.intent, entities);
+    const missingRequired = actionValidation.missing;
     const languageUnderstanding = this._buildLanguageUnderstanding(
       preparedInput || this.nlp.prepare(rawCommandText),
       intentResult,
@@ -973,7 +1008,7 @@ class ActionRouter {
         preparedInput,
         validationStatus: 'incomplete'
       });
-      const capability = this._resolveCapabilityCommandIntent(rawCommandText, preparedInput);
+      const capability = this._resolveCapabilityCommandIntent(rawCommandText, preparedInput, { allowGeneric: false });
       if (capability) {
         return this._completeIntent(commandId, capability, rawCommandText, source, preparedInput);
       }
@@ -989,6 +1024,8 @@ class ActionRouter {
         intent: intentResult.intent.id,
         confidence: intentResult.confidence,
         entities,
+        needsClarification: true,
+        validation: actionValidation,
         languageUnderstanding
       };
     }
@@ -1352,7 +1389,13 @@ class ActionRouter {
 
   async _execute(commandId, intentResult, entities, rawCommandText = '', source = 'chat', languageUnderstanding = null) {
     try {
-      const result = await this.automationEngine.execute(intentResult.intent.action, entities);
+      const result = await this.nle.execute(intentResult.intent.action, entities, {
+        commandId,
+        intent: intentResult.intent.id,
+        input: rawCommandText,
+        source
+      });
+      const confirmation = this.actionConfirmation.confirm(result);
       this.logger.info(`Execution result: ${commandId}`, {
         success: result.success,
         error: result.error || null,
@@ -1419,6 +1462,7 @@ class ActionRouter {
         languageUnderstanding,
         validation: result.validation || result.data?.validation || null,
         verification: result.verification || result.data?.verification || null,
+        confirmation,
         data: responseData || result.data || null
       };
     } catch (err) {

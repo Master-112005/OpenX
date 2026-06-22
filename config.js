@@ -109,8 +109,9 @@ const CONFIG = {
   },
 
   plugins: {
-    directory: path.join(__dirname, '..', 'plugins'),
-    enabled: []
+    directory: path.join(__dirname, 'plugins'),
+    enabled: true,
+    trustedPlugins: ['sample_plugin', 'youtube', 'chrome', 'discord']
   }
 };
 
