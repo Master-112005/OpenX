@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { Normalizer } = require('./Data');
 const { buildDataPaths, writeJsonAtomic } = require('./Data');
+const LearningGuard = require('./active-learning/LearningGuard');
 
 const MAX_EVENTS = 200;
 const MAX_REWRITES = 100;
@@ -191,6 +192,7 @@ class ActiveLearningStore {
       reason: metadata.reason || '',
       createdAt: existing?.createdAt || now,
       updatedAt: now,
+      learnedAt: now,
       uses: existing?.uses || 0
     };
 
@@ -243,12 +245,95 @@ class ActiveLearningStore {
     const record = {
       value,
       source: metadata.source || 'user',
-      updatedAt: now
+      updatedAt: now,
+      learnedAt: now
     };
     this.data.preferences[kind] = record;
     this._pruneRecordObject(this.data.preferences, MAX_PREFERENCES);
     this._save();
     return record;
+  }
+
+  getMostRecentCorrectableLearning() {
+    if (!this.enabled) return null;
+
+    const corrections = (this.data.commandRewrites || []).map(rule => ({
+      type: 'correction',
+      key: rule.normalizedInput,
+      input: rule.input,
+      value: rule.correction,
+      source: rule.source,
+      learnedAt: rule.learnedAt || rule.createdAt || rule.updatedAt || ''
+    }));
+    const preferences = Object.entries(this.data.preferences || {})
+      .filter(([, record]) => ['explicit-learning', 'user', 'user-feedback'].includes(record?.source))
+      .map(([kind, record]) => ({
+        type: 'preference',
+        key: kind,
+        input: kind.replace(/([A-Z])/g, ' $1').replace(/[._-]+/g, ' ').trim(),
+        value: record.value,
+        source: record.source,
+        learnedAt: record.learnedAt || record.updatedAt || ''
+      }));
+
+    return [...corrections, ...preferences]
+      .filter(record => record.input && record.value)
+      .sort((left, right) => Date.parse(right.learnedAt || 0) - Date.parse(left.learnedAt || 0))[0] || null;
+  }
+
+  correctLearning(learning, replacement) {
+    if (!this.enabled || !learning) return null;
+    const cleanReplacement = cleanCommand(replacement).slice(0, 300);
+    const guard = LearningGuard.isAllowedLearning(
+      learning.type === 'preference' ? 'preference' : 'correction',
+      learning.key || learning.input,
+      cleanReplacement
+    );
+    if (!cleanReplacement || !guard.allowed) {
+      return {
+        success: false,
+        sensitive: !guard.allowed,
+        reason: guard.reason || 'The replacement is empty'
+      };
+    }
+
+    if (learning.type === 'correction') {
+      const rule = this.rememberCorrection(learning.input, cleanReplacement, {
+        source: 'user-feedback',
+        reason: 'relearned-after-user-rejection'
+      });
+      return rule ? { success: true, type: 'correction', record: rule } : null;
+    }
+
+    if (learning.type === 'preference') {
+      const value = this._normalizeCorrectedPreference(learning.key, cleanReplacement);
+      if (!value) return { success: false, reason: 'I could not identify the corrected preference' };
+      const record = this.rememberPreference(learning.key, value, {
+        source: 'user-feedback'
+      });
+      return record ? { success: true, type: 'preference', key: learning.key, record } : null;
+    }
+
+    return { success: false, reason: 'That learning type cannot be corrected here' };
+  }
+
+  _normalizeCorrectedPreference(kind, replacement) {
+    const normalized = normalizeCommand(replacement);
+    if (kind === 'searchOpenMode') {
+      if (/\b(?:background|silent|do not open|dont open)\b/.test(normalized)) return 'background';
+      if (/\b(?:browser|chrome|new tab|open)\b/.test(normalized)) return 'browser';
+      return '';
+    }
+    if (kind === 'mediaPlatform') {
+      return normalized.match(/\b(spotify|youtube|apple music|amazon music)\b/)?.[1] || '';
+    }
+    if (kind === 'photoLibrary') {
+      if (/\bgoogle photos?\b/.test(normalized)) return 'googlePhotos';
+      if (/\b(?:windows|microsoft) photos?\b|\bphotos app\b/.test(normalized)) return 'windowsPhotos';
+      if (/\b(?:local|pictures?|photos? folder|computer|pc|laptop)\b/.test(normalized)) return 'localPictures';
+      return '';
+    }
+    return cleanCommand(replacement).slice(0, 200);
   }
 
   getPreference(kind) {

@@ -1,6 +1,7 @@
 const { Normalizer } = require('./Data');
 const EntityExtractor = require('./entities');
 const { FILLER_WORDS } = require('./nlp/preprocessor');
+const { parseLearningDirective } = require('./active-learning/LearningLanguage');
 
 const CONNECTOR_PATTERN = /\s*(?:;|,|\b(?:and then|then|after that|afterwards|and|also|plus|additionally|furthermore)\b)\s*/i;
 
@@ -147,6 +148,27 @@ class NaturalLanguageRouter {
     const tokens = Array.isArray(prepared?.tokens) && prepared.tokens.length
       ? prepared.tokens
       : Normalizer.tokenize(correctedText);
+    const learningDirective = prepared?.learningDirective || parseLearningDirective(clause);
+    if (learningDirective?.kind === 'repair-learning') {
+      return {
+        index,
+        text: clause,
+        correctedText,
+        tokens,
+        tokenRoles: tokens.map(token => ({ token, role: 'learning-feedback' })),
+        action: 'repair',
+        actionToken: 'wrong learning',
+        targetText: learningDirective.correction,
+        domain: 'active-learning',
+        intentId: 'assistant.learningRepair',
+        entities: {
+          repairKind: learningDirective.kind,
+          ...(learningDirective.correction ? { correction: learningDirective.correction } : {})
+        },
+        confidence: 1,
+        validation: { status: 'passed', reason: 'Active-learning repair request detected' }
+      };
+    }
     const action = this._findAction(tokens, correctedText);
     const value = this._extractValue(correctedText);
     const domain = this._inferDomain(tokens, correctedText, action?.verb || '', value);

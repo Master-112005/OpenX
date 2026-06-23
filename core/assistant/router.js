@@ -145,7 +145,8 @@ class ActionRouter {
       rawCommandText
     );
 
-    if (options.allowMulti !== false && !commandLooksLikeCapability) {
+    const commandLooksLikeLearningRepair = preparedInput.learningDirective?.kind === 'repair-learning';
+    if (options.allowMulti !== false && !commandLooksLikeCapability && !commandLooksLikeLearningRepair) {
       const multiPlan = this._buildMultiCommandPlan(rawCommandText, source);
       if (multiPlan) {
         return this._executeMultiCommand(commandId, multiPlan, source);
@@ -219,6 +220,7 @@ class ActionRouter {
     }
 
     return (
+      this._resolveLearningRepairIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitReminderIntent(rawCommandText, preparedInput) ||
       this._resolveSystemSettingsIntent(rawCommandText, preparedInput) ||
       this._resolveSystemInsightIntent(rawCommandText, preparedInput) ||
@@ -2575,6 +2577,21 @@ class ActionRouter {
         ...frame,
         domain: 'app',
         intentId
+      }
+    };
+  }
+
+  _resolveLearningRepairIntent(rawCommandText, preparedInput) {
+    const directive = preparedInput?.learningDirective;
+    if (directive?.kind !== 'repair-learning') return null;
+    const intent = this.intentRegistry.get('assistant.learningRepair');
+    if (!intent) return null;
+    return {
+      intent,
+      confidence: 1,
+      entities: {
+        repairKind: directive.kind,
+        ...(directive.correction ? { correction: directive.correction } : {})
       }
     };
   }

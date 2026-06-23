@@ -27,6 +27,12 @@ function buildDataPaths(config = {}) {
     root,
     settingsPath: path.join(root, 'settings.json'),
     learningPath: path.join(root, 'learning.json'),
+    learningDir: path.join(root, 'learning'),
+    learningAliasesPath: path.join(root, 'learning', 'aliases.json'),
+    learningPreferencesPath: path.join(root, 'learning', 'preferences.json'),
+    learningCorrectionsPath: path.join(root, 'learning', 'corrections.json'),
+    learningWorkflowsPath: path.join(root, 'learning', 'workflows.json'),
+    learningUsageStatsPath: path.join(root, 'learning', 'usage_stats.json'),
     logsDir: path.join(root, 'logs'),
     runtimeDir,
     cacheDir: path.join(root, 'cache'),
@@ -163,6 +169,7 @@ function ensureDataRoot(config = {}) {
   [
     paths.root,
     paths.logsDir,
+    paths.learningDir,
     paths.runtimeDir,
     paths.cacheDir,
     paths.mediaProfileDir

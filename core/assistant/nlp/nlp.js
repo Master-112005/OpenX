@@ -13,6 +13,7 @@ const {
   scorePreparedPattern
 } = require('./scorer');
 const { normalizeWebTarget } = require('./web-targets');
+const { parseLearningDirective } = require('../active-learning/LearningLanguage');
 
 const PREPARE_CACHE_LIMIT = 256;
 const PATTERN_CACHE_LIMIT = 512;
@@ -164,6 +165,7 @@ class NlpProcessor {
     const repairContextTokenCount = this._countRepairContextTokens(correctedTokens);
     const bigrams = buildBigrams(correctedTokens);
     const intentBigrams = buildBigrams(intentTokens);
+    const learningDirective = parseLearningDirective(text);
 
     return {
       normalizedText: normalized,
@@ -178,6 +180,7 @@ class NlpProcessor {
       intentText,
       tokens: correctedTokens,
       intentTokens,
+      learningDirective,
       bigrams,
       intentBigrams
     };

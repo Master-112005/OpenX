@@ -1,6 +1,7 @@
 const Normalizer = require('./Data').Normalizer;
 const Logger = require('./Data').Logger;
 const { stripLeadIns } = require('./nlp/preprocessor');
+const { parseLearningDirective } = require('./active-learning/LearningLanguage');
 
 class InputParser {
   constructor(config) {
@@ -24,6 +25,7 @@ class InputParser {
     const commandText = stripLeadIns(normalized);
     const rawCommandText = this._stripLeadInRaw(raw);
     const hasCommand = rawCommandText.length > 0;
+    const learningDirective = parseLearningDirective(rawCommandText);
 
     return {
       raw,
@@ -31,7 +33,8 @@ class InputParser {
       wakeWordDetected: false,
       commandText,
       rawCommandText,
-      hasCommand
+      hasCommand,
+      learningDirective
     };
   }
 
@@ -70,6 +73,7 @@ module.exports = InputParser;
 
 const CommandFrameParser = (() => {
 const { Normalizer } = require('./Data');
+const { parseLearningDirective } = require('./active-learning/LearningLanguage');
 
 const ACTION_ALIASES = new Map([
   ['close', 'close'],
@@ -169,6 +173,25 @@ class CommandFrameParser {
     const tokens = Array.isArray(preparedInput?.tokens) && preparedInput.tokens.length
       ? preparedInput.tokens.map(token => String(token || '').toLowerCase()).filter(Boolean)
       : Normalizer.tokenize(corrected || raw);
+    const learningDirective = preparedInput?.learningDirective || parseLearningDirective(raw);
+
+    if (learningDirective?.kind === 'repair-learning') {
+      return {
+        rawText: raw,
+        correctedText: corrected,
+        tokens,
+        tokenRoles: tokens.map(token => ({ token, role: 'learning-feedback' })),
+        action: 'repair',
+        actionToken: 'wrong learning',
+        actionIndex: -1,
+        targetTokens: [],
+        targetText: learningDirective.correction,
+        domain: 'active-learning',
+        appRouteAllowed: false,
+        learningDirective,
+        validation: { status: 'passed', reason: 'Active-learning repair request detected' }
+      };
+    }
 
     const actionIndex = tokens.findIndex(token => ACTION_ALIASES.has(token));
     const actionToken = actionIndex >= 0 ? tokens[actionIndex] : '';

@@ -16,6 +16,7 @@ describe('Assistant Data Root', function() {
     assert.equal(path.basename(paths.root), 'OpenX_Data');
     assert.equal(paths.settingsPath, path.join(paths.root, 'settings.json'));
     assert.equal(paths.learningPath, path.join(paths.root, 'learning.json'));
+    assert.equal(paths.learningDir, path.join(paths.root, 'learning'));
     assert.equal(paths.logsDir, path.join(paths.root, 'logs'));
     assert.equal(paths.mediaProfileDir, path.join(paths.root, 'runtime', 'chrome-media-profile'));
   });
@@ -27,6 +28,7 @@ describe('Assistant Data Root', function() {
     assert.equal(paths.root, tempDir);
     assert.ok(fs.existsSync(paths.root));
     assert.ok(fs.existsSync(paths.logsDir));
+    assert.ok(fs.existsSync(paths.learningDir));
     assert.ok(fs.existsSync(paths.runtimeDir));
     assert.ok(fs.existsSync(paths.cacheDir));
     assert.ok(fs.existsSync(paths.mediaProfileDir));

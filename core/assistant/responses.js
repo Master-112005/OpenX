@@ -898,6 +898,12 @@ const RESPONSE_BUILDERS = {
       const capability = valueFromContext(context, 'capability', 'that');
       return `I understood this as a ${capability} request, but this capability is not connected to an automation controller yet.`;
     },
+    'assistant.learningRepair': context => {
+      const correction = valueFromContext(context, 'correction', '');
+      return correction
+        ? `I understood the corrected learning as "${correction}".`
+        : 'Tell me what I should learn instead.';
+    },
     'window.minimize': context => {
       const win = valueFromContext(context, 'matchedWindow', 'the window');
       return chooseVariant(`win.minimize:${win}`, [

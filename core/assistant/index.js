@@ -12,6 +12,10 @@ const ActiveLearningStore = require('./Active-learning');
 const Personality = require('./personality');
 const ResponseGenerator = require('./responses');
 const PluginManager = require('../../plugins/plugin-controller');
+const {
+  extractReplacement,
+  parseLearningDirective
+} = require('./active-learning/LearningLanguage');
 
 const CONFIRM_PHRASES = [
   'approve',
@@ -103,6 +107,7 @@ class Assistant extends EventEmitter {
     this.pendingClarification = null;
     this.pendingFeedback = null;
     this.pendingLearningCorrection = null;
+    this.pendingLearningRepair = null;
   }
 
   async processCommand(input, source = 'chat') {
@@ -660,6 +665,45 @@ class Assistant extends EventEmitter {
       return null;
     }
 
+    if (this.pendingLearningRepair) {
+      const pending = this.pendingLearningRepair;
+      const directive = parseLearningDirective(raw);
+      if (directive?.kind === 'cancel') {
+        this.pendingLearningRepair = null;
+        return {
+          success: true,
+          cancelled: true,
+          source,
+          response: this.personality.applyToResponse('Okay. I did not change that learning.')
+        };
+      }
+      const replacement = directive?.correction || extractReplacement(raw);
+      const corrected = this.learning.correctLearning?.(pending, replacement);
+      if (!corrected?.success) {
+        return {
+          success: false,
+          learned: false,
+          source,
+          response: this.personality.applyToResponse(
+            corrected?.sensitive
+              ? 'I cannot store that correction because it contains sensitive information. Please give a non-sensitive correction.'
+              : `${corrected?.reason || 'I could not understand that correction.'} What should I learn instead?`
+          )
+        };
+      }
+      this.pendingLearningRepair = null;
+      return {
+        success: true,
+        learned: true,
+        relearned: true,
+        source,
+        data: corrected,
+        response: this.personality.applyToResponse(
+          `Understood. I replaced the incorrect learning with "${replacement}".`
+        )
+      };
+    }
+
     if (this.pendingLearningCorrection) {
       const pending = this.pendingLearningCorrection;
       this.pendingLearningCorrection = null;
@@ -722,6 +766,48 @@ class Assistant extends EventEmitter {
       }
 
       this.pendingFeedback = null;
+    }
+
+    const learningDirective = parseLearningDirective(raw);
+    if (learningDirective?.kind === 'repair-learning') {
+      const recentLearning = this.learning.getMostRecentCorrectableLearning?.();
+      if (!recentLearning) {
+        return {
+          success: false,
+          learned: false,
+          source,
+          response: this.personality.applyToResponse(
+            'I could not identify a recent alias, preference, or correction to repair.'
+          )
+        };
+      }
+
+      if (learningDirective.correction) {
+        const corrected = this.learning.correctLearning?.(recentLearning, learningDirective.correction);
+        if (corrected?.success) {
+          return {
+            success: true,
+            learned: true,
+            relearned: true,
+            source,
+            data: corrected,
+            response: this.personality.applyToResponse(
+              `Understood. I replaced the incorrect learning with "${learningDirective.correction}".`
+            )
+          };
+        }
+      }
+
+      this.pendingLearningRepair = recentLearning;
+      return {
+        success: false,
+        learned: false,
+        awaitingLearningCorrection: true,
+        source,
+        response: this.personality.applyToResponse(
+          `What should I learn instead of "${recentLearning.value}" for "${recentLearning.input}"?`
+        )
+      };
     }
 
     const correction = this._extractCorrectionCommand(raw);

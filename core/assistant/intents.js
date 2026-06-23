@@ -577,6 +577,17 @@ const INTENT_DEFINITIONS = [
     description: 'Close active window'
   },
   {
+    id: 'assistant.learningRepair',
+    patterns: ['this learning is wrong', 'what you learned is wrong', 'wrong learning'],
+    permissionLevel: 'low',
+    action: 'assistant.learningRepair',
+    entities: [
+      { name: 'repairKind', type: 'string', required: false },
+      { name: 'correction', type: 'string', required: false }
+    ],
+    description: 'Request correction of the latest active-learning record'
+  },
+  {
     id: 'assistant.identity',
     patterns: ['what is your name', 'who are you', 'what are you called', 'who is your name'],
     permissionLevel: 'low',
