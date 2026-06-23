@@ -8,18 +8,40 @@ const stopBtn = document.getElementById('stop-btn');
 
 let currentSchedule = null;
 
-function alertPresentation(kind) {
+function inferReminderCategory(message, category = '') {
+  const preferred = String(category || '').toLowerCase();
+  if (preferred) return preferred;
+  const text = String(message || '').toLowerCase();
+  if (/\b(?:college|collage|school|class|lecture|campus|study|exam|assignment|homework)\b/.test(text)) return 'education';
+  if (/\b(?:water|hydrate|hydration|drink)\b/.test(text)) return 'water';
+  if (/\b(?:exercise|workout|gym|walk|run|yoga|stretch|fitness)\b/.test(text)) return 'exercise';
+  if (/\b(?:medicine|medication|tablet|pill|doctor|health)\b/.test(text)) return 'health';
+  if (/\b(?:work|office|meeting|project|deadline|client|email)\b/.test(text)) return 'work';
+  if (/\b(?:birthday|anniversary|party)\b/.test(text)) return 'birthday';
+  return 'general';
+}
+
+function alertPresentation(kind, category = '', message = '') {
   const normalized = String(kind || '').toLowerCase();
   if (normalized === 'timer') return { symbol: '⏱️', title: 'Timer complete' };
   if (normalized === 'alarm') return { symbol: '⏰', title: 'Alarm ringing' };
-  return { symbol: '📝', title: 'A gentle reminder' };
+  const presentations = {
+    education: { symbol: '🎓', title: 'School & college reminder' },
+    water: { symbol: '💧', title: 'Water reminder' },
+    exercise: { symbol: '🏃', title: 'Exercise reminder' },
+    health: { symbol: '💊', title: 'Health reminder' },
+    work: { symbol: '💼', title: 'Work reminder' },
+    birthday: { symbol: '🎂', title: 'Birthday reminder' },
+    general: { symbol: '📝', title: 'A gentle reminder' }
+  };
+  return presentations[inferReminderCategory(message, category)] || presentations.general;
 }
 
 function renderSchedule(schedule) {
   currentSchedule = schedule;
   const kind = schedule?.kind || 'Reminder';
-  const presentation = alertPresentation(kind);
-  symbolEl.textContent = presentation.symbol;
+  const presentation = alertPresentation(kind, schedule?.category, schedule?.message);
+  symbolEl.textContent = schedule?.symbol || presentation.symbol;
   kindEl.textContent = kind;
   titleEl.textContent = presentation.title;
   messageEl.textContent = schedule?.message || 'It is time.';

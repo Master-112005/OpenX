@@ -20,6 +20,20 @@ describe('Chat Renderer UI', function() {
     assert.match(css, /@media\s*\(max-width:\s*460px\)/);
   });
 
+  it('should render clarification choices as selectable chat cards', function() {
+    assert.match(script, /className = 'message-choices'/);
+    assert.match(script, /sendCommand\(String\(choiceIndex\)\)/);
+    assert.match(css, /\.message-choice\s*\{/);
+    assert.match(css, /\.message-choice-copy\s*\{/);
+  });
+
+  it('should display category-specific reminder symbols', function() {
+    assert.match(script, /education: \{ color: '[^']+', symbol: '🎓'/);
+    assert.match(script, /water: \{ color: '[^']+', symbol: '💧'/);
+    assert.match(script, /exercise: \{ color: '[^']+', symbol: '🏃'/);
+    assert.match(script, /inferReminderCategory\(message, category\)/);
+  });
+
   it('should render and persist alarms, reminders, and notifications', function() {
     assert.match(script, /function addScheduleFromResult\(/);
     assert.match(script, /function triggerSchedule\(/);

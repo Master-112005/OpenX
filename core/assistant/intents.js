@@ -441,7 +441,10 @@ const INTENT_DEFINITIONS = [
     patterns: ['set alarm for', 'alarm for', 'wake me at'],
     permissionLevel: 'low',
     action: 'alarm.set',
-    entities: [{ name: 'timeExpression', type: 'string', required: true }],
+    entities: [
+      { name: 'timeExpression', type: 'string', required: true },
+      { name: 'alarmLabel', type: 'string', required: false }
+    ],
     description: 'Set an alarm'
   },
   {
@@ -460,9 +463,67 @@ const INTENT_DEFINITIONS = [
     entities: [
       { name: 'timeExpression', type: 'string', required: false },
       { name: 'duration', type: 'number', required: false },
-      { name: 'reminderText', type: 'string', required: true }
+      { name: 'reminderText', type: 'string', required: true },
+      { name: 'reminderCategory', type: 'string', required: false },
+      { name: 'recurrence', type: 'string', required: false }
     ],
     description: 'Set a reminder'
+  },
+  {
+    id: 'timer.pause', patterns: ['pause timer', 'pause active timer'], permissionLevel: 'low',
+    action: 'timer.pause', entities: [], description: 'Pause the active timer'
+  },
+  {
+    id: 'timer.resume', patterns: ['resume timer', 'resume active timer'], permissionLevel: 'low',
+    action: 'timer.resume', entities: [], description: 'Resume the paused timer'
+  },
+  {
+    id: 'timer.cancel', patterns: ['stop timer', 'cancel timer'], permissionLevel: 'low',
+    action: 'timer.cancel', entities: [], description: 'Stop the active timer'
+  },
+  {
+    id: 'timer.reset', patterns: ['reset timer', 'restart timer'], permissionLevel: 'low',
+    action: 'timer.reset', entities: [], description: 'Reset the active timer'
+  },
+  {
+    id: 'timer.remaining', patterns: ['time left', 'how much time is left'], permissionLevel: 'low',
+    action: 'timer.remaining', entities: [], description: 'Show remaining timer time'
+  },
+  {
+    id: 'timer.list', patterns: ['show active timers', 'list timers'], permissionLevel: 'low',
+    action: 'timer.list', entities: [], description: 'Show active timers'
+  },
+  {
+    id: 'timer.clear', patterns: ['delete all timers', 'cancel all timers'], permissionLevel: 'low',
+    action: 'timer.clear', entities: [], description: 'Cancel all active timers'
+  },
+  {
+    id: 'reminder.list', patterns: ['show reminders', 'list reminders'], permissionLevel: 'low',
+    action: 'reminder.list', entities: [{ name: 'scope', type: 'string', required: false }], description: 'Show reminders'
+  },
+  {
+    id: 'reminder.cancel', patterns: ['delete this reminder', 'cancel reminder'], permissionLevel: 'low',
+    action: 'reminder.cancel', entities: [], description: 'Cancel the latest reminder'
+  },
+  {
+    id: 'reminder.clear', patterns: ['delete all reminders', 'clear reminders'], permissionLevel: 'low',
+    action: 'reminder.clear', entities: [], description: 'Cancel all reminders'
+  },
+  {
+    id: 'alarm.snooze', patterns: ['snooze alarm', 'snooze the alarm'], permissionLevel: 'low',
+    action: 'alarm.snooze', entities: [{ name: 'duration', type: 'number', required: false }], description: 'Snooze the active alarm'
+  },
+  {
+    id: 'alarm.cancel', patterns: ['stop alarm', 'delete this alarm'], permissionLevel: 'low',
+    action: 'alarm.cancel', entities: [], description: 'Stop the active alarm'
+  },
+  {
+    id: 'alarm.list', patterns: ['show alarms', 'list alarms'], permissionLevel: 'low',
+    action: 'alarm.list', entities: [], description: 'Show active alarms'
+  },
+  {
+    id: 'alarm.clear', patterns: ['delete all alarms', 'clear alarms'], permissionLevel: 'low',
+    action: 'alarm.clear', entities: [], description: 'Cancel all alarms'
   },
   {
     id: 'system.shutdown',

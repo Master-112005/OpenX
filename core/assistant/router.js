@@ -223,7 +223,10 @@ class ActionRouter {
 
     return (
       this._resolveLearningRepairIntent(rawCommandText, preparedInput) ||
+      this._resolveScheduleManagementIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitReminderIntent(rawCommandText, preparedInput) ||
+      this._resolveExplicitAlarmIntent(rawCommandText, preparedInput) ||
+      this._resolveExplicitTimerIntent(rawCommandText, preparedInput) ||
       this._resolveSystemSettingsIntent(rawCommandText, preparedInput) ||
       this._resolveSystemInsightIntent(rawCommandText, preparedInput) ||
       this._resolveFolderOpenInAppIntent(rawCommandText, preparedInput) ||
@@ -242,8 +245,6 @@ class ActionRouter {
       this._resolveSmartFileIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitFileIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitFolderMoveIntent(rawCommandText, preparedInput) ||
-      this._resolveExplicitAlarmIntent(rawCommandText, preparedInput) ||
-      this._resolveExplicitTimerIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitModeIntent(rawCommandText, preparedInput) ||
       this._resolveLocalInfoIntent(rawCommandText, preparedInput) ||
       this._resolveExplicitAppIntent(rawCommandText, preparedInput) ||
@@ -489,8 +490,11 @@ class ActionRouter {
 
   _shouldPreserveStructuralCommand(rawText) {
     const text = String(rawText || '').toLowerCase();
-    return /\b(?:folder|directory|file|document)\b/.test(text) &&
+    const fileCommand = /\b(?:folder|directory|file|document)\b/.test(text) &&
       /\b(?:open|show|launch|start|find|locate|search|move|copy|rename|delete|create)\b/.test(text);
+    const scheduleCommand = /\b(?:timer|countdown|pomodoro|alarm|reminder|remind)\b/.test(text) &&
+      /\b(?:set|start|create|add|pause|resume|reset|stop|cancel|delete|show|list|snooze|wake|remind)\b/.test(text);
+    return fileCommand || scheduleCommand;
   }
 
   _resolveCapabilityCommandIntent(rawText, preparedInput = {}, options = {}) {
@@ -692,7 +696,7 @@ class ActionRouter {
       return null;
     }
 
-    const safeDomains = new Set(['brightness', 'browser-tab', 'media', 'volume']);
+    const safeDomains = new Set(['brightness', 'browser-tab', 'media', 'schedule', 'volume']);
     if (!safeDomains.has(frame.domain)) {
       return null;
     }
@@ -3471,7 +3475,8 @@ const newTabMatch = input.match(
 
   _resolveExplicitReminderIntent(rawText, preparedInput) {
     const input = String(preparedInput?.correctedText || rawText || '').trim();
-    if (!/^(?:remind|set\s+(?:a\s+)?reminder|create\s+(?:a\s+)?reminder|add\s+(?:a\s+)?reminder)\b/i.test(input)) {
+    const taskTimer = input.match(/^(?:set|create|add)\s+(?:a\s+)?timer\s+for\s+(.+?)\s+at\s+(\d{1,2}(?:(?::|\s+)\d{2})?\s*(?:am|pm)?)$/i);
+    if (!taskTimer && !/^(?:remind|set\s+(?:a\s+)?reminder|create\s+(?:a\s+)?reminder|add\s+(?:a\s+)?reminder|schedule\s+(?:a\s+)?reminder)\b/i.test(input)) {
       return null;
     }
 
@@ -3481,6 +3486,11 @@ const newTabMatch = input.match(
     }
 
     const entities = this.entityExtractor.extract(intent, rawText);
+    if (taskTimer) {
+      entities.reminderText = taskTimer[1].trim();
+      entities.timeExpression = taskTimer[2].replace(/^(\d{1,2})\s+(\d{2})/, '$1:$2').replace(/\s+/g, ' ').trim();
+      entities.reminderCategory = this.entityExtractor._extractReminderCategory(taskTimer[1]);
+    }
     const correctedEntities = this.entityExtractor.extract(intent, input);
     if (!entities.timeExpression && correctedEntities.timeExpression) {
       entities.timeExpression = correctedEntities.timeExpression;
@@ -3505,6 +3515,36 @@ const newTabMatch = input.match(
       return { intent, confidence: 1, entities };
     }
 
+    return null;
+  }
+
+  _resolveScheduleManagementIntent(rawText, preparedInput) {
+    const input = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
+    if (!input) return null;
+    const routes = [
+      ['timer.clear', /^(?:delete|clear|cancel|stop)\s+all\s+(?:active\s+)?timers?$/],
+      ['timer.pause', /^pause\s+(?:the\s+|my\s+)?(?:active\s+)?timer$/],
+      ['timer.resume', /^resume\s+(?:the\s+|my\s+)?(?:active\s+)?timer$/],
+      ['timer.reset', /^(?:reset|restart)\s+(?:the\s+|my\s+)?timer$/],
+      ['timer.remaining', /^(?:how\s+much\s+time\s+(?:is\s+)?left|show\s+(?:the\s+)?remaining\s+time|time\s+left)$/],
+      ['timer.list', /^(?:show|list|what|tell)\b.*\b(?:active\s+)?timers?\b/],
+      ['timer.cancel', /^(?:stop|cancel|delete)\s+(?:the\s+|my\s+)?(?:active\s+)?timer$/],
+      ['reminder.clear', /^(?:delete|clear|cancel)\s+all\s+(?:my\s+)?reminders?$/],
+      ['reminder.list', /^(?:show|list|tell)\b.*\breminders?\b/],
+      ['reminder.cancel', /^(?:delete|cancel|stop)\s+(?:this\s+|the\s+|my\s+)?reminder$/],
+      ['alarm.clear', /^(?:delete|clear|cancel|stop)\s+all\s+(?:my\s+)?alarms?$/],
+      ['alarm.snooze', /^snooze\s+(?:the\s+|my\s+)?alarm(?:\s+for\s+.+)?$/],
+      ['alarm.list', /^(?:show|list|tell)\b.*\b(?:active\s+)?alarms?\b/],
+      ['alarm.cancel', /^(?:delete|cancel|stop|dismiss)\s+(?:this\s+|the\s+|my\s+)?alarm$/]
+    ];
+    for (const [intentId, pattern] of routes) {
+      if (!pattern.test(input)) continue;
+      const intent = this.intentRegistry.get(intentId);
+      if (!intent) return null;
+      const entities = this.entityExtractor.extract(intent, rawText);
+      if (intentId === 'reminder.list' && /\btoday\b/.test(input)) entities.scope = 'today';
+      return { intent, confidence: 1, entities };
+    }
     return null;
   }
 
@@ -3542,7 +3582,18 @@ _resolveExplicitTimerIntent(rawText, preparedInput) {
     const corrected = String(preparedInput?.correctedText || rawText || '').trim();
     const raw = String(rawText || corrected || '').trim();
     const combined = `${raw} ${corrected}`.toLowerCase().replace(/\s+/g, ' ').trim();
-    if (!/\b(?:set|start|create|run)\b.*\btimers?\b|\btimers?\b.*\b(?:for|of|at)\s+\d/.test(combined)) {
+    const durationWords = '(?:\\d+|one|two|three|four|five|six|seven|eight|nine|ten|fifteen|twenty|thirty|forty(?:\\s*five)?|sixty)';
+    const durationUnits = '(?:seconds?|secs?|minutes?|mins?|hours?|hrs?)';
+    const timerRequest = new RegExp(
+      `\\b(?:set|start|create|run)\\b.*\\btimers?\\b|` +
+      `\\btimers?\\b.*\\b(?:for|of|at)\\s+${durationWords}|` +
+      `\\b(?:set|start|create)\\b.*\\bcountdown\\b|` +
+      `\\b(?:pomodoro|study|focus|break)\\s+(?:timer|session)\\b|` +
+      `^(?:add|set|start|give\\s+me)\\s+(?:a\\s+)?time\\s+for\\s+${durationWords}\\s*${durationUnits}\\b|` +
+      `^time\\s+me\\s+for\\s+${durationWords}\\s*${durationUnits}\\b`,
+      'i'
+    );
+    if (!timerRequest.test(combined)) {
       return null;
     }
 
@@ -3552,6 +3603,10 @@ _resolveExplicitTimerIntent(rawText, preparedInput) {
     }
 
     const entities = this.entityExtractor.extract(intent, raw);
+    const correctedEntities = this.entityExtractor.extract(intent, corrected);
+    if (!entities.duration && correctedEntities.duration) entities.duration = correctedEntities.duration;
+    if (!entities.timeExpression && correctedEntities.timeExpression) entities.timeExpression = correctedEntities.timeExpression;
+    if (!entities.duration && /\bpomodoro\b/i.test(combined)) entities.duration = 25;
     if (entities.timeExpression || entities.duration) {
       return { intent, confidence: 1, entities };
     }

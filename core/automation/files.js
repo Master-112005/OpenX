@@ -207,7 +207,9 @@ class FileController {
         };
       }
 
-      const fullPath = this._resolveFilePath(filename, targetPath);
+      const fullPath = matches.length === 1
+        ? matches[0]
+        : this._resolveFilePath(filename, targetPath);
       if (!fullPath) {
         return { success: false, error: 'File not found' };
       }
@@ -550,14 +552,7 @@ class FileController {
       return null;
     }
 
-    const requestedExt = path.extname(requestedName).toLowerCase();
-    const requestedBase = path.basename(requestedName, requestedExt).toLowerCase();
-    const requestedTokens = requestedBase
-      .split(/[^a-z0-9]+/i)
-      .map(token => token.trim())
-      .filter(Boolean);
-
-    if (requestedTokens.length === 0 && !requestedExt) {
+    if (!String(requestedName || '').trim()) {
       return null;
     }
 
@@ -569,29 +564,9 @@ class FileController {
     }
 
     const matches = entries
-      .filter(entry => entry.isFile())
-      .map(entry => {
-        const entryExt = path.extname(entry.name).toLowerCase();
-        if (requestedExt && entryExt !== requestedExt) {
-          return null;
-        }
-
-        const entryBase = path.basename(entry.name, entryExt).toLowerCase();
-        const entryTokens = entryBase
-          .split(/[^a-z0-9]+/i)
-          .map(token => token.trim())
-          .filter(Boolean);
-        const tokenScore = requestedTokens.filter(token => (
-          entryBase.includes(token) ||
-          entryTokens.some(entryToken => entryToken.includes(token) || token.includes(entryToken) || Normalizer.findClosestOption(token, [entryToken], {
-            minSimilarity: 0.74,
-            maxDistance: 2
-          }))
-        )).length;
-        const exactSubstring = requestedBase && entryBase.includes(requestedBase);
-        const score = (exactSubstring ? 10 : 0) + tokenScore;
-        return score > 0 ? { entry, score } : null;
-      })
+      .filter(entry => entry.isFile() && !entry.name.startsWith('~$'))
+      .map(entry => ({ entry, score: this._fileNameMatchScore(entry.name, requestedName) }))
+      .filter(match => match.score > 0)
       .filter(Boolean)
       .sort((left, right) => right.score - left.score || left.entry.name.localeCompare(right.entry.name));
 
@@ -647,13 +622,21 @@ class FileController {
         maxDepth: 7,
         maxDirectories: 2500,
         maxElapsedMs: 1200,
-        maxResults: 12,
+        maxResults: 100,
         filesOnly: true,
         fuzzyName: safeName,
         visitedDirectories
       });
     }
-    return Array.from(new Set(fuzzyMatches)).slice(0, 12);
+    const rankedMatches = Array.from(new Set(fuzzyMatches))
+      .map(filePath => ({ path: filePath, score: this._fileNameMatchScore(path.basename(filePath), safeName) }))
+      .filter(match => match.score > 0)
+      .sort((left, right) => right.score - left.score || left.path.localeCompare(right.path))
+      .slice(0, 12);
+    if (rankedMatches[0]?.score >= 95 && (!rankedMatches[1] || rankedMatches[1].score < 95)) {
+      return [rankedMatches[0].path];
+    }
+    return rankedMatches.map(match => match.path);
   }
 
   _searchDirectoryRecursive(root, lowerQuery, results, options = {}) {
@@ -702,6 +685,9 @@ class FileController {
       }
 
       for (const entry of entries) {
+        if (entry.isFile() && entry.name.startsWith('~$')) {
+          continue;
+        }
         const entryPath = path.join(directory, entry.name);
         const isDirectory = entry.isDirectory();
         const isMatch = options.fuzzyName && entry.isFile()
@@ -978,26 +964,53 @@ class FileController {
   }
 
   _fileNameLooksLike(entryName, requestedName) {
+    return this._fileNameMatchScore(entryName, requestedName) > 0;
+  }
+
+  _fileNameMatchScore(entryName, requestedName) {
     const requestedExt = path.extname(requestedName).toLowerCase();
     const entryExt = path.extname(entryName).toLowerCase();
     if (requestedExt && requestedExt !== entryExt) {
-      return false;
+      return 0;
     }
 
-    const requestedBase = path.basename(requestedName, requestedExt).toLowerCase();
-    const entryBase = path.basename(entryName, entryExt).toLowerCase();
+    const requestedBase = Normalizer.normalizeText(path.basename(requestedName, requestedExt));
+    const entryBase = Normalizer.normalizeText(path.basename(entryName, entryExt));
     if (!requestedBase) {
-      return false;
+      return 0;
     }
 
-    if (entryBase.includes(requestedBase) || requestedBase.includes(entryBase)) {
-      return true;
+    const compactRequested = requestedBase.replace(/\s+/g, '');
+    const compactEntry = entryBase.replace(/\s+/g, '');
+    if (entryBase === requestedBase) return requestedExt ? 110 : 100;
+    if (compactEntry === compactRequested) return 95;
+    if (entryBase.startsWith(requestedBase)) return 90;
+    if (entryBase.includes(requestedBase)) return 85;
+    if (requestedBase.length >= 4 && requestedBase.includes(entryBase) && entryBase.length / requestedBase.length >= 0.65) return 75;
+
+    const requestedTokens = requestedBase.split(/\s+/).filter(token => token.length >= 2);
+    const entryTokens = entryBase.split(/\s+/).filter(token => token.length >= 2);
+    const matchedTokens = requestedTokens.filter(token => (
+      entryTokens.some(entryToken => (
+        entryToken.includes(token) ||
+        (entryToken.length >= 4 && entryToken.length / token.length >= 0.6 && token.includes(entryToken))
+      )) ||
+      Normalizer.findClosestOption(token, entryTokens, {
+        minSimilarity: token.length >= 7 ? 0.64 : 0.72,
+        maxDistance: token.length >= 7 ? 3 : 2
+      })
+    )).length;
+    if (requestedTokens.length > 0 && matchedTokens === requestedTokens.length) {
+      return 65 + matchedTokens;
+    }
+    if (requestedTokens.length >= 3 && matchedTokens >= requestedTokens.length - 1) {
+      return 55 + matchedTokens;
     }
 
-    return Boolean(Normalizer.findClosestOption(requestedBase, [entryBase], {
-      minSimilarity: 0.72,
+    return Normalizer.findClosestOption(requestedBase, [entryBase], {
+      minSimilarity: requestedBase.length >= 8 ? 0.68 : 0.74,
       maxDistance: requestedBase.length >= 8 ? 3 : 2
-    }));
+    }) ? 60 : 0;
   }
 
   _cleanSearchQuery(query) {
@@ -1013,8 +1026,7 @@ class FileController {
   }
 
   _buildAmbiguousFileMessage(filename, choices) {
-    const labels = choices.map(choice => `${choice.index}. ${choice.path}`).join('; ');
-    return `I found multiple files named "${filename}". Please say which one to open: ${labels}`;
+    return `I found ${choices.length} matching files for "${filename}". Choose a number to open one.`;
   }
 }
 

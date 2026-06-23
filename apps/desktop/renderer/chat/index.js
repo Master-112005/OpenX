@@ -110,7 +110,7 @@ function saveStoredList(key, value) {
   } catch (error) {}
 }
 
-function addMessage(text, type, meta) {
+function addMessage(text, type, meta, options = {}) {
   const msg = document.createElement('article');
   msg.className = `message ${type}`;
   const avatar = document.createElement('div');
@@ -123,6 +123,45 @@ function addMessage(text, type, meta) {
   const bubble = document.createElement('div');
   bubble.className = 'message-bubble';
   bubble.textContent = String(text || '');
+  const choices = Array.isArray(options.choices) ? options.choices.slice(0, 8) : [];
+  if (type === 'assistant' && choices.length > 0) {
+    const choiceList = document.createElement('ol');
+    choiceList.className = 'message-choices';
+    for (const choice of choices) {
+      const item = document.createElement('li');
+      const button = document.createElement('button');
+      button.className = 'message-choice';
+      button.type = 'button';
+      const choiceIndex = Number(choice.index) || choiceList.children.length + 1;
+      const choicePath = String(choice.path || '');
+      const fallbackTitle = String(choice.title || `Option ${choiceIndex}`);
+      const choiceName = choicePath.split(/[\\/]/).filter(Boolean).pop() ||
+        fallbackTitle.replace(/\s+-\s+[A-Za-z]:\\.*$/, '') ||
+        `Option ${choiceIndex}`;
+      const number = document.createElement('span');
+      number.className = 'message-choice-number';
+      number.textContent = String(choiceIndex);
+      const copy = document.createElement('span');
+      copy.className = 'message-choice-copy';
+      const name = document.createElement('strong');
+      name.textContent = choiceName;
+      copy.appendChild(name);
+      if (choicePath) {
+        const location = document.createElement('small');
+        location.textContent = choicePath;
+        copy.appendChild(location);
+      }
+      button.append(number, copy);
+      button.addEventListener('click', () => {
+        if (!isProcessing) {
+          sendCommand(String(choiceIndex));
+        }
+      });
+      item.appendChild(button);
+      choiceList.appendChild(item);
+    }
+    bubble.appendChild(choiceList);
+  }
   stack.appendChild(bubble);
   if (meta) {
     const metaElement = document.createElement('div');
@@ -274,11 +313,34 @@ function showToast(title, message, tone = 'info', options = {}) {
   return toast;
 }
 
-function scheduleTone(kind) {
+function inferReminderCategory(message, category = '') {
+  const preferred = String(category || '').toLowerCase();
+  if (['education', 'water', 'exercise', 'health', 'work', 'birthday', 'general'].includes(preferred)) return preferred;
+  const text = String(message || '').toLowerCase();
+  if (/\b(?:college|collage|school|class|lecture|campus|study|exam|assignment|homework)\b/.test(text)) return 'education';
+  if (/\b(?:water|hydrate|hydration|drink)\b/.test(text)) return 'water';
+  if (/\b(?:exercise|workout|gym|walk|run|running|yoga|stretch|fitness)\b/.test(text)) return 'exercise';
+  if (/\b(?:medicine|medication|tablet|pill|doctor|appointment|health)\b/.test(text)) return 'health';
+  if (/\b(?:work|office|meeting|project|deadline|client|email)\b/.test(text)) return 'work';
+  if (/\b(?:birthday|anniversary|celebrate|party)\b/.test(text)) return 'birthday';
+  return 'general';
+}
+
+function scheduleTone(kind, category = '', message = '') {
   const normalized = String(kind || '').toLowerCase();
   if (normalized === 'alarm') return { tone: 'alarm', color: '#ff9f73', symbol: '⏰' };
   if (normalized === 'timer') return { tone: 'timer', color: '#69c8ff', symbol: '⏱️' };
-  return { tone: 'reminder', color: '#ae93ff', symbol: '📝' };
+  const reminderCategory = inferReminderCategory(message, category);
+  const presentations = {
+    education: { color: '#7ea7ff', symbol: '🎓', label: 'School & college' },
+    water: { color: '#54c7ec', symbol: '💧', label: 'Water' },
+    exercise: { color: '#69d39c', symbol: '🏃', label: 'Exercise' },
+    health: { color: '#ff8fa3', symbol: '💊', label: 'Health' },
+    work: { color: '#f3b765', symbol: '💼', label: 'Work' },
+    birthday: { color: '#f08ad4', symbol: '🎂', label: 'Birthday' },
+    general: { color: '#ae93ff', symbol: '📝', label: 'Reminder' }
+  };
+  return { tone: 'reminder', category: reminderCategory, ...presentations[reminderCategory] };
 }
 
 function addScheduleFromResult(result) {
@@ -294,6 +356,8 @@ function addScheduleFromResult(result) {
     id: data.taskName || `schedule-${Date.now()}`,
     kind,
     message,
+    category: data.category || result.entities?.reminderCategory || null,
+    symbol: data.symbol || null,
     dueAt: data.dueAt,
     status: 'scheduled',
     createdAt: new Date().toISOString()
@@ -302,7 +366,7 @@ function addScheduleFromResult(result) {
   saveStoredList(SCHEDULE_STORAGE_KEY, scheduleItems);
   if (!window.jarvis) armSchedule(item);
   renderActivity();
-  const tone = scheduleTone(kind).tone;
+  const tone = scheduleTone(kind, item.category, item.message).tone;
   showToast(`${kind} scheduled`, `${message} · ${formatDueDate(data.dueAt)}`, tone);
 }
 
@@ -336,13 +400,13 @@ function triggerSchedule(id) {
   saveStoredList(SCHEDULE_STORAGE_KEY, scheduleItems);
   activeAlarmId = item.id;
   alarmKindEl.textContent = item.kind;
-  const alertStyle = scheduleTone(item.kind);
-  alarmSymbolEl.textContent = alertStyle.symbol;
-  alarmTitleEl.textContent = item.kind === 'Reminder' ? 'A gentle reminder' : `${item.kind} is ready`;
+  const alertStyle = scheduleTone(item.kind, item.category, item.message);
+  alarmSymbolEl.textContent = item.symbol || alertStyle.symbol;
+  alarmTitleEl.textContent = item.kind === 'Reminder' ? `${alertStyle.label} reminder` : `${item.kind} is ready`;
   alarmMessageEl.textContent = item.message;
   alarmTimeEl.textContent = formatDueDate(item.dueAt);
   alarmOverlay.hidden = false;
-  showToast(`${item.kind} due`, item.message, scheduleTone(item.kind).tone, { duration: 0 });
+  showToast(`${item.kind} due`, item.message, scheduleTone(item.kind, item.category, item.message).tone, { duration: 0 });
   renderActivity();
 }
 
@@ -382,7 +446,7 @@ function renderSchedules() {
   }
 
   visible.slice(0, 12).forEach(item => {
-    const style = scheduleTone(item.kind);
+    const style = scheduleTone(item.kind, item.category, item.message);
     const card = document.createElement('article');
     card.className = 'schedule-card';
     card.style.setProperty('--schedule-color', style.color);
@@ -391,7 +455,7 @@ function renderSchedules() {
     const copy = document.createElement('div');
     const kind = document.createElement('div');
     kind.className = 'schedule-kind';
-    kind.textContent = `${style.symbol} ${item.kind}`;
+    kind.textContent = `${item.symbol || style.symbol} ${item.kind === 'Reminder' ? style.label : item.kind}`;
     const title = document.createElement('div');
     title.className = 'schedule-title';
     title.textContent = item.message;
@@ -559,7 +623,7 @@ async function sendCommand(text) {
         addConfirmationPrompt(result);
       } else {
         const response = result.response || `Operation completed, ${getHonorific()}.`;
-        addMessage(response, 'assistant', assistantMeta());
+        addMessage(response, 'assistant', assistantMeta(), { choices: result.data?.choices });
         speakAssistantResponse(response);
       }
     } catch (err) {
@@ -589,7 +653,7 @@ async function sendCommand(text) {
     }
 
     const response = result.response || `Operation completed, ${getHonorific()}.`;
-    addMessage(response, 'assistant', assistantMeta());
+    addMessage(response, 'assistant', assistantMeta(), { choices: result.data?.choices });
     speakAssistantResponse(response);
   } catch (err) {
     hideTyping();

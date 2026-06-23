@@ -116,6 +116,66 @@
   border-radius: 20px 8px 20px 20px;
 }
 
+.message-choices {
+  display: grid;
+  gap: 7px;
+  list-style: none;
+  margin: 10px 0 0;
+  padding: 0;
+}
+
+.message-choice {
+  align-items: center;
+  background: color-mix(in srgb, var(--accent-color) 9%, transparent);
+  border: 1px solid color-mix(in srgb, var(--accent-color) 18%, transparent);
+  border-radius: 10px;
+  color: inherit;
+  cursor: pointer;
+  display: flex;
+  gap: 9px;
+  min-width: 0;
+  padding: 8px 10px;
+  text-align: left;
+  width: 100%;
+}
+
+.message-choice:hover,
+.message-choice:focus-visible {
+  background: color-mix(in srgb, var(--accent-color) 16%, transparent);
+  border-color: color-mix(in srgb, var(--accent-color) 34%, transparent);
+  outline: none;
+}
+
+.message-choice-number {
+  align-items: center;
+  background: var(--accent-soft);
+  border-radius: 999px;
+  display: inline-flex;
+  flex: 0 0 24px;
+  font-size: 11px;
+  font-weight: 800;
+  height: 24px;
+  justify-content: center;
+}
+
+.message-choice-copy {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.message-choice-copy strong,
+.message-choice-copy small {
+  overflow-wrap: anywhere;
+}
+
+.message-choice-copy small {
+  color: var(--muted-color);
+  font-size: 10px;
+  margin-top: 2px;
+}
+
 #input-area {
   background: linear-gradient(180deg, transparent, rgba(5, 8, 16, 0.72) 35%);
   padding: 14px 18px 16px;

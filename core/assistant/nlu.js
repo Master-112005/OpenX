@@ -7,6 +7,7 @@ const { analyzeDiscourse } = require('./ContextLanguage');
 const CONNECTOR_PATTERN = /\s*(?:;|,|\b(?:and then|then|after that|afterwards|and|also|plus|additionally|furthermore)\b)\s*/i;
 
 const ACTION_ALIASES = new Map([
+  ['add', 'set'],
   ['activate', 'switch'],
   ['adjust', 'set'],
   ['boost', 'increase'],
@@ -64,7 +65,8 @@ const DOMAIN_TERMS = {
   brightness: new Set(['brightness', 'display', 'light', 'screen']),
   window: new Set(['fullscreen', 'maximize', 'minimize', 'screen', 'tab', 'window']),
   file: new Set(['directory', 'document', 'documents', 'file', 'files', 'folder', 'folders', 'pdf', 'photo', 'photos', 'picture', 'pictures']),
-  web: new Set(['browser', 'chrome', 'edge', 'firefox', 'google', 'internet', 'site', 'website', 'web', 'youtube'])
+  web: new Set(['browser', 'chrome', 'edge', 'firefox', 'google', 'internet', 'site', 'website', 'web', 'youtube']),
+  schedule: new Set(['alarm', 'alarms', 'clock', 'remind', 'reminder', 'reminders', 'timer', 'timers'])
 };
 
 const PREPOSITIONS = new Set(['at', 'by', 'for', 'from', 'in', 'into', 'of', 'on', 'onto', 'to', 'with', 'using', 'via']);
@@ -256,6 +258,9 @@ class NaturalLanguageRouter {
     if (/\.[a-z0-9]{1,10}\b/i.test(text) || has('file')) {
       return 'local-file';
     }
+    if (has('schedule') || (action === 'set' && /\btime\s+for\s+(?:\d+|one|two|three|four|five|ten)\s+(?:seconds?|minutes?|hours?)\b/.test(text))) {
+      return 'schedule';
+    }
     if (has('brightness')) {
       return 'brightness';
     }
@@ -326,6 +331,12 @@ class NaturalLanguageRouter {
       if (action === 'minimize') return 'window.minimize';
       if (action === 'maximize') return 'window.maximize';
       if (action === 'close') return 'window.close';
+    }
+
+    if (domain === 'schedule' && ['set', 'open'].includes(action)) {
+      if (/\b(?:remind|reminder|reminders)\b/.test(text)) return 'reminder.set';
+      if (/\b(?:alarm|alarms|wake\s+me)\b/.test(text)) return 'alarm.set';
+      if (/\b(?:timer|timers)\b/.test(text) || /\btime\s+for\b/.test(text)) return 'timer.set';
     }
 
     if (domain === 'app') {

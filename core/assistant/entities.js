@@ -214,6 +214,15 @@ class EntityExtractor {
         case 'reminderText':
           entities.reminderText = this._extractReminderText(normalized, text);
           break;
+        case 'reminderCategory':
+          entities.reminderCategory = this._extractReminderCategory(text);
+          break;
+        case 'alarmLabel':
+          entities.alarmLabel = this._extractAlarmLabel(text);
+          break;
+        case 'recurrence':
+          entities.recurrence = this._extractRecurrence(text);
+          break;
         case 'mediaQuery':
           entities.mediaQuery = this._extractMediaQuery(normalized, text);
           break;
@@ -461,19 +470,20 @@ class EntityExtractor {
     }
 
     const patterns = [
-      /\b(?:create|new|make)\s+file\s+(.+?)(?=\s+(?:on|in|at|to|from)\b|$)/i,
-      /\b(?:create|new|make)\s+(.+?)\s+file(?=\s+(?:on|in|at|to|from)\b|$)/i,
-      /\b(?:delete|remove|erase)\s+file\s+(.+?)(?=\s+(?:on|in|at|to|from)\b|$)/i,
-      /\b(?:delete|remove|erase)\s+(.+?)\s+file(?=\s+(?:on|in|at|to|from)\b|$)/i,
-      /\b(?:delete|remove|erase)\s+(.+?)(?=\s+(?:on|in|at|from)\b|$)/i,
-      /\b(?:open|show|play|watch)\s+(?:file\s+)?(.+?)(?=\s+(?:on|in|at|from|with|using)\b|$)/i,
-      /\b(?:rename|copy|move)\s+file\s+(.+?)(?=\s+(?:to|into|in|on|from)\b|$)/i
+      { pattern: /\b(?:create|new|make)\s+file\s+(.+?)(?=\s+(?:on|in|at|to|from)\b|$)/i, existing: false },
+      { pattern: /\b(?:create|new|make)\s+(.+?)\s+file(?=\s+(?:on|in|at|to|from)\b|$)/i, existing: false },
+      { pattern: /\b(?:delete|remove|erase)\s+file\s+(.+?)(?=\s+(?:on|in|at|to|from)\b|$)/i, existing: true },
+      { pattern: /\b(?:delete|remove|erase)\s+(.+?)\s+file(?=\s+(?:on|in|at|to|from)\b|$)/i, existing: true },
+      { pattern: /\b(?:delete|remove|erase)\s+(.+?)(?=\s+(?:on|in|at|from)\b|$)/i, existing: true },
+      { pattern: /\b(?:open|show|play|watch)\s+(?:file\s+)?(.+?)(?=\s+(?:on|in|at|from|with|using)\b|$)/i, existing: true },
+      { pattern: /\b(?:rename|copy|move)\s+file\s+(.+?)(?=\s+(?:to|into|in|on|from)\b|$)/i, existing: true }
     ];
 
-    for (const pattern of patterns) {
-      const match = raw.match(pattern);
+    for (const definition of patterns) {
+      const match = raw.match(definition.pattern);
       if (match && match[1]) {
-        return cleanEntityName(match[1]);
+        const cleaned = cleanEntityName(match[1]);
+        return definition.existing ? this._cleanExistingFileReference(cleaned) : cleaned;
       }
     }
 
@@ -483,6 +493,14 @@ class EntityExtractor {
     }
 
     return null;
+  }
+
+  _cleanExistingFileReference(value) {
+    return String(value || '')
+      .trim()
+      .replace(/^(?:the|my|a|an)\s+/i, '')
+      .replace(/\s+(?:file|document)\s*$/i, '')
+      .trim();
   }
 
   _extractFolderName(text, raw) {
@@ -743,10 +761,16 @@ class EntityExtractor {
   }
 
   _extractDuration(raw) {
-    const match = String(raw || '').match(/(\d+)\s*(seconds?|secs?|minutes?|mins?|hours?|hrs?)/i);
+    const source = String(raw || '');
+    const numberWords = {
+      one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9,
+      ten: 10, fifteen: 15, twenty: 20, thirty: 30, forty: 40, fortyfive: 45, sixty: 60
+    };
+    const match = source.match(/(\d+|one|two|three|four|five|six|seven|eight|nine|ten|fifteen|twenty|thirty|forty(?:\s*five)?|sixty)\s*(seconds?|secs?|minutes?|mins?|hours?|hrs?)/i);
     if (!match) return null;
 
-    const value = parseInt(match[1], 10);
+    const wordKey = match[1].toLowerCase().replace(/\s+/g, '');
+    const value = /^\d+$/.test(wordKey) ? parseInt(wordKey, 10) : numberWords[wordKey];
     const unit = match[2].toLowerCase();
     if (unit.startsWith('hour') || unit.startsWith('hr')) {
       return value * 60;
@@ -758,6 +782,17 @@ class EntityExtractor {
     return value;
   }
 
+  _extractReminderCategory(raw) {
+    const text = String(raw || '').toLowerCase();
+    if (/\b(?:college|collage|school|class|lecture|campus|study|exam|assignment|homework|tuition)\b/.test(text)) return 'education';
+    if (/\b(?:water|hydrate|hydration|drink)\b/.test(text)) return 'water';
+    if (/\b(?:exercise|workout|gym|walk|run|running|yoga|stretch|fitness)\b/.test(text)) return 'exercise';
+    if (/\b(?:medicine|medication|tablet|pill|doctor|appointment|health)\b/.test(text)) return 'health';
+    if (/\b(?:work|office|meeting|project|deadline|client|email)\b/.test(text)) return 'work';
+    if (/\b(?:birthday|anniversary|celebrate|party)\b/.test(text)) return 'birthday';
+    return 'general';
+  }
+
   _extractTimeExpression(text, raw) {
     const source = String(raw || '');
     const normalizeClock = value => String(value || '')
@@ -765,6 +800,13 @@ class EntityExtractor {
       .replace(/^(\d{1,2})\s+(\d{2})(\s*(?:am|pm)?(?:\s+(?:today|tomorrow))?)$/i, '$1:$2$3')
       .replace(/\s+/g, ' ')
       .trim();
+
+    const dateOnlyReminderMatch = source.match(
+      /^(?:remind\s+me|(?:create|add|set)\s+(?:a\s+)?(?:new\s+)?reminder)(?:\s+(?:for|on|at))?\s+(today|tomorrow(?:\s+(?:morning|afternoon|evening|night))?|tonight|next\s+week|(?:next\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))$/i
+    );
+    if (dateOnlyReminderMatch?.[1]) {
+      return normalizeClock(dateOnlyReminderMatch[1].toLowerCase());
+    }
 
     const reminderMatch = source.match(/\bremind(?: me)?\s+(?:at|for|in)\s+(.+?)(?:\s+to\s+.+)?$/i);
     if (reminderMatch && reminderMatch[1]) {
@@ -790,7 +832,7 @@ class EntityExtractor {
       return normalizeClock(setReminderTimeMatch[1]);
     }
 
-    const alarmMatch = source.match(/\b(?:set alarm for|alarm for|wake me at|set alarm at|set a alarm at|set me alarm at)\s+(.+)$/i);
+    const alarmMatch = source.match(/\b(?:set alarm for|alarm for|wake me at|set alarm at|set a alarm at|set me alarm at)\s+(.+?)(?=\s+(?:to|and\s+label(?:\s+it)?|label(?:\s+it)?)\s+.+$|$)/i);
     if (alarmMatch && alarmMatch[1]) {
       return normalizeClock(alarmMatch[1]);
     }
@@ -814,8 +856,33 @@ class EntityExtractor {
     return null;
   }
 
+  _extractAlarmLabel(raw) {
+    const source = String(raw || '').trim();
+    const match = source.match(/\s+(?:to|and\s+label(?:\s+it)?|label(?:\s+it)?)\s+(.+)$/i);
+    return match?.[1] ? match[1].trim() : null;
+  }
+
+  _extractRecurrence(raw) {
+    const source = String(raw || '').toLowerCase();
+    if (/\bevery\s+(?:one\s+)?hour\b|\bhourly\b/.test(source)) return 'hourly';
+    if (/\bevery\s+(?:two|2)\s+hours?\b/.test(source)) return 'every-2-hours';
+    if (/\bevery\s+weekday(?:\s+morning)?\b/.test(source)) return source.includes('morning') ? 'weekday-morning' : 'weekday';
+    if (/\bevery\s+(?:day|morning|evening|night)\b|\bdaily\b/.test(source)) {
+      if (source.includes('morning')) return 'daily-morning';
+      if (source.includes('evening')) return 'daily-evening';
+      if (source.includes('night')) return 'daily-night';
+      return 'daily';
+    }
+    if (/\bevery\s+week\b|\bweekly\b/.test(source)) return 'weekly';
+    return null;
+  }
+
   _extractReminderText(text, raw) {
     const source = String(raw || '');
+
+    if (/^(?:remind\s+me|(?:create|add|set)\s+(?:a\s+)?(?:new\s+)?reminder)(?:\s+(?:for|on|at))?\s+(?:today|tomorrow(?:\s+(?:morning|afternoon|evening|night))?|tonight|next\s+week|(?:next\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))$/i.test(source.trim())) {
+      return null;
+    }
 
     const directRemindMatch = source.match(/^remind\s+me\s+(?:tomorrow\s+at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s+)?to\s+(.+)$/i);
     if (directRemindMatch && directRemindMatch[1]) {

@@ -108,6 +108,10 @@ class ContextManager {
       this.pendingTasks.push({
         type: 'reminder',
         text: entities.reminderText,
+        category: entities.reminderCategory || result?.data?.category || 'general',
+        duration: entities.duration || null,
+        timeExpression: entities.timeExpression || null,
+        dueAt: result?.data?.dueAt || null,
         timestamp: Date.now()
       });
     }
@@ -116,6 +120,7 @@ class ContextManager {
       this.pendingTasks.push({
         type: 'timer',
         duration: entities.duration,
+        dueAt: result?.data?.dueAt || null,
         timestamp: Date.now()
       });
     }

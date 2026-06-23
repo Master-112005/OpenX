@@ -497,8 +497,7 @@ class FolderController {
   }
 
   _buildAmbiguousFolderMessage(folderName, choices) {
-    const labels = choices.map(choice => `${choice.index}. ${choice.path}`).join('; ');
-    return `I found multiple folders named "${folderName}". Please say which one to open: ${labels}`;
+    return `I found ${choices.length} matching folders for "${folderName}". Choose a number to open one.`;
   }
 }
 

@@ -126,6 +126,153 @@ describe('Assistant Confirmation Flow', function() {
     assert.equal(selectedEntities.targetProcessId, 202);
   });
 
+  it('should remember a clarified file across later chat messages and open it again', async function() {
+    const filePath = 'C:\\Users\\rakes\\Documents\\Resume.docx';
+    const routedInputs = [];
+    const router = {
+      process: async input => {
+        routedInputs.push(input);
+        if (input === 'open my resume file') {
+          return {
+            commandId: 'cmd-resume-choice',
+            success: false,
+            needsClarification: true,
+            intent: 'file.open',
+            entities: { filename: 'resume' },
+            data: {
+              choices: [{ index: 1, title: `Resume.docx - ${filePath}`, path: filePath, entities: { selectedPath: filePath } }]
+            },
+            response: 'Choose a file.'
+          };
+        }
+        return {
+          commandId: `cmd-${routedInputs.length}`,
+          success: true,
+          intent: input.startsWith('open C:') ? 'file.open' : 'browser.search',
+          entities: input.startsWith('open C:') ? { filename: filePath, selectedPath: filePath } : { query: input },
+          data: input.startsWith('open C:') ? { path: filePath, filename: 'Resume.docx' } : {},
+          response: 'Done.'
+        };
+      },
+      confirmAndExecute: async (commandId, intentId, entities) => ({
+        commandId,
+        success: true,
+        intent: intentId,
+        entities,
+        data: { path: entities.selectedPath, filename: 'Resume.docx' },
+        response: 'Opened Resume.docx.'
+      })
+    };
+    const assistant = new Assistant({}, {
+      router,
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    await assistant.processCommand('open my resume file');
+    await assistant.processCommand('1');
+    await assistant.processCommand('tell me about resumes');
+    await assistant.processCommand('open it');
+
+    assert.equal(routedInputs.at(-1), `open ${filePath}`);
+  });
+
+  it('should resolve conversational timer and reminder follow-ups', async function() {
+    const routedInputs = [];
+    const router = {
+      process: async input => {
+        routedInputs.push(input);
+        const isReminder = /^remind/i.test(input);
+        const duration = isReminder ? 5 : Number(input.match(/\d+/)?.[0] || 5);
+        return {
+          commandId: `cmd-schedule-${routedInputs.length}`,
+          success: true,
+          intent: isReminder ? 'reminder.set' : 'timer.set',
+          entities: isReminder
+            ? { reminderText: 'drink water', duration, reminderCategory: 'water' }
+            : { duration },
+          data: { dueAt: new Date(Date.now() + duration * 60000).toISOString() },
+          response: 'Scheduled.'
+        };
+      }
+    };
+    const assistant = new Assistant({}, {
+      router,
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    await assistant.processCommand('set timer for 5 minutes');
+    await assistant.processCommand('another one for 10 minutes');
+    await assistant.processCommand('remind me then to drink water');
+
+    assert.deepEqual(routedInputs, [
+      'set timer for 5 minutes',
+      'set timer for 10 minutes',
+      'remind me in 10 minutes to drink water'
+    ]);
+  });
+
+  it('should collect missing schedule details across chat turns', async function() {
+    const routedInputs = [];
+    const router = {
+      entityExtractor: { _extractReminderCategory: () => 'water' },
+      process: async input => {
+        routedInputs.push(input);
+        return {
+          commandId: `schedule-${routedInputs.length}`,
+          success: true,
+          intent: /^set alarm/.test(input) ? 'alarm.set' : 'reminder.set',
+          entities: /^set alarm/.test(input)
+            ? { timeExpression: input.replace(/^set alarm at\s+/i, '') }
+            : { reminderText: 'drink water', timeExpression: '4:30 pm', reminderCategory: 'water' },
+          data: { dueAt: new Date().toISOString() },
+          response: 'Scheduled.'
+        };
+      }
+    };
+    const assistant = new Assistant({}, { router, automation: {}, eventBus: { publish() {} } });
+
+    const reminderStart = await assistant.processCommand('create reminder');
+    const reminderText = await assistant.processCommand('drink water');
+    await assistant.processCommand('4:30 pm');
+    const alarmStart = await assistant.processCommand('set alarm');
+    await assistant.processCommand('4:54 pm');
+
+    assert.equal(reminderStart.needsClarification, true);
+    assert.equal(reminderText.needsClarification, true);
+    assert.equal(alarmStart.needsClarification, true);
+    assert.deepEqual(routedInputs, [
+      'remind me at 4:30 pm to drink water',
+      'set alarm at 4:54 pm'
+    ]);
+  });
+
+  it('should collect reminder text after a date-only reminder request', async function() {
+    const routedInputs = [];
+    const router = {
+      process: async input => {
+        routedInputs.push(input);
+        return {
+          commandId: 'dated-reminder',
+          success: true,
+          intent: 'reminder.set',
+          entities: { reminderText: 'attend class', timeExpression: 'tomorrow morning' },
+          data: { dueAt: new Date().toISOString() },
+          response: 'Scheduled.'
+        };
+      }
+    };
+    const assistant = new Assistant({}, { router, automation: {}, eventBus: { publish() {} } });
+
+    const clarification = await assistant.processCommand('remind me tomorrow morning');
+    const completed = await assistant.processCommand('attend class');
+
+    assert.equal(clarification.needsClarification, true);
+    assert.equal(completed.success, true);
+    assert.deepEqual(routedInputs, ['remind me at tomorrow morning to attend class']);
+  });
+
   it('should use the last knowledge topic for explanation follow-up commands', async function() {
     const routedInputs = [];
     const router = {

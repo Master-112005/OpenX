@@ -105,6 +105,7 @@ class Assistant extends EventEmitter {
     this.isProcessing = false;
     this.pendingConfirmation = null;
     this.pendingClarification = null;
+    this.pendingScheduleCompletion = null;
     this.pendingFeedback = null;
     this.pendingLearningCorrection = null;
     this.pendingLearningRepair = null;
@@ -136,9 +137,19 @@ class Assistant extends EventEmitter {
         return clarificationResult;
       }
 
+      const scheduleCompletion = await this._handlePendingScheduleCompletion(input, source);
+      if (scheduleCompletion) {
+        return scheduleCompletion;
+      }
+
       const learningResult = await this._handleLearningInput(input, source);
       if (learningResult) {
         return learningResult;
+      }
+
+      const newScheduleClarification = this._startScheduleClarification(input, source);
+      if (newScheduleClarification) {
+        return newScheduleClarification;
       }
 
       const sessionContextResult = this._answerSessionContextQuestion(input, source) ||
@@ -163,11 +174,15 @@ class Assistant extends EventEmitter {
       this._recordLearningOutcome(input, routedInput, result);
 
       let response = result.response || '';
+      const incompleteSchedulePrompt = this._captureIncompleteSchedule(input, result, source);
+      if (incompleteSchedulePrompt) {
+        response = incompleteSchedulePrompt;
+      }
       const contextAwareError = this._generateContextAwareErrorResponse(result, input);
-      if (contextAwareError) {
+      if (contextAwareError && !incompleteSchedulePrompt) {
         response = contextAwareError;
       }
-      if (!contextAwareError) {
+      if (!contextAwareError && !incompleteSchedulePrompt) {
         response = this._appendLearningPrompt(response, input, routedInput, result);
       }
       response = this.personality.applyToResponse(response);
@@ -200,7 +215,8 @@ class Assistant extends EventEmitter {
           intentId: result.intent,
           entities: { ...(result.entities || {}) },
           data: result.data || {},
-          response
+          response,
+          originalInput: input
         };
       } else if (result.success) {
         this.pendingConfirmation = null;
@@ -334,6 +350,7 @@ class Assistant extends EventEmitter {
       isProcessing: this.isProcessing,
       awaitingConfirmation: Boolean(this.pendingConfirmation),
       awaitingClarification: Boolean(this.pendingClarification),
+      awaitingScheduleDetail: Boolean(this.pendingScheduleCompletion),
       awaitingFeedback: Boolean(this.pendingFeedback),
       awaitingLearningCorrection: Boolean(this.pendingLearningCorrection),
       awaitingLearningRepair: Boolean(this.pendingLearningRepair),
@@ -346,6 +363,7 @@ class Assistant extends EventEmitter {
     this.isProcessing = false;
     this.pendingConfirmation = null;
     this.pendingClarification = null;
+    this.pendingScheduleCompletion = null;
     this.pendingFeedback = null;
     this.pendingLearningCorrection = null;
     this.pendingLearningRepair = null;
@@ -1327,11 +1345,17 @@ class Assistant extends EventEmitter {
     }
 
     this.pendingClarification = null;
+    const clarifiedEntities = this._buildClarifiedEntities(pending.entities, choice);
     const result = await this.router.confirmAndExecute(
       pending.commandId,
       pending.intentId,
-      this._buildClarifiedEntities(pending.entities, choice),
+      clarifiedEntities,
       { source }
+    );
+    this.context.record(
+      pending.originalInput || input,
+      result.entities || clarifiedEntities,
+      { ...result, entities: result.entities || clarifiedEntities }
     );
     const response = this.personality.applyToResponse(result.response || '');
     return {
@@ -1339,6 +1363,111 @@ class Assistant extends EventEmitter {
       response,
       source
     };
+  }
+
+  _captureIncompleteSchedule(input, result, source) {
+    if (result?.success !== false || !/^(?:timer|alarm|reminder)\.set$/.test(result?.intent || '')) return '';
+    const error = String(result.error || '').toLowerCase();
+    if (!/invalid (?:timer duration|alarm time|reminder time)|reminder text is required/.test(error)) return '';
+    this.pendingScheduleCompletion = {
+      intent: result.intent,
+      entities: { ...(result.entities || {}) },
+      originalInput: input,
+      source
+    };
+    if (result.intent === 'timer.set') return 'How long should the timer run? You can say “10 minutes” or “one hour”.';
+    if (result.intent === 'alarm.set') return 'What time should I set the alarm for?';
+    if (error.includes('text')) return 'What should I remind you about?';
+    return 'When should I remind you?';
+  }
+
+  _startScheduleClarification(input, source) {
+    const normalized = Normalizer.normalizeText(String(input || '').trim());
+    let intent = '';
+    let entities = {};
+    let response = '';
+    if (/^(?:set|start|create)\s+(?:a\s+)?(?:timer|countdown)$/.test(normalized)) {
+      intent = 'timer.set';
+      response = 'How long should the timer run?';
+    } else if (/^(?:set|create)\s+(?:an?\s+)?alarm$/.test(normalized)) {
+      intent = 'alarm.set';
+      response = 'What time should I set the alarm for?';
+    } else if (/^(?:create|add|set)\s+(?:a\s+)?(?:new\s+)?reminder$/.test(normalized)) {
+      intent = 'reminder.set';
+      response = 'What should I remind you about?';
+    } else {
+      const datedReminder = normalized.match(
+        /^(?:remind\s+me|(?:create|add|set)\s+(?:a\s+)?(?:new\s+)?reminder)(?:\s+(?:for|on|at))?\s+(today|tomorrow(?:\s+(?:morning|afternoon|evening|night))?|tonight|next\s+week|(?:next\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday))$/
+      );
+      if (datedReminder?.[1]) {
+        intent = 'reminder.set';
+        entities = { timeExpression: datedReminder[1] };
+        response = 'What should I remind you about?';
+      }
+
+      const untimedReminder = String(input || '').match(/^remind\s+me\s+to\s+(.+)$/i);
+      if (!intent && untimedReminder?.[1]) {
+        intent = 'reminder.set';
+        entities = {
+          reminderText: untimedReminder[1].trim(),
+          reminderCategory: this.router?.entityExtractor?._extractReminderCategory?.(untimedReminder[1]) || 'general'
+        };
+        response = 'When should I remind you?';
+      }
+    }
+    if (!intent) return null;
+    this.pendingScheduleCompletion = { intent, entities, originalInput: input, source };
+    return {
+      success: false,
+      needsClarification: true,
+      intent,
+      entities,
+      source,
+      response: this.personality.applyToResponse(response)
+    };
+  }
+
+  async _handlePendingScheduleCompletion(input, source) {
+    const pending = this.pendingScheduleCompletion;
+    if (!pending) return null;
+    const detail = String(input || '').trim();
+    const normalized = Normalizer.normalizeText(detail);
+    if (this._isCancelPhrase(normalized)) {
+      this.pendingScheduleCompletion = null;
+      return { success: true, cancelled: true, source, response: this.personality.applyToResponse('Okay, I cancelled that schedule request.') };
+    }
+    const durationLike = /^(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|fifteen|twenty|thirty|forty(?:\s*five)?|sixty)\s*(?:seconds?|minutes?|hours?)$/i.test(detail);
+    const timeLike = /^(?:at\s+)?(?:\d{1,2}(?:(?::|\s+)\d{2})?\s*(?:am|pm)?|noon|midnight|today|tomorrow(?:\s+(?:morning|afternoon|evening|night))?|tonight|next\s+week|(?:next\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|(?:half|quarter)\s+(?:past|to)\s+\w+)$/i.test(detail);
+    let completed = '';
+    if (pending.intent === 'timer.set' && durationLike) {
+      completed = `set timer for ${detail}`;
+    } else if (pending.intent === 'alarm.set' && timeLike) {
+      completed = `set alarm at ${detail}${pending.entities.alarmLabel ? ` to ${pending.entities.alarmLabel}` : ''}`;
+    } else if (pending.intent === 'reminder.set') {
+      if (!pending.entities.reminderText && detail && !timeLike && !durationLike) {
+        if (pending.entities.timeExpression || pending.entities.duration) {
+          const schedule = pending.entities.duration
+            ? `in ${pending.entities.duration} minutes`
+            : `at ${pending.entities.timeExpression}`;
+          completed = `remind me ${schedule} to ${detail}`;
+        } else {
+          this.pendingScheduleCompletion = { ...pending, entities: { ...pending.entities, reminderText: detail } };
+        }
+        if (completed) {
+          this.pendingScheduleCompletion = null;
+          return this.processCommand(completed, source);
+        }
+        return { success: false, needsClarification: true, source, response: this.personality.applyToResponse('When should I remind you?') };
+      }
+      if ((timeLike || durationLike) && pending.entities.reminderText) {
+        completed = `remind me ${durationLike ? 'in' : 'at'} ${detail} to ${pending.entities.reminderText}`;
+      }
+    }
+    if (!completed) {
+      return { success: false, needsClarification: true, source, response: this.personality.applyToResponse('Please give the missing time or duration for that request.') };
+    }
+    this.pendingScheduleCompletion = null;
+    return this.processCommand(completed, source);
   }
 
   _resolveClarificationChoice(input, choices) {
@@ -1416,6 +1545,11 @@ class Assistant extends EventEmitter {
     const repeatTarget = this._resolveRepeatRequest(normalized);
     if (repeatTarget) {
       return repeatTarget;
+    }
+
+    const scheduleFollowUp = this._resolveScheduleFollowUp(normalized);
+    if (scheduleFollowUp) {
+      return scheduleFollowUp;
     }
 
     const yearFollowUp = normalized.match(/^(?:what\s+about|and|who\s+won\s+in)\s+((?:19|20)\d{2})$/);
@@ -1539,6 +1673,31 @@ class Assistant extends EventEmitter {
     }
 
     return `list ${type ? `${type} ` : ''}files in ${path}`;
+  }
+
+  _resolveScheduleFollowUp(normalized) {
+    const recentTasks = this.context.getRecentTasks?.() || [];
+    const lastTask = recentTasks[recentTasks.length - 1];
+    if (!lastTask) return '';
+
+    const duration = String(normalized || '').match(
+      /^(?:add|give\s+me|set|start|make\s+it|another(?:\s+one)?(?:\s+for)?)\s+(?:a\s+)?(\d+|one|two|three|four|five|six|seven|eight|nine|ten|fifteen|twenty|thirty|forty(?:\s*five)?|sixty)\s*(seconds?|minutes?|hours?)$/i
+    );
+    if (lastTask.type === 'timer' && duration?.[1] && duration?.[2]) {
+      return `set timer for ${duration[1]} ${duration[2]}`;
+    }
+
+    const reminder = String(normalized || '').match(/^(?:and\s+)?remind\s+me\s+(?:then|at\s+the\s+same\s+time)\s+to\s+(.+)$/i);
+    if (reminder?.[1]) {
+      if (lastTask.duration) {
+        return `remind me in ${lastTask.duration} minutes to ${reminder[1]}`;
+      }
+      if (lastTask.timeExpression) {
+        return `remind me at ${lastTask.timeExpression} to ${reminder[1]}`;
+      }
+    }
+
+    return '';
   }
 
   _resolveRecentFileOpen(normalized) {

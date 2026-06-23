@@ -15,6 +15,9 @@ describe('Dedicated Schedule Alert UI', function() {
     assert.match(html, /id="stop-btn"/);
     assert.match(script, /⏱️/);
     assert.match(script, /📝/);
+    assert.match(script, /education: \{ symbol: '🎓'/);
+    assert.match(script, /water: \{ symbol: '💧'/);
+    assert.match(script, /exercise: \{ symbol: '🏃'/);
     assert.match(script, /handleScheduleAlert/);
     assert.match(css, /border-radius:\s*36px/);
   });

@@ -77,6 +77,13 @@ describe('Entity Extractor', function() {
     assert.equal(entities.filename, 'report.pdf');
   });
 
+  it('should remove conversational noise from existing file references', function() {
+    const extractor = new EntityExtractor({});
+    const intent = { entities: [{ name: 'filename', type: 'string', required: true }] };
+    const entities = extractor.extract(intent, 'open my resume file');
+    assert.equal(entities.filename, 'resume');
+  });
+
   it('should extract filename and path for file creation', function() {
     const extractor = new EntityExtractor({});
     const intent = {
@@ -174,6 +181,24 @@ describe('Entity Extractor', function() {
     const entities = extractor.extract(intent, 'remind at 1 pm to eat lunch');
     assert.equal(entities.timeExpression, '1 pm');
     assert.equal(entities.reminderText, 'eat lunch');
+  });
+
+  it('should separate a date-only reminder time from missing content', function() {
+    const extractor = new EntityExtractor({});
+    const intent = {
+      entities: [
+        { name: 'timeExpression', type: 'string', required: false },
+        { name: 'reminderText', type: 'string', required: true }
+      ]
+    };
+
+    const remind = extractor.extract(intent, 'remind me tomorrow morning');
+    const create = extractor.extract(intent, 'create a reminder for tomorrow');
+
+    assert.equal(remind.timeExpression, 'tomorrow morning');
+    assert.equal(remind.reminderText, null);
+    assert.equal(create.timeExpression, 'tomorrow');
+    assert.equal(create.reminderText, null);
   });
 
   it('should extract message details for whatsapp drafts', function() {

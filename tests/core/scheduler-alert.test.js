@@ -30,4 +30,77 @@ describe('Scheduler Alert Delivery', function() {
     assert.equal(scheduler.complete(result.data.taskName).success, true);
     scheduler.destroy();
   });
+
+  it('should classify reminders and persist category symbols', function() {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openx-reminder-category-'));
+    const scheduler = new SchedulerController({
+      app: { dataDir, cleanupLegacySchedules: false },
+      eventBus: { publish() {} }
+    });
+
+    const college = scheduler.setReminder('go to college', { duration: 10 });
+    const water = scheduler.setReminder('drink water', { duration: 20 });
+    const exercise = scheduler.setReminder('do my exercise', { duration: 30 });
+
+    assert.equal(college.data.category, 'education');
+    assert.equal(college.data.symbol, '🎓');
+    assert.equal(water.data.category, 'water');
+    assert.equal(water.data.symbol, '💧');
+    assert.equal(exercise.data.category, 'exercise');
+    assert.equal(exercise.data.symbol, '🏃');
+    const persisted = JSON.parse(fs.readFileSync(path.join(dataDir, 'schedules.json'), 'utf8'));
+    assert.deepEqual(persisted.map(item => item.category), ['education', 'water', 'exercise']);
+    scheduler.destroy();
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it('should understand spoken clock expressions', function() {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openx-spoken-clock-'));
+    const scheduler = new SchedulerController({ app: { dataDir, cleanupLegacySchedules: false } });
+
+    assert.ok(scheduler._parseTimeExpression('seven am') instanceof Date);
+    assert.ok(scheduler._parseTimeExpression('noon') instanceof Date);
+    assert.ok(scheduler._parseTimeExpression('midnight') instanceof Date);
+    assert.ok(scheduler._parseTimeExpression('half past seven') instanceof Date);
+    assert.ok(scheduler._parseTimeExpression('quarter to eight') instanceof Date);
+
+    scheduler.destroy();
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it('should manage active timers alarms and schedule lists', function() {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openx-schedule-management-'));
+    const scheduler = new SchedulerController({ app: { dataDir, cleanupLegacySchedules: false } });
+
+    scheduler.setTimer(5);
+    assert.equal(scheduler.pauseActiveTimer().success, true);
+    assert.equal(scheduler.resumeActiveTimer().success, true);
+    assert.equal(scheduler.getRemainingTimer().data.remainingMinutes, 5);
+    assert.equal(scheduler.listSchedules('Timer').data.count, 1);
+    assert.equal(scheduler.resetActiveTimer().success, true);
+    assert.equal(scheduler.cancelLatest('Timer').success, true);
+    scheduler.setAlarm('noon', 'Lunch');
+    assert.equal(scheduler.listSchedules('Alarm').data.entries[0].alarmLabel, 'Lunch');
+    assert.equal(scheduler.snoozeLatestAlarm().success, true);
+    assert.equal(scheduler.clearSchedules('Alarm').data.count, 1);
+
+    scheduler.destroy();
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it('should persist and roll recurring reminders forward', function() {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openx-recurring-reminder-'));
+    const scheduler = new SchedulerController({ app: { dataDir, cleanupLegacySchedules: false } });
+    const result = scheduler.setReminder('drink water', { recurrence: 'hourly' });
+    const firstDueAt = result.data.dueAt;
+
+    assert.equal(result.success, true);
+    assert.equal(scheduler.scheduledItems[0].recurrence, 'hourly');
+    scheduler.complete(result.data.taskName);
+    assert.equal(scheduler.scheduledItems[0].status, 'scheduled');
+    assert.ok(new Date(scheduler.scheduledItems[0].dueAt) > new Date(firstDueAt));
+
+    scheduler.destroy();
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  });
 });

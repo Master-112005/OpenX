@@ -97,4 +97,13 @@ describe('Natural Language Router', function() {
     assert.equal(folderResult.intent.id, 'folder.search');
     assert.equal(folderResult.entities.query, 'projet archve');
   });
+
+  it('should understand natural timer language with spelling mistakes', function() {
+    const router = createRouter();
+    const result = router.resolveIntent('add time for one minit');
+
+    assert.equal(result.intent.id, 'timer.set');
+    assert.equal(result.entities.duration, 1);
+    assert.equal(result.entities.routeSource, 'natural-language-router');
+  });
 });

@@ -1500,6 +1500,117 @@ describe('Action Router', function() {
     assert.equal(result.entities.duration, 5);
   });
 
+  it('should route add-time language and word durations to timers', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const executed = [];
+    const router = new ActionRouter(config, {
+      execute(actionId, entities) {
+        executed.push({ actionId, entities });
+        return { success: true, data: { dueAt: new Date().toISOString(), kind: 'Timer' } };
+      }
+    });
+
+    const result = await router.process('add time for one minit', 'chat');
+
+    assert.equal(result.intent, 'timer.set');
+    assert.equal(result.entities.duration, 1);
+    assert.equal(executed[0].actionId, 'timer.set');
+  });
+
+  it('should classify common reminder subjects for presentation', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const router = new ActionRouter(config, {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...entities, dueAt: new Date().toISOString(), kind: 'Reminder' } };
+      }
+    });
+
+    const college = await router.process('remind me in 10 minutes to go to collage', 'chat');
+    const water = await router.process('remind me in 20 minutes to drink water', 'chat');
+    const exercise = await router.process('remind me in 30 minutes to exercise', 'chat');
+
+    assert.equal(college.entities.reminderCategory, 'education');
+    assert.equal(water.entities.reminderCategory, 'water');
+    assert.equal(exercise.entities.reminderCategory, 'exercise');
+  });
+
+  it('should treat task-at-clock timer wording as a reminder', async function() {
+    const config = { permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } } };
+    const router = new ActionRouter(config, {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...entities, dueAt: new Date().toISOString() } };
+      }
+    });
+
+    const result = await router.process('set timer for go to collage at 4 30 pm', 'chat');
+
+    assert.equal(result.intent, 'reminder.set');
+    assert.equal(result.entities.timeExpression, '4:30 pm');
+    assert.equal(result.entities.reminderText, 'go to college');
+    assert.equal(result.entities.reminderCategory, 'education');
+  });
+
+  it('should separate alarm time from its label', async function() {
+    const config = { permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } } };
+    const router = new ActionRouter(config, {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...entities, dueAt: new Date().toISOString() } };
+      }
+    });
+
+    const spaced = await router.process('set alarm at 4:54 pm to drink water', 'chat');
+    const compact = await router.process('set alarm at 4:54pm to drink water', 'chat');
+
+    assert.equal(spaced.intent, 'alarm.set');
+    assert.equal(spaced.entities.timeExpression, '4:54 pm');
+    assert.equal(spaced.entities.alarmLabel, 'drink water');
+    assert.equal(compact.entities.timeExpression, '4:54pm');
+    assert.equal(compact.entities.alarmLabel, 'drink water');
+  });
+
+  it('should route timer reminder and alarm management commands', async function() {
+    const config = { permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } } };
+    const router = new ActionRouter(config, {
+      execute(actionId) { return { success: true, data: { actionId, count: 0, entries: [] } }; }
+    });
+    const commands = new Map([
+      ['pause the timer', 'timer.pause'], ['resume the timer', 'timer.resume'],
+      ['reset the timer', 'timer.reset'], ['how much time is left', 'timer.remaining'],
+      ['show active timers', 'timer.list'], ['cancel all active timers', 'timer.clear'],
+      ['show all reminders', 'reminder.list'], ['delete this reminder', 'reminder.cancel'],
+      ['delete all reminders', 'reminder.clear'], ['snooze the alarm', 'alarm.snooze'],
+      ['show my alarms', 'alarm.list'], ['delete all alarms', 'alarm.clear']
+    ]);
+    for (const [command, expectedIntent] of commands) {
+      const result = await router.process(command, 'chat');
+      assert.equal(result.intent, expectedIntent, command);
+    }
+  });
+
+  it('should generalize countdown pomodoro session and recurring reminder language', async function() {
+    const config = { permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } } };
+    const router = new ActionRouter(config, {
+      execute(actionId, entities) { return { success: true, data: { actionId, ...entities, dueAt: new Date().toISOString() } }; }
+    });
+
+    const countdown = await router.process('set a countdown for thirty minutes', 'chat');
+    const pomodoro = await router.process('start a Pomodoro timer', 'chat');
+    const study = await router.process('start a one-hour study session', 'chat');
+    const recurring = await router.process('remind me every hour to drink water', 'chat');
+
+    assert.equal(countdown.intent, 'timer.set');
+    assert.equal(countdown.entities.duration, 30);
+    assert.equal(pomodoro.entities.duration, 25);
+    assert.equal(study.entities.duration, 60);
+    assert.equal(recurring.intent, 'reminder.set');
+    assert.equal(recurring.entities.recurrence, 'hourly');
+    assert.equal(recurring.entities.reminderCategory, 'water');
+  });
+
   it('should route alarm commands to alarm.set instead of timer.set', async function() {
     const config = {
       permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
@@ -2568,6 +2679,26 @@ describe('Action Router', function() {
     assert.equal(locate.entities.query, 'report.pdf');
     assert.equal(implicitLocate.intent, 'file.search');
     assert.equal(implicitLocate.entities.query, 'dlnlp labmanual');
+  });
+
+  it('should clean conversational words from file-open commands', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const executed = [];
+    const stubEngine = {
+      execute(actionId, entities) {
+        executed.push({ actionId, entities });
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const result = await router.process('open my resume file', 'chat');
+
+    assert.equal(result.intent, 'file.open');
+    assert.equal(result.entities.filename, 'resume');
+    assert.equal(executed[0].actionId, 'file.open');
   });
 
   it('should route misspelled folder searches through local execution', async function() {

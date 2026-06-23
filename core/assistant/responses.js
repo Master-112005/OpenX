@@ -746,6 +746,33 @@ const RESPONSE_BUILDERS = {
         `Added reminder: ${txt}.`
       ]);
     },
+    'timer.pause': () => 'Paused the active timer.',
+    'timer.resume': () => 'Resumed the timer.',
+    'timer.cancel': () => 'Stopped the active timer.',
+    'timer.reset': () => 'Reset and restarted the timer.',
+    'timer.remaining': context => {
+      const minutes = valueFromContext(context, 'remainingMinutes', 0);
+      return `${minutes} minute${minutes === 1 ? '' : 's'} remaining on the active timer.`;
+    },
+    'timer.list': context => {
+      const count = valueFromContext(context, 'count', 0);
+      return count ? `You have ${count} active timer${count === 1 ? '' : 's'}.` : 'You have no active timers.';
+    },
+    'timer.clear': context => `Cancelled ${valueFromContext(context, 'count', 0)} active timer${valueFromContext(context, 'count', 0) === 1 ? '' : 's'}.`,
+    'reminder.list': context => {
+      const entries = valueFromContext(context, 'entries', []);
+      if (!Array.isArray(entries) || entries.length === 0) return 'You have no matching reminders.';
+      return `Your reminders are: ${entries.slice(0, 5).map(entry => entry.message).join(', ')}.`;
+    },
+    'reminder.cancel': () => 'Cancelled the latest reminder.',
+    'reminder.clear': context => `Cancelled ${valueFromContext(context, 'count', 0)} reminder${valueFromContext(context, 'count', 0) === 1 ? '' : 's'}.`,
+    'alarm.snooze': () => 'Snoozed the alarm.',
+    'alarm.cancel': () => 'Stopped the active alarm.',
+    'alarm.list': context => {
+      const count = valueFromContext(context, 'count', 0);
+      return count ? `You have ${count} active alarm${count === 1 ? '' : 's'}.` : 'You have no active alarms.';
+    },
+    'alarm.clear': context => `Cancelled ${valueFromContext(context, 'count', 0)} alarm${valueFromContext(context, 'count', 0) === 1 ? '' : 's'}.`,
     'system.shutdown': () => chooseVariant('sys.shutdown', [
       `Initiating system shutdown now.`,
       `The system will power down shortly.`,

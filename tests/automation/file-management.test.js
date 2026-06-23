@@ -313,6 +313,17 @@ describe('File Management Automation', function() {
     assert.ok(spaced.data.results.includes(target));
   });
 
+  it('should prefer a real resume over weak fuzzy filename matches', function() {
+    const target = path.join(tempProfile, 'Documents', 'Resume.docx');
+    const unrelated = path.join(tempProfile, 'Documents', 'es.pak');
+    fs.writeFileSync(target, 'resume', 'utf8');
+    fs.writeFileSync(unrelated, 'locale', 'utf8');
+
+    const matches = engine.files._findFileMatches('resume');
+
+    assert.deepEqual(matches, [target]);
+  });
+
   it('should rank misspelled file names like Windows search', function() {
     const nested = path.join(tempProfile, 'Documents', 'Work');
     fs.mkdirSync(nested, { recursive: true });
