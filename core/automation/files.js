@@ -345,7 +345,11 @@ class FileController {
     const lowerQuery = cleanQuery.toLowerCase();
     const visitedDirectories = new Set();
     const startedAt = Date.now();
-    const limits = this._resolveSearchLimits(FILE_SEARCH_LIMITS, options);
+    const requestedLimits = this._resolveSearchLimits(FILE_SEARCH_LIMITS, options);
+    const limits = {
+      ...requestedLimits,
+      maxResults: Math.max(100, requestedLimits.maxResults * 4)
+    };
     const stats = createSearchStats('file.search', searchDirs.length);
 
     for (const dir of searchDirs) {
@@ -368,7 +372,16 @@ class FileController {
       }
     }
 
-    const uniqueResults = Array.from(new Set(results)).slice(0, 20);
+    const uniqueResults = Array.from(new Set(results))
+      .map(resultPath => ({
+        path: resultPath,
+        score: this._entryNameMatchScore(path.basename(resultPath), lowerQuery),
+        depth: resultPath.split(path.sep).length
+      }))
+      .filter(entry => entry.score > 0)
+      .sort((left, right) => right.score - left.score || left.depth - right.depth || left.path.localeCompare(right.path))
+      .slice(0, Math.min(requestedLimits.maxResults, 20))
+      .map(entry => entry.path);
     stats.elapsedMs = Date.now() - startedAt;
 
     return {
@@ -921,23 +934,25 @@ class FileController {
   }
 
   _entryNameMatchesQuery(entryName, lowerQuery) {
+    return this._entryNameMatchScore(entryName, lowerQuery) > 0;
+  }
+
+  _entryNameMatchScore(entryName, lowerQuery) {
     const query = String(lowerQuery || '').trim().toLowerCase();
     const name = String(entryName || '').trim().toLowerCase();
     if (!query || !name) {
-      return false;
-    }
-
-    if (name.includes(query)) {
-      return true;
+      return 0;
     }
 
     const normalizedName = Normalizer.normalizeText(name);
     const normalizedQuery = Normalizer.normalizeText(query);
     const compactName = normalizedName.replace(/\s+/g, '');
     const compactQuery = normalizedQuery.replace(/\s+/g, '');
-    if (compactQuery.length >= 4 && compactName.includes(compactQuery)) {
-      return true;
-    }
+    if (normalizedName === normalizedQuery) return 100;
+    if (normalizedName.startsWith(normalizedQuery)) return 90;
+    if (normalizedName.includes(normalizedQuery)) return 82;
+    if (compactQuery.length >= 4 && compactName === compactQuery) return 88;
+    if (compactQuery.length >= 4 && compactName.includes(compactQuery)) return 78;
 
     const queryTokens = normalizedQuery.split(/\s+/).filter(token => token.length >= 2);
     if (queryTokens.length === 0) {
@@ -953,8 +968,13 @@ class FileController {
       })
     ));
 
-    return matchedTokens.length === queryTokens.length ||
-      (queryTokens.length >= 3 && matchedTokens.length >= queryTokens.length - 1);
+    if (matchedTokens.length === queryTokens.length) {
+      return 60 + Math.round((matchedTokens.length / queryTokens.length) * 15);
+    }
+    if (queryTokens.length >= 3 && matchedTokens.length >= queryTokens.length - 1) {
+      return 50 + matchedTokens.length;
+    }
+    return 0;
   }
 
   _fileNameLooksLike(entryName, requestedName) {
@@ -983,7 +1003,10 @@ class FileController {
   _cleanSearchQuery(query) {
     return String(query || '')
       .trim()
-      .replace(/^(?:the|a|an)\s+/i, '')
+      .replace(/^(?:locate|find|search|serch|seach|searh|saerch|serach)(?:\s+for)?\s+/i, '')
+      .replace(/^(?:look\s+for)\s+/i, '')
+      .replace(/^(?:(?:the|a|an|my)\s+)?(?:file|folder|foldr|floder|foler|directory|diretory|dirctory)\s+/i, '')
+      .replace(/^(?:the|a|an|my)\s+/i, '')
       .replace(/\s+(?:file|folder|directory|location|path)$/i, '')
       .replace(/\b([a-z0-9_-]+)\s+(pdf|txt|docx?|xlsx?|pptx?|csv|json|xml|html?|js|ts|py|java|md|png|jpe?g|gif|webp|mp[34]|mkv|wav|zip|rar)$/i, '$1.$2')
       .trim();

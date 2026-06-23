@@ -313,6 +313,29 @@ describe('File Management Automation', function() {
     assert.ok(spaced.data.results.includes(target));
   });
 
+  it('should rank misspelled file names like Windows search', function() {
+    const nested = path.join(tempProfile, 'Documents', 'Work');
+    fs.mkdirSync(nested, { recursive: true });
+    const target = path.join(nested, 'Quarterly Project Report.docx');
+    fs.writeFileSync(target, 'report', 'utf8');
+
+    const result = engine.files.search('quaterly projet reprt docx');
+
+    assert.equal(result.success, true);
+    assert.equal(result.data.results[0], target);
+  });
+
+  it('should search folders by compact and misspelled names', function() {
+    const target = path.join(tempProfile, 'Documents', 'Project Archives');
+    fs.mkdirSync(target, { recursive: true });
+
+    const result = engine.folders.search('projet archves');
+
+    assert.equal(result.success, true);
+    assert.equal(result.data.entries[0].type, 'folder');
+    assert.equal(result.data.results[0], target);
+  });
+
   it('should fuzzy match unique folder open requests without exact folder names', function() {
     const target = path.join(tempProfile, 'Documents', 'Projects', 'DLNLP Node Folder');
     fs.mkdirSync(target, { recursive: true });

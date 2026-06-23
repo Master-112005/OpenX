@@ -482,6 +482,15 @@ const RESPONSE_BUILDERS = {
         `Your folder "${name}" is being launched.`
       ]);
     },
+    'folder.search': context => {
+      const count = valueFromContext(context, 'count', context.result?.data?.count || 0);
+      const entries = valueFromContext(context, 'entries', context.result?.data?.entries || []);
+      if (!count || !Array.isArray(entries) || entries.length === 0) {
+        return 'I could not find a matching local folder.';
+      }
+      const names = entries.slice(0, 5).map(entry => entry.name).join(', ');
+      return `I found ${count} matching ${count === 1 ? 'folder' : 'folders'}: ${names}.`;
+    },
     'browser.open': context => {
       const url = valueFromContext(context, 'url');
       const newTab = Boolean(valueFromContext(context, 'newTab', false));

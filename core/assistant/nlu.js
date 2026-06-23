@@ -334,6 +334,12 @@ class NaturalLanguageRouter {
       if (action === 'switch') return 'app.switch';
     }
 
+    if (domain === 'local-file' && action === 'search') {
+      return /\b(?:folder|folders|directory|directories)\b/.test(text)
+        ? 'folder.search'
+        : 'file.search';
+    }
+
     if (domain === 'web' && action === 'search') {
       return 'browser.search';
     }
@@ -357,6 +363,10 @@ class NaturalLanguageRouter {
 
     if (intent.id === 'browser.search') {
       entities.query = entities.query || this._extractSearchQuery(rawText, frame);
+    }
+
+    if (intent.id === 'file.search' || intent.id === 'folder.search') {
+      entities.query = this._extractLocalSearchQuery(rawText, frame);
     }
 
     if (intent.id === 'browser.open' && frame.domain === 'browser-tab') {
@@ -475,6 +485,16 @@ class NaturalLanguageRouter {
   _extractSearchQuery(rawText, frame) {
     return String(rawText || frame.correctedText || '')
       .replace(/^(?:search|find|look\s+up|google|show\s+me|tell\s+me\s+about|tell\s+about)\s+(?:for\s+)?/i, '')
+      .trim();
+  }
+
+  _extractLocalSearchQuery(rawText, frame) {
+    return String(rawText || frame.correctedText || '')
+      .replace(/^(?:locate|find|search|serch|seach|searh|saerch|serach)(?:\s+for)?\s+/i, '')
+      .replace(/^(?:look\s+for)\s+/i, '')
+      .replace(/^(?:(?:the|a|an|my)\s+)?(?:file|folder|foldr|floder|foler|directory|diretory|dirctory)\s+/i, '')
+      .replace(/^(?:the|a|an|my)\s+/i, '')
+      .replace(/\s+(?:file|folder|foldr|floder|foler|directory|diretory|dirctory|location|path)\s*$/i, '')
       .trim();
   }
 }

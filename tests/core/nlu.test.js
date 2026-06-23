@@ -86,4 +86,15 @@ describe('Natural Language Router', function() {
     assert.equal(result.entities.browserName, 'chrome');
     assert.equal(result.entities.newTab, true);
   });
+
+  it('should distinguish typo-tolerant local file and folder searches', function() {
+    const router = createRouter();
+    const fileResult = router.resolveIntent('serch for my quaterly reprt file');
+    const folderResult = router.resolveIntent('find my projet archve floder');
+
+    assert.equal(fileResult.intent.id, 'file.search');
+    assert.equal(fileResult.entities.query, 'quaterly reprt');
+    assert.equal(folderResult.intent.id, 'folder.search');
+    assert.equal(folderResult.entities.query, 'projet archve');
+  });
 });

@@ -38,7 +38,7 @@ const FOLDER_SEARCH_LIMITS = Object.freeze({
   maxDepth: 7,
   maxDirectories: 2500,
   maxElapsedMs: 1200,
-  maxResults: 12
+  maxResults: 40
 });
 
 function uniquePaths(paths) {
@@ -66,6 +66,62 @@ function hasSearchTimeRemaining(startedAt, maxElapsedMs) {
 class FolderController {
   constructor(config) {
     this.logger = new Logger(config?.logging || { level: 'info' });
+  }
+
+  search(query, options = {}) {
+    const cleanQuery = this._cleanSearchQuery(query);
+    if (!cleanQuery) {
+      return { success: false, error: 'No folder search query provided' };
+    }
+
+    const roots = searchRoots();
+    const results = [];
+    const visitedDirectories = new Set();
+    const startedAt = Date.now();
+    const maxResults = Number.isFinite(options.maxResults) ? options.maxResults : FOLDER_SEARCH_LIMITS.maxResults;
+    const limits = {
+      maxDepth: Number.isFinite(options.maxDepth) ? options.maxDepth : FOLDER_SEARCH_LIMITS.maxDepth,
+      maxDirectories: Number.isFinite(options.maxDirectories) ? options.maxDirectories : FOLDER_SEARCH_LIMITS.maxDirectories,
+      maxElapsedMs: Number.isFinite(options.maxElapsedMs) ? options.maxElapsedMs : FOLDER_SEARCH_LIMITS.maxElapsedMs,
+      maxResults: Math.max(100, maxResults * 4),
+      visitedDirectories,
+      startedAt
+    };
+
+    for (const root of roots) {
+      this._searchFoldersRecursive(root, cleanQuery.toLowerCase(), results, limits);
+      if (!hasSearchTimeRemaining(startedAt, limits.maxElapsedMs) || results.length >= limits.maxResults) {
+        break;
+      }
+    }
+
+    const ranked = uniquePaths(results)
+      .map(resultPath => ({
+        path: resultPath,
+        score: this._folderNameMatchScore(path.basename(resultPath), cleanQuery),
+        depth: resultPath.split(path.sep).length
+      }))
+      .filter(entry => entry.score > 0)
+      .sort((left, right) => right.score - left.score || left.depth - right.depth || left.path.localeCompare(right.path))
+      .slice(0, Math.min(maxResults, 20));
+
+    return {
+      success: true,
+      data: {
+        query: cleanQuery,
+        results: ranked.map(entry => entry.path),
+        entries: ranked.map(entry => ({ name: path.basename(entry.path), type: 'folder', path: entry.path })),
+        count: ranked.length,
+        searchStats: {
+          kind: 'folder.search',
+          roots: roots.length,
+          visitedDirectories: visitedDirectories.size,
+          partial: !hasSearchTimeRemaining(startedAt, limits.maxElapsedMs),
+          partialReason: !hasSearchTimeRemaining(startedAt, limits.maxElapsedMs) ? 'time-budget' : null,
+          elapsedMs: Date.now() - startedAt
+        }
+      }
+    };
   }
 
   _resolveFolderPath(folderName, targetPath = null) {
@@ -301,6 +357,7 @@ class FolderController {
     for (const root of roots) {
       this._searchFoldersRecursive(root, lowerQuery, results, {
         ...FOLDER_SEARCH_LIMITS,
+        maxResults: 100,
         visitedDirectories
       });
       if (results.length >= 12) {
@@ -308,7 +365,11 @@ class FolderController {
       }
     }
 
-    return uniquePaths(results).slice(0, 12);
+    return uniquePaths(results)
+      .map(resultPath => ({ path: resultPath, score: this._folderNameMatchScore(path.basename(resultPath), folderName) }))
+      .sort((left, right) => right.score - left.score || left.path.localeCompare(right.path))
+      .slice(0, 12)
+      .map(entry => entry.path);
   }
 
   _searchFoldersRecursive(root, lowerQuery, results, options = {}) {
@@ -354,6 +415,9 @@ class FolderController {
         }
 
         const entryPath = path.join(directory, entry.name);
+        if (!this._shouldDescendIntoDirectory(entry.name)) {
+          continue;
+        }
         if (this._folderNameMatchesQuery(entry.name, lowerQuery)) {
           results.push(entryPath);
           if (results.length >= (options.maxResults || 12)) {
@@ -361,7 +425,7 @@ class FolderController {
           }
         }
 
-        if (depth < maxDepth && this._shouldDescendIntoDirectory(entry.name)) {
+        if (depth < maxDepth) {
           queue.push({ directory: entryPath, depth: depth + 1 });
         }
       }
@@ -376,28 +440,60 @@ class FolderController {
   }
 
   _folderNameMatchesQuery(entryName, lowerQuery) {
+    return this._folderNameMatchScore(entryName, lowerQuery) > 0;
+  }
+
+  _folderNameMatchScore(entryName, lowerQuery) {
     const query = String(lowerQuery || '').trim().toLowerCase();
     const name = String(entryName || '').trim().toLowerCase();
     if (!query || !name) {
-      return false;
+      return 0;
     }
 
-    if (name === query || name.includes(query)) {
-      return true;
-    }
-
-    const normalizedName = name.replace(/[_-]+/g, ' ');
-    const normalizedQuery = query.replace(/[_-]+/g, ' ');
+    const normalizedName = Normalizer.normalizeText(name.replace(/[_-]+/g, ' '));
+    const normalizedQuery = Normalizer.normalizeText(query.replace(/[_-]+/g, ' '));
     const compactName = normalizedName.replace(/\s+/g, '');
     const compactQuery = normalizedQuery.replace(/\s+/g, '');
-    if (compactQuery.length >= 4 && compactName.includes(compactQuery)) {
-      return true;
+    if (normalizedName === normalizedQuery) return 100;
+    if (normalizedName.startsWith(normalizedQuery)) return 90;
+    if (normalizedName.includes(normalizedQuery)) return 82;
+    if (compactQuery.length >= 4 && compactName === compactQuery) return 88;
+    if (compactQuery.length >= 4 && compactName.includes(compactQuery)) return 78;
+
+    const nameTokens = normalizedName.split(/\s+/).filter(Boolean);
+    const queryTokens = normalizedQuery.split(/\s+/).filter(Boolean);
+    const matchedTokens = queryTokens.filter(token => (
+      nameTokens.some(nameToken => (
+        nameToken.includes(token) ||
+        (nameToken.length >= 4 && nameToken.length / token.length >= 0.6 && token.includes(nameToken))
+      )) ||
+      Normalizer.findClosestOption(token, nameTokens, {
+        minSimilarity: token.length >= 7 ? 0.64 : 0.7,
+        maxDistance: token.length >= 7 ? 3 : 2
+      })
+    )).length;
+    if (queryTokens.length > 0 && matchedTokens === queryTokens.length) {
+      return 60 + Math.round((matchedTokens / queryTokens.length) * 15);
+    }
+    if (queryTokens.length >= 3 && matchedTokens >= queryTokens.length - 1) {
+      return 50 + matchedTokens;
     }
 
-    return Boolean(normalizedQuery.length >= 4 && Normalizer.findClosestOption(normalizedQuery, [normalizedName], {
-      minSimilarity: 0.72,
+    return normalizedQuery.length >= 4 && Normalizer.findClosestOption(normalizedQuery, [normalizedName], {
+      minSimilarity: normalizedQuery.length >= 8 ? 0.64 : 0.7,
       maxDistance: normalizedQuery.length >= 8 ? 3 : 2
-    }));
+    }) ? 55 : 0;
+  }
+
+  _cleanSearchQuery(query) {
+    return String(query || '')
+      .trim()
+      .replace(/^(?:locate|find|search|serch|seach|searh|saerch|serach)(?:\s+for)?\s+/i, '')
+      .replace(/^(?:look\s+for)\s+/i, '')
+      .replace(/^(?:(?:the|a|an|my)\s+)?(?:folder|foldr|floder|foler|directory|diretory|dirctory)\s+/i, '')
+      .replace(/^(?:the|a|an|my)\s+/i, '')
+      .replace(/\s+(?:folder|foldr|floder|foler|directory|diretory|dirctory|location|path)$/i, '')
+      .trim();
   }
 
   _buildAmbiguousFolderMessage(folderName, choices) {

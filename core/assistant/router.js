@@ -776,7 +776,10 @@ class ActionRouter {
     const isList = /^(?:show|list|tell|display)\b/.test(correctedText) ||
       /\b(?:what|which)\b.*\b(?:files|folders|items|contents)\b/.test(input);
     const isSearch = ['search', 'find'].includes(action) || /\b(?:look|find|search|locate)\b/.test(correctedText);
-    const intentId = isList ? 'file.list' : isSearch ? 'file.search' : '';
+    const folderOnlySearch = isSearch &&
+      /\b(?:folder|folders|directory|directories)\b/.test(input) &&
+      !/\b(?:file|files|pdf|pdfs|image|images|photo|photos)\b/.test(input);
+    const intentId = isList ? 'file.list' : folderOnlySearch ? 'folder.search' : isSearch ? 'file.search' : '';
     const intent = intentId ? this.intentRegistry.get(intentId) : null;
     if (!intent) {
       return null;
@@ -3878,7 +3881,9 @@ _resolveExplicitTimerIntent(rawText, preparedInput) {
       return null;
     }
 
-    const intent = this.intentRegistry.get('file.search');
+    const folderOnlySearch = /\b(?:folder|folders|directory|directories)\b/i.test(fileEvidence) &&
+      !/\b(?:file|files|pdf|pdfs|document|documents|docx?|xlsx?|pptx?|csv|json|image|images|photo|photos|picture|pictures|video|videos)\b/i.test(fileEvidence);
+    const intent = this.intentRegistry.get(folderOnlySearch ? 'folder.search' : 'file.search');
     if (!intent) {
       return null;
     }
@@ -3889,10 +3894,12 @@ _resolveExplicitTimerIntent(rawText, preparedInput) {
   _extractLocalFileSearchQuery(rawText, correctedText = rawText) {
     const clean = value => String(value || '')
       .trim()
-      .replace(/^(?:locate|find|search(?:\s+for)?|where\s+(?:is|are|i)|whare\s+i|what\s+is\s+the\s+location\s+of|show\s+me\s+where)\s+/i, '')
-      .replace(/^(?:the|a|an)\s+/i, '')
+      .replace(/^(?:locate|find|search|serch|seach|searh|saerch|serach)(?:\s+for)?\s+/i, '')
+      .replace(/^(?:where\s+(?:is|are|i)|whare\s+i|what\s+is\s+the\s+location\s+of|show\s+me\s+where)\s+/i, '')
+      .replace(/^(?:(?:the|a|an|my)\s+)?(?:file|folder|foldr|floder|foler|directory|diretory|dirctory)\s+/i, '')
+      .replace(/^(?:the|a|an|my)\s+/i, '')
       .replace(/\s+(?:on|in)\s+(?:my\s+)?(?:computer|pc|laptop|system|files?|folders?)$/i, '')
-      .replace(/\s+(?:file|folder|directory|location|path)$/i, '')
+      .replace(/\s+(?:file|folder|foldr|floder|foler|directory|diretory|dirctory|location|path)$/i, '')
       .replace(/\b([a-z0-9_-]+)\s+(pdf|txt|docx?|xlsx?|pptx?|csv|json|xml|html?|js|ts|py|java|md|png|jpe?g|gif|webp|mp[34]|mkv|wav|zip|rar)$/i, '$1.$2')
       .trim();
 

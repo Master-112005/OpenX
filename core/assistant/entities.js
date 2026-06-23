@@ -535,7 +535,12 @@ class EntityExtractor {
   }
 
   _extractQuery(text, raw) {
-    const patterns = ['search for ', 'search web ', 'search ', 'look up ', 'google ', 'find file ', 'search file ', 'look for file ', 'locate ', 'find '];
+    const patterns = [
+      'search for ', 'search web ', 'search ', 'look up ', 'google ',
+      'find file ', 'search file ', 'look for file ',
+      'find folder ', 'search folder ', 'look for folder ',
+      'find directory ', 'search directory ', 'locate '
+    ];
     for (const p of patterns) {
       if (text.includes(p)) {
         const after = raw.split(new RegExp(p, 'i'))[1];
@@ -543,6 +548,7 @@ class EntityExtractor {
           return after
             .replace(/\s+(?:in|on)\s+new\s+tab(?:\s+(?:in|on)\s+(?:chrome|browser|edge|firefox))?\s*$/i, '')
             .replace(/\s+new\s+tab(?:\s+(?:in|on)\s+(?:chrome|browser|edge|firefox))?\s*$/i, '')
+            .replace(/\s+(?:file|folder|directory|location|path)\s*$/i, '')
             .trim();
         }
       }

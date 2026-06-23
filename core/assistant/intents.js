@@ -242,6 +242,14 @@ const INTENT_DEFINITIONS = [
     description: 'Open a folder in explorer'
   },
   {
+    id: 'folder.search',
+    patterns: ['search folder', 'find folder', 'look for folder', 'locate directory'],
+    permissionLevel: 'low',
+    action: 'folder.search',
+    entities: [{ name: 'query', type: 'string', required: true }],
+    description: 'Search for local folders'
+  },
+  {
     id: 'browser.open',
     patterns: ['open website', 'go to website', 'open url', 'open new tab', 'open new chrome tab', 'navigate to', 'browse to', 'open', 'go to'],
     permissionLevel: 'low',

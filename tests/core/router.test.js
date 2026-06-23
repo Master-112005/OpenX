@@ -2570,6 +2570,23 @@ describe('Action Router', function() {
     assert.equal(implicitLocate.entities.query, 'dlnlp labmanual');
   });
 
+  it('should route misspelled folder searches through local execution', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...entities, entries: [], count: 0 } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const result = await router.process('serch for my projet archve floder', 'chat');
+
+    assert.equal(result.intent, 'folder.search');
+    assert.equal(result.entities.query, 'projet archve');
+  });
+
   it('should not treat file names containing resume as media resume', async function() {
     const config = {
       permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
