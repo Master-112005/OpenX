@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { Normalizer } = require('./Data');
-const { buildDataPaths, writeJsonAtomic } = require('./Data');
+const { buildDataPaths, readJsonFile, writeJsonAtomic } = require('./Data');
 const LearningGuard = require('./active-learning/LearningGuard');
 
 const MAX_EVENTS = 200;
@@ -93,7 +93,12 @@ const PERSONAL_FACT_LABELS = {
   name: 'name'
 };
 
-const PROTECTED_FACT_KEY_PATTERN = /^(?:password|account_password|googlePassword|applePassword|microsoftPassword|facebookPassword|instagramPassword|generalPassword)$/;
+const PROTECTED_FACT_KEY_PATTERN = /(?:^|_)(?:password|passcode|pin|secret|token|api_key|credential|cookie|session_id|auth|authentication|authorization|otp|one_time_password|credit_card|card_number|cvv|bank_account|routing_number|iban|swift|passport|government_id|social_security|ssn|private_key|seed_phrase|mnemonic)(?:_|$)/i;
+const PROTECTED_FACT_VALUE_PATTERNS = [
+  /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/i,
+  /\b(?:sk-(?:proj-)?|gh[pousr]_|AKIA|AIza)[A-Z0-9_-]{16,}\b/i,
+  /\beyJ[A-Z0-9_-]+\.eyJ[A-Z0-9_-]+\.[A-Z0-9_-]+\b/i
+];
 
 function isPlainObject(value) {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
@@ -119,6 +124,12 @@ function normalizeMemoryKey(value) {
     .replace(/[.!?]+$/g, '')
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '');
+}
+
+function isProtectedUserFact(key, value = '') {
+  const normalizedKey = normalizeMemoryKey(key);
+  return PROTECTED_FACT_KEY_PATTERN.test(normalizedKey) ||
+    PROTECTED_FACT_VALUE_PATTERNS.some(pattern => pattern.test(String(value || '')));
 }
 
 function normalizePersonalFactKey(value) {
@@ -352,7 +363,8 @@ class ActiveLearningStore {
 
     const normalizedKind = normalizePersonalFactKey(kind).replace(/\s+/g, '.');
     const cleanValue = cleanCommand(value);
-    if (!normalizedKind || !cleanValue) {
+    if (!normalizedKind || !cleanValue || normalizedKind.length > 80 || cleanValue.length > 500 ||
+      isProtectedUserFact(normalizedKind, cleanValue)) {
       return null;
     }
 
@@ -977,7 +989,10 @@ class ActiveLearningStore {
     if (genericRememberMatch && genericRememberMatch[1] && genericRememberMatch[2]) {
       const key = normalizePersonalFactKey(genericRememberMatch[1]);
       const value = genericRememberMatch[2].replace(/[.!?]+$/g, '').trim();
-      if (key && value && key.length > 1 && value.length > 0 && value.length < 100 && !PROTECTED_FACT_KEY_PATTERN.test(key) && !/^(?:i|my|the|a|an|this|that|it|they|them|his|her|their)\b/i.test(key)) {
+      if (isProtectedUserFact(key, value)) {
+        return this._rejectSensitiveProfileFact(key);
+      }
+      if (key && value && key.length > 1 && value.length > 0 && value.length <= 500 && !/^(?:i|my|the|a|an|this|that|it|they|them|his|her|their)\b/i.test(key)) {
         const fact = this.rememberUserFact(key, value, {
           source: /^remember\b/i.test(text) ? 'explicit-memory' : 'user-stated-fact'
         });
@@ -994,7 +1009,10 @@ class ActiveLearningStore {
     if (myXIsYMatch && myXIsYMatch[1] && myXIsYMatch[2]) {
       const key = normalizePersonalFactKey(myXIsYMatch[1]);
       const value = myXIsYMatch[2].replace(/[.!?]+$/g, '').trim();
-      if (key && value && key.length > 1 && value.length > 0 && value.length < 100 && !/^(?:name|password|email|phone|mobile|card|number)\b/i.test(key)) {
+      if (isProtectedUserFact(key, value)) {
+        return this._rejectSensitiveProfileFact(key);
+      }
+      if (key && value && key.length > 1 && value.length > 0 && value.length <= 500 && !/^(?:name|email|phone|mobile)\b/i.test(key)) {
         const fact = this.rememberUserFact(key, value, {
           source: 'user-stated-fact'
         });
@@ -1158,15 +1176,10 @@ class ActiveLearningStore {
   }
 
   _load() {
-    try {
-      if (!fs.existsSync(this.storePath)) {
-        return {};
-      }
-      const source = fs.readFileSync(this.storePath, 'utf8').trim();
-      return source ? JSON.parse(source) : {};
-    } catch (err) {
-      return {};
-    }
+    return readJsonFile(this.storePath, {}, {
+      createIfMissing: false,
+      maxBytes: 5 * 1024 * 1024
+    });
   }
 
   flush() {
@@ -1217,7 +1230,7 @@ class ActiveLearningStore {
 
   _scheduleSave() {
     if (this.pendingSaveTimer) {
-      return;
+      clearTimeout(this.pendingSaveTimer);
     }
 
     this.pendingSaveTimer = setTimeout(() => {
@@ -1256,7 +1269,7 @@ class ActiveLearningStore {
 
     let changed = false;
     for (const key of Object.keys(facts)) {
-      if (PROTECTED_FACT_KEY_PATTERN.test(key)) {
+      if (isProtectedUserFact(key, facts[key]?.value)) {
         delete facts[key];
         changed = true;
       }
@@ -1289,6 +1302,16 @@ class ActiveLearningStore {
     }
 
     return records;
+  }
+
+  _rejectSensitiveProfileFact(kind = 'that value') {
+    return {
+      type: 'rejected-sensitive',
+      learned: false,
+      sensitive: true,
+      fact: normalizeMemoryKey(kind),
+      response: 'I can remember ordinary profile details, including your phone number, but I cannot store passwords, tokens, OTPs, payment data, or authentication secrets.'
+    };
   }
 
   _containsPrivateCommunicationRecords(source) {
@@ -1328,3 +1351,4 @@ class ActiveLearningStore {
 }
 
 module.exports = ActiveLearningStore;
+module.exports.isProtectedUserFact = isProtectedUserFact;

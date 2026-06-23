@@ -155,7 +155,10 @@ class Assistant extends EventEmitter {
       }
 
       const routedInput = this._buildRoutedInput(input);
-      const result = await this.router.process(routedInput, source);
+      const result = await this.router.process(routedInput, source, {
+        contextualRewrite: this._lastContextualRewrite,
+        conversation: this.context.buildConversationDigest({ limit: 4 })
+      });
       this.context.record(input, result.entities || {}, result);
       this._recordLearningOutcome(input, routedInput, result);
 
@@ -333,6 +336,7 @@ class Assistant extends EventEmitter {
       awaitingClarification: Boolean(this.pendingClarification),
       awaitingFeedback: Boolean(this.pendingFeedback),
       awaitingLearningCorrection: Boolean(this.pendingLearningCorrection),
+      awaitingLearningRepair: Boolean(this.pendingLearningRepair),
       recentCommands: this.context.getRecentCommands(),
       conversation: this.context.getConversationSummary()
     };
@@ -344,6 +348,7 @@ class Assistant extends EventEmitter {
     this.pendingClarification = null;
     this.pendingFeedback = null;
     this.pendingLearningCorrection = null;
+    this.pendingLearningRepair = null;
 
     if (this.pluginManager) {
       for (const plugin of this.pluginManager.getLoaded()) {
@@ -1435,6 +1440,11 @@ class Assistant extends EventEmitter {
           ? `who won IPL in ${previousYear}`
           : `search for ${query} ${previousYear}`;
       }
+    }
+
+    const ellipticalFollowUp = this.context.resolveEllipticalFollowUp(input);
+    if (ellipticalFollowUp) {
+      return ellipticalFollowUp;
     }
 
     const earlyLastFileEntry = this.context.getLastFileReference();

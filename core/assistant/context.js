@@ -301,6 +301,47 @@ class ContextManager {
     return this.findRecent(entry => Boolean(this._fileReferenceFromEntry(entry)), 30);
   }
 
+  getLastActionableCommand(limit = 12) {
+    return this.history
+      .slice(-limit)
+      .reverse()
+      .find(entry => entry?.success && entry?.input && entry?.intent &&
+        /^(?:app|browser|file|folder|media|volume|brightness|window)\./.test(entry.intent)) || null;
+  }
+
+  resolveEllipticalFollowUp(input) {
+    const normalized = normalizeText(input);
+    if (!normalized || /(?:19|20)\d{2}/.test(normalized)) return '';
+    const match = normalized.match(/^(?:and|also|then|what about|how about)\s+(.+)$/) ||
+      normalized.match(/^(?:do (?:the )?same|same(?: thing)?)\s+(?:with|for)\s+(.+)$/);
+    if (!match?.[1]) return '';
+
+    const replacement = match[1]
+      .replace(/^(?:the|a|an)\s+/, '')
+      .replace(/^(?:open|close|launch|start|play|search(?:\s+for)?)\s+/, '')
+      .trim();
+    const last = this.getLastActionableCommand();
+    if (!last || !replacement) return '';
+    const verbs = {
+      'app.open': 'open',
+      'app.close': 'close',
+      'app.switch': 'switch to',
+      'browser.search': 'search for',
+      'browser.siteSearch': 'search for',
+      'media.play': 'play',
+      'file.open': 'open',
+      'folder.open': 'open'
+    };
+    const verb = verbs[last.intent];
+    if (!verb) return '';
+
+    if (/^browser\./.test(last.intent) && /^(?:chrome|edge|firefox|browser)$/.test(replacement)) {
+      const query = String(last.entities?.query || last.data?.query || '').trim();
+      return query ? `search for ${query} in ${replacement}` : '';
+    }
+    return `${verb} ${replacement}`;
+  }
+
   getFileReference(entry) {
     return this._fileReferenceFromEntry(entry);
   }

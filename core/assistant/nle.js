@@ -17,7 +17,14 @@ class NaturalLanguageExecution {
     if (!this.automation || typeof this.automation.execute !== 'function') {
       return Promise.resolve({ success: false, error: 'Automation engine is unavailable' });
     }
-    return this.automation.execute(actionId, entities, context);
+    const discourse = context?.languageUnderstanding?.discourse;
+    const contextualRewrite = context?.contextualRewrite;
+    const executionContext = {
+      ...context,
+      ...(discourse ? { discourse } : {}),
+      ...(contextualRewrite ? { contextualRewrite } : {})
+    };
+    return this.automation.execute(actionId, entities, executionContext);
   }
 }
 

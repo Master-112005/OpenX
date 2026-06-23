@@ -2,6 +2,7 @@ const Normalizer = require('./Data').Normalizer;
 const Logger = require('./Data').Logger;
 const { stripLeadIns } = require('./nlp/preprocessor');
 const { parseLearningDirective } = require('./active-learning/LearningLanguage');
+const { analyzeDiscourse } = require('./ContextLanguage');
 
 class InputParser {
   constructor(config) {
@@ -16,7 +17,8 @@ class InputParser {
         commandText: '',
         rawCommandText: '',
         wakeWordDetected: false,
-        hasCommand: false
+        hasCommand: false,
+        discourse: analyzeDiscourse('')
       };
     }
 
@@ -26,6 +28,7 @@ class InputParser {
     const rawCommandText = this._stripLeadInRaw(raw);
     const hasCommand = rawCommandText.length > 0;
     const learningDirective = parseLearningDirective(rawCommandText);
+    const discourse = analyzeDiscourse(rawCommandText);
 
     return {
       raw,
@@ -34,7 +37,8 @@ class InputParser {
       commandText,
       rawCommandText,
       hasCommand,
-      learningDirective
+      learningDirective,
+      discourse
     };
   }
 

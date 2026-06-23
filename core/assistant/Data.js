@@ -4,10 +4,15 @@ const dataRootModule = (() => {
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const crypto = require('crypto');
 
 const DATA_ROOT_NAME = 'OpenX_Data';
 const LEGACY_DATA_ROOT_NAME = '.jarvis';
 const JSON_BACKUP_SUFFIX = '.bak';
+const DEFAULT_JSON_MAX_BYTES = 5 * 1024 * 1024;
+const PRIVATE_FILE_MODE = 0o600;
+const PRIVATE_DIRECTORY_MODE = 0o700;
+const securedDirectories = new Set();
 
 function resolveDataRoot(config = {}) {
   const configured = String(config?.app?.dataDir || process.env.OPENX_DATA_DIR || '').trim();
@@ -41,8 +46,11 @@ function buildDataPaths(config = {}) {
 }
 
 function ensureDirectory(dir) {
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+  fs.mkdirSync(dir, { recursive: true, mode: PRIVATE_DIRECTORY_MODE });
+  const resolved = path.resolve(dir);
+  if (!securedDirectories.has(resolved)) {
+    try { fs.chmodSync(resolved, PRIVATE_DIRECTORY_MODE); } catch (_) {}
+    securedDirectories.add(resolved);
   }
 }
 
@@ -58,17 +66,18 @@ function writeFileAtomic(filePath, content) {
   ensureDirectory(path.dirname(filePath));
   const tempPath = path.join(
     path.dirname(filePath),
-    `.${path.basename(filePath)}.${process.pid}.${Date.now()}.tmp`
+    `.${path.basename(filePath)}.${process.pid}.${crypto.randomBytes(8).toString('hex')}.tmp`
   );
 
   let fd = null;
   try {
-    fd = fs.openSync(tempPath, 'w');
+    fd = fs.openSync(tempPath, 'wx', PRIVATE_FILE_MODE);
     fs.writeFileSync(fd, content, 'utf8');
     fs.fsyncSync(fd);
     fs.closeSync(fd);
     fd = null;
     fs.renameSync(tempPath, filePath);
+    try { fs.chmodSync(filePath, PRIVATE_FILE_MODE); } catch (_) {}
   } catch (err) {
     if (fd !== null) {
       try {
@@ -91,31 +100,48 @@ function writeFileAtomic(filePath, content) {
 function writeJsonAtomic(filePath, value, options = {}) {
   const spacing = Number.isInteger(options.spacing) ? options.spacing : 2;
   const backup = options.backup !== false;
+  const maxBytes = Number(options.maxBytes) > 0 ? Number(options.maxBytes) : DEFAULT_JSON_MAX_BYTES;
+  const json = JSON.stringify(value, null, spacing);
+  if (json === undefined) throw new TypeError('Value is not JSON serializable');
+  const serialized = `${json}\n`;
+  if (Buffer.byteLength(serialized, 'utf8') > maxBytes) {
+    throw new Error(`JSON data exceeds the ${maxBytes} byte limit`);
+  }
   ensureDirectory(path.dirname(filePath));
 
   if (backup && fs.existsSync(filePath)) {
-    fs.copyFileSync(filePath, safeBackupPath(filePath));
+    const backupPath = safeBackupPath(filePath);
+    fs.copyFileSync(filePath, backupPath);
+    try { fs.chmodSync(backupPath, PRIVATE_FILE_MODE); } catch (_) {}
   }
 
-  writeFileAtomic(filePath, `${JSON.stringify(value, null, spacing)}\n`);
+  writeFileAtomic(filePath, serialized);
 }
 
 function readJsonFile(filePath, fallbackValue = {}, options = {}) {
   const fallback = typeof fallbackValue === 'function' ? fallbackValue() : fallbackValue;
   const backupPath = safeBackupPath(filePath);
   const preserveCorrupt = options.preserveCorrupt !== false;
+  const maxBytes = Number(options.maxBytes) > 0 ? Number(options.maxBytes) : DEFAULT_JSON_MAX_BYTES;
+  const validate = typeof options.validate === 'function' ? options.validate : () => true;
 
   const parsePath = sourcePath => {
+    const stats = fs.statSync(sourcePath);
+    if (!stats.isFile() || stats.size > maxBytes) {
+      throw new Error('JSON file is invalid or exceeds its size limit');
+    }
     const source = fs.readFileSync(sourcePath, 'utf8').trim();
     if (!source) {
-      return fallback;
+      throw new Error('JSON file is empty');
     }
-    return JSON.parse(source);
+    const parsed = JSON.parse(source);
+    if (!validate(parsed)) throw new Error('JSON schema validation failed');
+    return parsed;
   };
 
   if (!fs.existsSync(filePath)) {
     if (options.createIfMissing !== false) {
-      writeJsonAtomic(filePath, fallback, { backup: false, spacing: options.spacing });
+      writeJsonAtomic(filePath, fallback, { backup: false, spacing: options.spacing, maxBytes });
     }
     return fallback;
   }
@@ -135,14 +161,14 @@ function readJsonFile(filePath, fallbackValue = {}, options = {}) {
     if (fs.existsSync(backupPath)) {
       try {
         const recovered = parsePath(backupPath);
-        writeJsonAtomic(filePath, recovered, { backup: false, spacing: options.spacing });
+        writeJsonAtomic(filePath, recovered, { backup: false, spacing: options.spacing, maxBytes });
         return recovered;
       } catch (_) {
         // Fall through to a clean fallback file.
       }
     }
 
-    writeJsonAtomic(filePath, fallback, { backup: false, spacing: options.spacing });
+    writeJsonAtomic(filePath, fallback, { backup: false, spacing: options.spacing, maxBytes });
     return fallback;
   }
 }

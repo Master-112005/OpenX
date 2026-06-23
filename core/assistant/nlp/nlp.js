@@ -14,6 +14,7 @@ const {
 } = require('./scorer');
 const { normalizeWebTarget } = require('./web-targets');
 const { parseLearningDirective } = require('../active-learning/LearningLanguage');
+const { analyzeDiscourse } = require('../ContextLanguage');
 
 const PREPARE_CACHE_LIMIT = 256;
 const PATTERN_CACHE_LIMIT = 512;
@@ -45,6 +46,10 @@ class NlpProcessor {
       ...prepared,
       query: prepared.query ? { ...prepared.query, clauses: [...(prepared.query.clauses || [])] } : prepared.query,
       semanticFrame: prepared.semanticFrame ? { ...prepared.semanticFrame } : prepared.semanticFrame,
+      discourse: prepared.discourse ? {
+        ...prepared.discourse,
+        references: [...(prepared.discourse.references || [])]
+      } : prepared.discourse,
       tokens: [...(prepared.tokens || [])],
       intentTokens: [...(prepared.intentTokens || [])],
       bigrams: [...(prepared.bigrams || [])],
@@ -166,6 +171,7 @@ class NlpProcessor {
     const bigrams = buildBigrams(correctedTokens);
     const intentBigrams = buildBigrams(intentTokens);
     const learningDirective = parseLearningDirective(text);
+    const discourse = analyzeDiscourse(text);
 
     return {
       normalizedText: normalized,
@@ -181,6 +187,7 @@ class NlpProcessor {
       tokens: correctedTokens,
       intentTokens,
       learningDirective,
+      discourse,
       bigrams,
       intentBigrams
     };

@@ -110,6 +110,8 @@ class ActionRouter {
     const preparedInput = effectiveCommandText === parseResult.commandText
       ? initialPreparedInput
       : this.nlp.prepare(effectiveCommandText);
+    preparedInput.contextualRewrite = options.contextualRewrite || null;
+    preparedInput.conversation = options.conversation || null;
     const rawCommandText = useNoisyRepair
       ? effectiveCommandText
       : (parseResult.rawCommandText || parseResult.commandText);
@@ -1399,7 +1401,9 @@ class ActionRouter {
         commandId,
         intent: intentResult.intent.id,
         input: rawCommandText,
-        source
+        source,
+        languageUnderstanding,
+        contextualRewrite: languageUnderstanding?.contextualRewrite || null
       });
       const confirmation = this.actionConfirmation.confirm(result);
       this.logger.info(`Execution result: ${commandId}`, {
@@ -1547,6 +1551,8 @@ class ActionRouter {
       normalizedText: preparedInput?.normalizedText || '',
       correctedText: preparedInput?.correctedText || '',
       intentText: preparedInput?.intentText || '',
+      discourse: preparedInput?.discourse || null,
+      contextualRewrite: preparedInput?.contextualRewrite || null,
       commandFrame: commandFrame ? {
         action: commandFrame.action || null,
         actionToken: commandFrame.actionToken || null,

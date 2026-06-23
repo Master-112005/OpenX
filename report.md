@@ -54,7 +54,195 @@ Input
   -> OpenX_Data
 ```
 
-### 3.1 Assistant layer
+### 3.1 Complete project directory tree
+
+The tree below includes every project file and source directory. It intentionally excludes dependency, generated-output, version-control, and editor/agent metadata directories: `node_modules/`, `dist/`, `graphify-out/`, `.git/`, `.codex/`, `.cursor/`, `.agents/`, `.code-review-graph/`, and `.playwright-mcp/`.
+
+```text
+OpenX/
+├── apps
+│   └── desktop
+│       ├── electron
+│       │   ├── crash-recovery.js
+│       │   ├── main.js
+│       │   └── security.js
+│       ├── renderer
+│       │   ├── alert
+│       │   │   ├── index.css
+│       │   │   ├── index.html
+│       │   │   └── index.js
+│       │   ├── chat
+│       │   │   ├── index.css
+│       │   │   ├── index.html
+│       │   │   └── index.js
+│       │   └── settings
+│       │       ├── index.css
+│       │       ├── index.html
+│       │       └── index.js
+│       ├── voice
+│       │   └── tts.js
+│       ├── permissions.js
+│       ├── preload.js
+│       └── settings.js
+├── build
+│   ├── icon.ico
+│   ├── icon.png
+│   ├── ICON_README.md
+│   └── installer.nsh
+├── core
+│   ├── assistant
+│   │   ├── active-learning
+│   │   │   ├── ActiveLearningManager.js
+│   │   │   ├── AliasStore.js
+│   │   │   ├── BaseStore.js
+│   │   │   ├── CorrectionStore.js
+│   │   │   ├── LearningGuard.js
+│   │   │   ├── LearningLanguage.js
+│   │   │   ├── PreferenceStore.js
+│   │   │   ├── UsageStatsStore.js
+│   │   │   └── WorkflowStore.js
+│   │   ├── nlp
+│   │   │   ├── nlp.js
+│   │   │   ├── preprocessor.js
+│   │   │   ├── scorer.js
+│   │   │   └── web-targets.js
+│   │   ├── Active-learning.js
+│   │   ├── contest.js
+│   │   ├── context.js
+│   │   ├── ContextLanguage.js
+│   │   ├── Data.js
+│   │   ├── entities.js
+│   │   ├── index.js
+│   │   ├── intents.js
+│   │   ├── nle.js
+│   │   ├── nlu.js
+│   │   ├── parser.js
+│   │   ├── personality.js
+│   │   ├── responses.js
+│   │   └── router.js
+│   ├── automation
+│   │   ├── common
+│   │   │   ├── action-confirm.js
+│   │   │   ├── action-velidation.js
+│   │   │   ├── action-verification.js
+│   │   │   ├── launcher.js
+│   │   │   ├── path-utils.js
+│   │   │   └── windows-session.js
+│   │   ├── apps.js
+│   │   ├── brightness.js
+│   │   ├── browser.js
+│   │   ├── communications.js
+│   │   ├── files.js
+│   │   ├── folders.js
+│   │   ├── index.js
+│   │   ├── media.js
+│   │   ├── scheduler.js
+│   │   ├── screenshot-recording.js
+│   │   ├── system.js
+│   │   ├── volume.js
+│   │   └── windows.js
+│   └── context-awareness
+│       ├── active-window.js
+│       ├── app-registry.js
+│       ├── context-engine.js
+│       ├── mode-engine.js
+│       ├── process-monitor.js
+│       └── signals.js
+├── docs
+│   ├── architecture
+│   │   └── overview.md
+│   ├── modules
+│   │   ├── assistant-communication.md
+│   │   ├── communications.md
+│   │   ├── core-engine.md
+│   │   ├── nlp-pipeline.md
+│   │   └── settings.md
+│   ├── plugins
+│   │   └── development.md
+│   ├── setup
+│   │   └── installation.md
+│   └── workflows
+│       └── command-execution.md
+├── plugins
+│   ├── chrome
+│   │   ├── index.js
+│   │   └── plugin.json
+│   ├── communications
+│   │   └── whatsapp-desktop.js
+│   ├── discord
+│   │   ├── index.js
+│   │   └── plugin.json
+│   ├── forms
+│   │   ├── index.js
+│   │   └── understanding.js
+│   ├── sample_plugin
+│   │   ├── index.js
+│   │   └── plugin.json
+│   ├── youtube
+│   │   ├── index.js
+│   │   └── plugin.json
+│   └── plugin-controller.js
+├── scripts
+│   └── start-electron.js
+├── tests
+│   ├── automation
+│   │   ├── apps.test.js
+│   │   ├── automation.test.js
+│   │   ├── browser.test.js
+│   │   ├── communications.test.js
+│   │   ├── file-management.test.js
+│   │   ├── media.test.js
+│   │   ├── volume-brightness.test.js
+│   │   └── windows-session.test.js
+│   ├── context-awareness
+│   │   ├── context-awareness.test.js
+│   │   └── mode-engine.test.js
+│   ├── core
+│   │   ├── active-learning-v2.test.js
+│   │   ├── app-language.test.js
+│   │   ├── architecture-structure.test.js
+│   │   ├── assistant.test.js
+│   │   ├── browser-language.test.js
+│   │   ├── command-corpus.test.js
+│   │   ├── crash-recovery.test.js
+│   │   ├── data-root.test.js
+│   │   ├── electron-security.test.js
+│   │   ├── entities.test.js
+│   │   ├── human-context.test.js
+│   │   ├── intents.test.js
+│   │   ├── learning.test.js
+│   │   ├── learning-repair.test.js
+│   │   ├── logger.test.js
+│   │   ├── media-youtube-corpus.test.js
+│   │   ├── nlp.test.js
+│   │   ├── nlu.test.js
+│   │   ├── parser.test.js
+│   │   ├── permissions.test.js
+│   │   ├── renderer-security.test.js
+│   │   ├── responses.test.js
+│   │   ├── router.test.js
+│   │   ├── scheduler-alert.test.js
+│   │   ├── security-critical.test.js
+│   │   └── settings.test.js
+│   ├── media-handling
+│   │   └── media-handling.test.js
+│   ├── plugins
+│   └── ui
+│       ├── chat-renderer.test.js
+│       └── schedule-alert-renderer.test.js
+├── .gitignore
+├── AGENTS.md
+├── commands.md
+├── config.js
+├── eslint.config.mjs
+├── package.json
+├── package-lock.json
+├── README.md
+├── report.md
+└── RULES.md
+```
+
+### 3.2 Assistant layer
 
 | File | Current responsibility |
 |---|---|
@@ -76,7 +264,7 @@ Input
 | `core/assistant/responses.js` | Deterministic response templates and formal address |
 | `core/assistant/Data.js` | Logger, events, normalizer, validator, IDs, atomic persistence, data-root layout, and migration |
 
-### 3.2 Context-awareness layer
+### 3.3 Context-awareness layer
 
 | File | Responsibility |
 |---|---|
@@ -87,7 +275,7 @@ Input
 | `core/context-awareness/process-monitor.js` | Running-process snapshots |
 | `core/context-awareness/signals.js` | Context signal definitions |
 
-### 3.3 Automation layer
+### 3.4 Automation layer
 
 `core/automation/index.js` owns the action registry and controller composition. Connected actions include:
 
