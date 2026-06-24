@@ -546,6 +546,11 @@ class SchedulerController {
     return item ? this.snooze(item.id, minutes) : { success: false, error: 'No active alarm found' };
   }
 
+  snoozeLatestReminder(minutes = 5) {
+    const item = this._latestSchedule('Reminder', ['scheduled', 'due']);
+    return item ? this.snooze(item.id, minutes) : { success: false, error: 'No active reminder found' };
+  }
+
   _latestSchedule(kind, statuses) {
     const normalizedKind = String(kind || '').toLowerCase();
     return this.scheduledItems

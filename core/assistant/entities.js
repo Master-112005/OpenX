@@ -813,6 +813,11 @@ class EntityExtractor {
       return normalizeClock(reminderMatch[1]);
     }
 
+    const directReminderAfterTextMatch = source.match(/^remind\s+me\s+to\s+.+?\s+at\s+(.+)$/i);
+    if (directReminderAfterTextMatch?.[1]) {
+      return normalizeClock(directReminderAfterTextMatch[1]);
+    }
+
     const relativeReminderMatch = source.match(/\bremind(?: me)?\s+(.+?)\s+to\s+.+$/i);
     if (relativeReminderMatch && relativeReminderMatch[1]) {
       const candidate = relativeReminderMatch[1]

@@ -166,6 +166,7 @@ class AutomationEngine {
       'reminder.list': (entities) => this.scheduler.listSchedules('Reminder', entities.scope || 'active'),
       'reminder.cancel': () => this.scheduler.cancelLatest('Reminder'),
       'reminder.clear': () => this.scheduler.clearSchedules('Reminder'),
+      'reminder.snooze': (entities) => this.scheduler.snoozeLatestReminder(entities.duration || 5),
       'alarm.snooze': (entities) => this.scheduler.snoozeLatestAlarm(entities.duration || 5),
       'alarm.cancel': () => this.scheduler.cancelLatest('Alarm'),
       'alarm.list': () => this.scheduler.listSchedules('Alarm'),

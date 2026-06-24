@@ -183,6 +183,19 @@ describe('Entity Extractor', function() {
     assert.equal(entities.reminderText, 'eat lunch');
   });
 
+  it('should extract reminder time when the time appears after the reminder text', function() {
+    const extractor = new EntityExtractor({});
+    const intent = {
+      entities: [
+        { name: 'timeExpression', type: 'string', required: false },
+        { name: 'reminderText', type: 'string', required: true }
+      ]
+    };
+    const entities = extractor.extract(intent, 'remind me to sleep at 12 am');
+    assert.equal(entities.timeExpression, '12 am');
+    assert.equal(entities.reminderText, 'sleep');
+  });
+
   it('should separate a date-only reminder time from missing content', function() {
     const extractor = new EntityExtractor({});
     const intent = {

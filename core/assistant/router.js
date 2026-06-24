@@ -2083,10 +2083,10 @@ class ActionRouter {
       return null;
     }
 
-    if (/\bminimize\b/.test(correctedText)) {
+    if (/\b(?:minimize|collapse|hide|shrink)\b/.test(correctedText)) {
       const intent = this.intentRegistry.get('window.minimize');
       if (intent) {
-        if (/\b(?:all|everything)\s+(?:windows?|apps?|applications?)\b|\b(?:windows?|apps?|applications?)\s+(?:all|everything)\b/.test(correctedText)) {
+        if (/\b(?:all|everything)\s+(?:windows?|apps?|applications?|folders?)\b|\b(?:windows?|apps?|applications?|folders?)\s+(?:all|everything)\b/.test(correctedText)) {
           return {
             intent,
             confidence: 1,
@@ -2102,9 +2102,16 @@ class ActionRouter {
       }
     }
 
-    if (/\b(?:maximize|fullscreen)\b/.test(correctedText)) {
+    if (/\b(?:maximize|fullscreen|expand|enlarge)\b/.test(correctedText)) {
       const intent = this.intentRegistry.get('window.maximize');
       if (intent) {
+        if (/\b(?:all|everything)\s+(?:windows?|apps?|applications?|folders?)\b|\b(?:windows?|apps?|applications?|folders?)\s+(?:all|everything)\b/.test(correctedText)) {
+          return {
+            intent,
+            confidence: 1,
+            entities: { windowName: 'all windows', allWindows: true }
+          };
+        }
         const target = this._cleanWindowTarget(preparedInput?.semanticFrame?.targetText || correctedText);
         return {
           intent,
@@ -2119,7 +2126,7 @@ class ActionRouter {
 
   _cleanWindowTarget(value) {
     return String(value || '')
-      .replace(/\b(?:minimize|maximize|fullscreen|full\s+screen|please|kindly|now)\b/gi, ' ')
+      .replace(/\b(?:minimize|maximize|collapse|expand|hide|shrink|fullscreen|full\s+screen|please|kindly|now)\b/gi, ' ')
       .replace(/^(?:the|a|an)\s+/i, '')
       .replace(/\s+/g, ' ')
       .trim();
@@ -3584,6 +3591,7 @@ const newTabMatch = input.match(
       ['timer.cancel', /^(?:stop|cancel|delete)\s+(?:the\s+|my\s+)?(?:active\s+)?timer$/],
       ['reminder.clear', /^(?:delete|clear|cancel)\s+all\s+(?:my\s+)?reminders?$/],
       ['reminder.list', /^(?:show|list|tell)\b.*\breminders?\b/],
+      ['reminder.snooze', /^snooze\s+(?:this\s+|the\s+|my\s+)?reminder(?:\s+for\s+.+)?$/],
       ['reminder.cancel', /^(?:delete|cancel|stop)\s+(?:this\s+|the\s+|my\s+)?reminder$/],
       ['alarm.clear', /^(?:delete|clear|cancel|stop)\s+all\s+(?:my\s+)?alarms?$/],
       ['alarm.snooze', /^snooze\s+(?:the\s+|my\s+)?alarm(?:\s+for\s+.+)?$/],

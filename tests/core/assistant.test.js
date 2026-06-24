@@ -273,6 +273,31 @@ describe('Assistant Confirmation Flow', function() {
     assert.deepEqual(routedInputs, ['remind me at tomorrow morning to attend class']);
   });
 
+  it('should clear pending schedule clarification when a new standalone request arrives', async function() {
+    const router = {
+      process: async input => {
+        if (input === 'what is my name') {
+          return {
+            commandId: 'memory-name',
+            success: true,
+            intent: 'assistant.memory',
+            response: 'Your name is Rakesh, sir.'
+          };
+        }
+        throw new Error(`Unexpected routed input: ${input}`);
+      }
+    };
+    const assistant = new Assistant({}, { router, automation: {}, eventBus: { publish() {} } });
+
+    const clarification = await assistant.processCommand('create reminder');
+    const unrelated = await assistant.processCommand('what is my name');
+
+    assert.equal(clarification.needsClarification, true);
+    assert.equal(unrelated.intent, 'assistant.memory');
+    assert.equal(unrelated.response, 'Your name is Rakesh, sir.');
+    assert.equal(assistant.pendingScheduleCompletion, null);
+  });
+
   it('should use the last knowledge topic for explanation follow-up commands', async function() {
     const routedInputs = [];
     const router = {

@@ -1582,7 +1582,7 @@ describe('Action Router', function() {
       ['reset the timer', 'timer.reset'], ['how much time is left', 'timer.remaining'],
       ['show active timers', 'timer.list'], ['cancel all active timers', 'timer.clear'],
       ['show all reminders', 'reminder.list'], ['delete this reminder', 'reminder.cancel'],
-      ['delete all reminders', 'reminder.clear'], ['snooze the alarm', 'alarm.snooze'],
+      ['delete all reminders', 'reminder.clear'], ['snooze this reminder for 10 minutes', 'reminder.snooze'], ['snooze the alarm', 'alarm.snooze'],
       ['show my alarms', 'alarm.list'], ['delete all alarms', 'alarm.clear']
     ]);
     for (const [command, expectedIntent] of commands) {
@@ -1645,6 +1645,22 @@ describe('Action Router', function() {
     assert.equal(result.intent, 'reminder.set');
     assert.equal(result.entities.timeExpression, '1 pm');
     assert.equal(result.entities.reminderText, 'eat lunch');
+  });
+
+  it('should route direct remind-me-to requests that include a trailing time', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...entities, dueAt: new Date().toISOString(), kind: 'Reminder' } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+    const result = await router.process('remind me to sleep at 12 am', 'chat');
+    assert.equal(result.intent, 'reminder.set');
+    assert.equal(result.entities.timeExpression, '12 am');
+    assert.equal(result.entities.reminderText, 'sleep');
   });
 
   it('should preserve reminder time when "at" is mistyped as "t"', async function() {
@@ -2120,6 +2136,7 @@ describe('Action Router', function() {
     const brightness = await router.process('keep brightness at 60', 'chat');
     const localSearch = await router.process('look inside downloads for pdfs', 'chat');
     const minimizeAll = await router.process('Minimize all windows', 'chat');
+    const collapseFolders = await router.process('Collapse all folders', 'chat');
 
     assert.equal(maximize.intent, 'window.maximize');
     assert.equal(maximize.entities.windowName, 'chrome');
@@ -2128,6 +2145,9 @@ describe('Action Router', function() {
     assert.equal(minimizeAll.intent, 'window.minimize');
     assert.equal(minimizeAll.entities.windowName, 'all windows');
     assert.equal(minimizeAll.entities.allWindows, true);
+    assert.equal(collapseFolders.intent, 'window.minimize');
+    assert.equal(collapseFolders.entities.windowName, 'all windows');
+    assert.equal(collapseFolders.entities.allWindows, true);
     assert.equal(volume.intent, 'volume.set');
     assert.equal(volume.entities.value, 35);
     assert.equal(brightness.intent, 'brightness.set');
@@ -2140,6 +2160,7 @@ describe('Action Router', function() {
       'volume.set',
       'brightness.set',
       'file.search',
+      'window.minimize',
       'window.minimize'
     ]);
   });

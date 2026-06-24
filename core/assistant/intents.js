@@ -510,6 +510,10 @@ const INTENT_DEFINITIONS = [
     action: 'reminder.clear', entities: [], description: 'Cancel all reminders'
   },
   {
+    id: 'reminder.snooze', patterns: ['snooze reminder', 'snooze this reminder'], permissionLevel: 'low',
+    action: 'reminder.snooze', entities: [{ name: 'duration', type: 'number', required: false }], description: 'Snooze the active reminder'
+  },
+  {
     id: 'alarm.snooze', patterns: ['snooze alarm', 'snooze the alarm'], permissionLevel: 'low',
     action: 'alarm.snooze', entities: [{ name: 'duration', type: 'number', required: false }], description: 'Snooze the active alarm'
   },

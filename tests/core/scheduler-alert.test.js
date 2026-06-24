@@ -83,6 +83,8 @@ describe('Scheduler Alert Delivery', function() {
     assert.equal(scheduler.listSchedules('Alarm').data.entries[0].alarmLabel, 'Lunch');
     assert.equal(scheduler.snoozeLatestAlarm().success, true);
     assert.equal(scheduler.clearSchedules('Alarm').data.count, 1);
+    scheduler.setReminder('drink water', { duration: 15 });
+    assert.equal(scheduler.snoozeLatestReminder(10).success, true);
 
     scheduler.destroy();
     fs.rmSync(dataDir, { recursive: true, force: true });

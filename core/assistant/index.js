@@ -1446,6 +1446,10 @@ class Assistant extends EventEmitter {
     }
     const durationLike = /^(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|fifteen|twenty|thirty|forty(?:\s*five)?|sixty)\s*(?:seconds?|minutes?|hours?)$/i.test(detail);
     const timeLike = /^(?:at\s+)?(?:\d{1,2}(?:(?::|\s+)\d{2})?\s*(?:am|pm)?|noon|midnight|today|tomorrow(?:\s+(?:morning|afternoon|evening|night))?|tonight|next\s+week|(?:next\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|(?:half|quarter)\s+(?:past|to)\s+\w+)$/i.test(detail);
+    if (this._looksLikeNewStandaloneRequest(normalized, pending, { timeLike, durationLike })) {
+      this.pendingScheduleCompletion = null;
+      return null;
+    }
     let completed = '';
     if (pending.intent === 'timer.set' && durationLike) {
       completed = `set timer for ${detail}`;
@@ -1476,6 +1480,17 @@ class Assistant extends EventEmitter {
     }
     this.pendingScheduleCompletion = null;
     return this.processCommand(completed, source);
+  }
+
+  _looksLikeNewStandaloneRequest(normalized, pending, options = {}) {
+    const text = String(normalized || '').trim();
+    if (!text) return false;
+    if (options.timeLike || options.durationLike) return false;
+    if (pending?.intent === 'reminder.set' && !pending?.entities?.reminderText && /^to\s+.+/i.test(text)) {
+      return false;
+    }
+
+    return /^(?:what|who|when|where|why|how|which|can|could|would|will|do|did|is|are|am|tell|show|open|close|launch|start|run|play|pause|resume|stop|set|turn|increase|decrease|create|delete|remove|move|copy|rename|search|find|look|google|remind|call|message|send|switch|focus|minimize|maximize|lock|shutdown|restart|sleep|take|capture|translate|summarize|explain|check|list|cancel|snooze|mute|unmute)\b/.test(text);
   }
 
   _resolveClarificationChoice(input, choices) {

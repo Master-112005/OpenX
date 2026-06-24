@@ -125,6 +125,8 @@ const PHRASE_REPLACEMENTS = [
   { from: /\bmake\s+(.+?)\s+(?:bigger|larger)\b/g, to: 'maximize $1' },
   { from: /\bmake\s+(.+?)\s+(?:smaller|hidden)\b/g, to: 'minimize $1' },
   { from: /\bhide\s+(.+?)\s+window\b/g, to: 'minimize $1' },
+  { from: /\bcollapse\s+all\s+folders\b/g, to: 'minimize all windows' },
+  { from: /\bexpand\s+all\s+folders\b/g, to: 'maximize all windows' },
   { from: /\bput\s+(?:the\s+)?(volume|sound|audio|brightness)\s+(?:at|to|on)\s+(\d{1,3})\b/g, to: 'set $1 to $2' },
   { from: /\bkeep\s+(?:the\s+)?(volume|sound|audio|brightness)\s+(?:at|to|on)\s+(\d{1,3})\b/g, to: 'set $1 to $2' },
   { from: /\b(volume|sound|audio|brightness)\s+(?:at|on)\s+(\d{1,3})\b/g, to: 'set $1 to $2' },

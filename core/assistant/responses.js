@@ -766,6 +766,7 @@ const RESPONSE_BUILDERS = {
     },
     'reminder.cancel': () => 'Cancelled the latest reminder.',
     'reminder.clear': context => `Cancelled ${valueFromContext(context, 'count', 0)} reminder${valueFromContext(context, 'count', 0) === 1 ? '' : 's'}.`,
+    'reminder.snooze': () => 'Snoozed the reminder.',
     'alarm.snooze': () => 'Snoozed the alarm.',
     'alarm.cancel': () => 'Stopped the active alarm.',
     'alarm.list': context => {
