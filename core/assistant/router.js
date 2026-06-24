@@ -127,7 +127,7 @@ class ActionRouter {
         { allowGeneric: true }
       );
       if (capability) {
-        return this._completeIntent(commandId, capability, rawCommandText, source, preparedInput);
+        return this._completeIntent(commandId, capability, rawCommandText, source, preparedInput, options);
       }
       return {
         commandId,
@@ -151,7 +151,7 @@ class ActionRouter {
     if (options.allowMulti !== false && !commandLooksLikeCapability && !commandLooksLikeLearningRepair) {
       const multiPlan = this._buildMultiCommandPlan(rawCommandText, source);
       if (multiPlan) {
-        return this._executeMultiCommand(commandId, multiPlan, source);
+        return this._executeMultiCommand(commandId, multiPlan, source, options);
       }
     }
 
@@ -209,7 +209,7 @@ class ActionRouter {
       this.logger.warn(`Low confidence intent ${intentResult.intent?.id} at ${intentResult.confidence}, proceeding anyway`);
     }
 
-    return this._completeIntent(commandId, intentResult, rawCommandText, source, preparedInput);
+    return this._completeIntent(commandId, intentResult, rawCommandText, source, preparedInput, options);
   }
 
   _resolveIntent(rawCommandText, preparedInput, source) {
@@ -994,7 +994,7 @@ class ActionRouter {
     ].includes(action);
   }
 
-  async _completeIntent(commandId, intentResult, rawCommandText, source, preparedInput = null) {
+  async _completeIntent(commandId, intentResult, rawCommandText, source, preparedInput = null, options = {}) {
     let entities = intentResult.entities || this.entityExtractor.extract(
       intentResult.intent,
       rawCommandText
@@ -1025,7 +1025,7 @@ class ActionRouter {
       });
       const capability = this._resolveCapabilityCommandIntent(rawCommandText, preparedInput, { allowGeneric: false });
       if (capability) {
-        return this._completeIntent(commandId, capability, rawCommandText, source, preparedInput);
+        return this._completeIntent(commandId, capability, rawCommandText, source, preparedInput, options);
       }
 
       return {
@@ -1041,6 +1041,26 @@ class ActionRouter {
         entities,
         needsClarification: true,
         validation: actionValidation,
+        languageUnderstanding
+      };
+    }
+
+    const externalPermissionCheck = this._validateExternalPermission(
+      options.permissionGuard,
+      intentResult.intent,
+      entities
+    );
+    if (!externalPermissionCheck.allowed) {
+      return {
+        commandId,
+        success: false,
+        error: 'Permission denied',
+        response: externalPermissionCheck.response || this._buildResponse('error', 'permissionDenied'),
+        intent: intentResult.intent.id,
+        confidence: intentResult.confidence,
+        entities,
+        requiresConfirmation: false,
+        permissionLevel: intentResult.intent.permissionLevel,
         languageUnderstanding
       };
     }
@@ -1260,11 +1280,14 @@ class ActionRouter {
     return /^(?:go\s+ahead|please|kindly|ok|okay|sure|can\s+you|could\s+you|would\s+you)$/i.test(String(clause || '').trim());
   }
 
-  async _executeMultiCommand(commandId, clauses, source) {
+  async _executeMultiCommand(commandId, clauses, source, options = {}) {
     const steps = [];
 
     for (const clause of clauses) {
-      const result = await this.process(clause, source, { allowMulti: false });
+      const result = await this.process(clause, source, {
+        allowMulti: false,
+        permissionGuard: options.permissionGuard
+      });
       steps.push({
         commandId: result.commandId || null,
         input: clause,
@@ -1384,6 +1407,25 @@ class ActionRouter {
       this.logger.warn(`Command verification warnings for ${commandId}:`, verification.warnings);
     }
 
+    const externalPermissionCheck = this._validateExternalPermission(
+      options.permissionGuard,
+      intent,
+      entities
+    );
+    if (!externalPermissionCheck.allowed) {
+      return {
+        commandId,
+        success: false,
+        error: 'Permission denied',
+        response: externalPermissionCheck.response || this._buildResponse('error', 'permissionDenied'),
+        intent: intent.id,
+        confidence: 1,
+        entities,
+        requiresConfirmation: false,
+        permissionLevel: intent.permissionLevel
+      };
+    }
+
     const permissionCheck = this.permissionValidator.validate(intent, entities, options.source || 'confirmation');
     if (!permissionCheck.allowed) {
       return {
@@ -1400,6 +1442,17 @@ class ActionRouter {
     }
 
     return this._execute(commandId, { intent, confidence: 1.0 }, entities, '', options.source || 'confirmation');
+  }
+
+  _validateExternalPermission(permissionGuard, intent, entities) {
+    if (typeof permissionGuard !== 'function') return { allowed: true };
+    try {
+      const result = permissionGuard(intent, entities);
+      return result?.allowed === false ? result : { allowed: true };
+    } catch (error) {
+      this.logger.warn('External permission guard failed', { error: error.message, intent: intent?.id });
+      return { allowed: false, response: 'Permission denied.' };
+    }
   }
 
   async _execute(commandId, intentResult, entities, rawCommandText = '', source = 'chat', languageUnderstanding = null) {

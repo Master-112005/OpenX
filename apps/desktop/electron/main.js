@@ -12,10 +12,13 @@ const { ensureDataRoot, migrateLegacyData } = require('../../../core/assistant/D
 const CrashRecoveryPolicy = require('./crash-recovery');
 const {
   DeviceRegistry,
+  FileTransferManager,
   IdentityVerificationService,
   PairingService,
   PhoneCommandRouter,
-  PhoneServer
+  PhoneServer,
+  QRPairingService,
+  TransferHistory
 } = require('../../../core/phone');
 const WindowsIdentityVerifier = require('../phone-verification');
 const {
@@ -107,6 +110,8 @@ let fatalErrorHandling = false;
 let signalHandling = false;
 let stableRuntimeHandle = null;
 let phoneServer = null;
+let qrPairingService = null;
+let phoneDeviceRegistry = null;
 const rendererCrashHistory = new Map();
 const recoveryTimeouts = new Set();
 const unresponsiveTimeouts = new Map();
@@ -120,7 +125,11 @@ const IPC_CHANNELS = [
   'window:openSettings',
   'config:get',
   'settings:get',
-  'phone:pairingToken:create',
+  'phone:pairingQR:create',
+  'phone:devices:list',
+  'phone:device:permissions:update',
+  'phone:device:remove',
+  'phone:device:disconnect',
   'settings:save',
   'settings:reset',
   'schedule:alertAction',
@@ -445,11 +454,31 @@ function setupIPC() {
     return settingsService.getSnapshot();
   });
 
-  registerIpcHandler('phone:pairingToken:create', async () => {
-    if (!phoneServer?.pairingService) {
+  registerIpcHandler('phone:pairingQR:create', async () => {
+    if (!qrPairingService) {
       return { success: false, message: 'Phone service unavailable.' };
     }
-    return phoneServer.pairingService.createPairingToken();
+    return qrPairingService.generatePairingQR();
+  });
+
+  registerIpcHandler('phone:devices:list', async () => {
+    return phoneDeviceRegistry?.listDevices() || [];
+  });
+
+  registerIpcHandler('phone:device:permissions:update', async (_event, { deviceId, permissions }) => {
+    const updated = phoneDeviceRegistry?.updatePermissions(deviceId, permissions);
+    if (!updated) throw new Error('Device not found');
+    return phoneDeviceRegistry.getDevice(deviceId);
+  });
+
+  registerIpcHandler('phone:device:disconnect', async (_event, { deviceId }) => {
+    return { success: true, disconnected: phoneServer?.disconnectDevice(deviceId) || 0 };
+  });
+
+  registerIpcHandler('phone:device:remove', async (_event, { deviceId }) => {
+    phoneServer?.disconnectDevice(deviceId);
+    phoneServer?.revokeDeviceSession(deviceId);
+    return { success: phoneDeviceRegistry?.removeDevice(deviceId) === true };
   });
 
   registerIpcHandler('settings:save', async (_event, payload) => {
@@ -562,6 +591,10 @@ async function cleanupRuntime() {
     globalShortcut.unregisterAll();
     childProcessRegistry.killAll();
     teardownIPC();
+    if (qrPairingService) {
+      qrPairingService.destroy();
+      qrPairingService = null;
+    }
     if (phoneServer) {
       try {
         await phoneServer.stop();
@@ -571,6 +604,7 @@ async function cleanupRuntime() {
         phoneServer = null;
       }
     }
+    phoneDeviceRegistry = null;
     destroyTextToSpeech();
     await destroyAssistantInstance();
     eventBus?.removeAllListeners?.();
@@ -657,8 +691,10 @@ async function initializeAssistant() {
 async function initializePhoneServer() {
   const commandRouter = new PhoneCommandRouter(() => assistant);
   const deviceRegistry = new DeviceRegistry({
-    filePath: runtimeConfig.app.dataPaths.phoneDevicesPath
+    filePath: runtimeConfig.app.dataPaths.phoneDevicesPath,
+    logger: mainLogger
   });
+  phoneDeviceRegistry = deviceRegistry;
   const identityVerificationService = new IdentityVerificationService({
     verifier: new WindowsIdentityVerifier(),
     logger: mainLogger
@@ -670,11 +706,27 @@ async function initializePhoneServer() {
     permissionsPath: runtimeConfig.app.dataPaths.phonePermissionsPath,
     logger: mainLogger
   });
+  const transferHistory = new TransferHistory({
+    filePath: runtimeConfig.app.dataPaths.phoneTransferHistoryPath
+  });
+  const fileTransferManager = new FileTransferManager({
+    deviceRegistry,
+    history: transferHistory,
+    receiveDirectory: path.join(app.getPath('downloads'), 'OpenX_Received'),
+    logger: mainLogger,
+    sendToDevice: (deviceId, payload) => phoneServer?.sendToDevice(deviceId, payload) === true
+  });
+  qrPairingService = new QRPairingService({
+    pairingService,
+    serverPort: runtimeConfig?.phone?.port,
+    logger: mainLogger
+  });
   phoneServer = new PhoneServer({
     host: runtimeConfig?.phone?.host,
     port: runtimeConfig?.phone?.port,
     commandRouter,
     pairingService,
+    fileTransferManager,
     logger: mainLogger
   });
   await phoneServer.start();

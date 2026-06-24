@@ -91,6 +91,7 @@ describe('Phone communication', function() {
     });
     const pairingService = createPairingService(tempDir);
     pairingService.deviceRegistry.registerDevice('phone001', 'Test Phone');
+    const session = pairingService.sessionManager.createSession('phone001');
     server = new PhoneServer({ port: 0, commandRouter: router, pairingService, logger: createLogger() });
     const address = await server.start();
 
@@ -100,14 +101,25 @@ describe('Phone communication', function() {
     assert.deepEqual(await statusPromise, { type: 'status', status: 'connected' });
 
     const responsePromise = nextJson(socket);
-    socket.send(JSON.stringify({ type: 'command', message: 'Open Chrome', timestamp: 123456789 }));
+    const timestamp = Date.now();
+    socket.send(JSON.stringify({
+      type: 'command',
+      deviceId: 'phone001',
+      sessionToken: session.sessionToken,
+      requestId: 'command-1',
+      message: 'Open Chrome',
+      timestamp
+    }));
     assert.deepEqual(await responsePromise, {
       type: 'response',
       success: true,
       message: 'Chrome launched successfully',
-      timestamp: 123456789
+      timestamp
     });
-    assert.deepEqual(calls, [['Open Chrome', 'phone']]);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0][0], 'Open Chrome');
+    assert.equal(calls[0][1], 'phone');
+    assert.equal(typeof calls[0][2].permissionGuard, 'function');
     assert.equal(server.clients.size, 1);
     assert.equal([...server.clients.values()][0].deviceName, 'Test Phone');
   });
@@ -150,6 +162,7 @@ describe('Phone communication', function() {
     });
     const pairingService = createPairingService(tempDir);
     pairingService.deviceRegistry.registerDevice('phone001', 'Test Phone');
+    const session = pairingService.sessionManager.createSession('phone001');
     server = new PhoneServer({ port: 0, commandRouter: router, pairingService, logger: createLogger() });
     const address = await server.start();
     socket = new WebSocket(`ws://127.0.0.1:${address.port}?deviceId=phone001`);
@@ -158,7 +171,14 @@ describe('Phone communication', function() {
     await statusPromise;
 
     const errorPromise = nextJson(socket);
-    socket.send(JSON.stringify({ type: 'command', message: 'Open Chrome' }));
+    socket.send(JSON.stringify({
+      type: 'command',
+      deviceId: 'phone001',
+      sessionToken: session.sessionToken,
+      requestId: 'command-failure',
+      timestamp: Date.now(),
+      message: 'Open Chrome'
+    }));
     assert.deepEqual(await errorPromise, { type: 'error', message: 'Unable to execute command' });
   });
 

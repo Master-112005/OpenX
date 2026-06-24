@@ -1,11 +1,16 @@
 const { buildDataPaths, readJsonFile } = require('../assistant/Data');
 const DeviceRegistry = require('./DeviceRegistry');
 const PairingTokenManager = require('./PairingTokenManager');
+const SessionManager = require('./SessionManager');
 
 class PairingService {
   constructor(options = {}) {
     const paths = buildDataPaths(options.config);
     this.tokenManager = options.tokenManager || new PairingTokenManager();
+    this.sessionManager = options.sessionManager || new SessionManager({
+      now: options.now || this.tokenManager.now,
+      logger: options.logger
+    });
     this.deviceRegistry = options.deviceRegistry || new DeviceRegistry({
       filePath: options.devicesPath || paths.phoneDevicesPath
     });
@@ -59,7 +64,8 @@ class PairingService {
         deviceName: validation.deviceName
       });
       this.tokenManager.invalidateToken(validation.token);
-      return { valid: true, device };
+      const session = this.sessionManager.createSession(device.deviceId);
+      return { valid: true, device, session };
     } catch (error) {
       return { valid: false, reason: 'invalid-device', error: error.message };
     }
@@ -67,6 +73,7 @@ class PairingService {
 
   destroy() {
     this.tokenManager.destroy?.();
+    this.sessionManager.destroy?.();
   }
 }
 

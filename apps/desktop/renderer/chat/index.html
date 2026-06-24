@@ -315,10 +315,21 @@
                 <strong>Desktop identity verification</strong>
                 <span id="phone-pairing-status">Generate a code when your phone is ready to pair.</span>
               </div>
-              <button class="primary-btn" id="phone-generate-token-btn" type="button">Generate Pairing Token</button>
+              <button class="primary-btn" id="phone-generate-token-btn" type="button">Generate Pairing QR</button>
+              <div class="phone-pairing-qr-wrap">
+                <img id="phone-pairing-qr" alt="OpenX phone pairing QR code" hidden>
+              </div>
               <output class="phone-pairing-token" id="phone-pairing-token" aria-live="polite">--------</output>
               <div class="section-note" id="phone-pairing-expiry"></div>
+              <div class="phone-pairing-countdown" id="phone-pairing-countdown" aria-live="polite"></div>
             </div>
+            <div class="phone-devices-heading">
+              <div>
+                <strong>Connected Devices</strong>
+                <div class="section-note">Manage what each trusted phone can do.</div>
+              </div>
+            </div>
+            <div class="phone-device-list" id="phone-device-list"></div>
           </section>
 
           <section class="settings-section" data-settings-section="modes" id="settings-section-modes">

@@ -3,6 +3,9 @@ const { fileURLToPath } = require('url');
 
 const FORBIDDEN_OBJECT_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 const ALLOWED_COMMAND_SOURCES = new Set(['chat', 'voice']);
+const PHONE_PERMISSION_NAMES = new Set([
+  'remoteCommands', 'fileTransfer', 'receiveFiles', 'sendFiles', 'powerActions'
+]);
 
 function isPlainObject(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -108,6 +111,28 @@ function validateScheduleAction(payload) {
   return { id, action, minutes };
 }
 
+function validatePhoneDevice(payload) {
+  requirePlainObject(payload);
+  const deviceId = requireString(payload.deviceId, 'deviceId', { maxLength: 128 });
+  if (!/^[A-Za-z0-9._-]+$/.test(deviceId)) throw new TypeError('deviceId is invalid');
+  return { deviceId };
+}
+
+function validatePhonePermissions(payload) {
+  const { deviceId } = validatePhoneDevice(payload);
+  const permissions = requirePlainObject(payload.permissions, 'permissions');
+  const entries = Object.entries(permissions);
+  if (entries.length === 0) throw new TypeError('permissions must not be empty');
+  const normalized = {};
+  for (const [name, value] of entries) {
+    if (!PHONE_PERMISSION_NAMES.has(name) || typeof value !== 'boolean') {
+      throw new TypeError('permissions are invalid');
+    }
+    normalized[name] = value;
+  }
+  return { deviceId, permissions: normalized };
+}
+
 function validateEmpty(payload) {
   if (payload !== undefined) throw new TypeError('This channel does not accept a payload');
   return undefined;
@@ -123,7 +148,11 @@ const IPC_VALIDATORS = Object.freeze({
   'window:openSettings': validateEmpty,
   'config:get': validateEmpty,
   'settings:get': validateEmpty,
-  'phone:pairingToken:create': validateEmpty,
+  'phone:pairingQR:create': validateEmpty,
+  'phone:devices:list': validateEmpty,
+  'phone:device:permissions:update': validatePhonePermissions,
+  'phone:device:remove': validatePhoneDevice,
+  'phone:device:disconnect': validatePhoneDevice,
   'settings:save': validateSettings,
   'settings:reset': validateEmpty,
   'schedule:alertAction': validateScheduleAction,

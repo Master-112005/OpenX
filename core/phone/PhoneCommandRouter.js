@@ -7,7 +7,7 @@ class PhoneCommandRouter {
     }
   }
 
-  async route(command) {
+  async route(command, options = {}) {
     if (typeof command !== 'string' || command.trim().length === 0) {
       throw new Error('Command must be a non-empty string');
     }
@@ -17,6 +17,11 @@ class PhoneCommandRouter {
       throw new Error('Assistant not initialized');
     }
 
+    if (typeof options.permissionGuard === 'function') {
+      return assistant.processCommand(command.trim(), 'phone', {
+        permissionGuard: options.permissionGuard
+      });
+    }
     return assistant.processCommand(command.trim(), 'phone');
   }
 }

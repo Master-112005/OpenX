@@ -46,7 +46,8 @@ function buildDataPaths(config = {}) {
     phoneDir,
     phoneDevicesPath: path.join(phoneDir, 'devices.json'),
     phonePairingPath: path.join(phoneDir, 'pairing.json'),
-    phonePermissionsPath: path.join(phoneDir, 'permissions.json')
+    phonePermissionsPath: path.join(phoneDir, 'permissions.json'),
+    phoneTransferHistoryPath: path.join(phoneDir, 'transfer-history.json')
   };
 }
 

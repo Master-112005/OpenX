@@ -111,7 +111,13 @@ describe('Phone device pairing', function() {
     const address = await createServer();
     const socket = await connect(address, 'unpaired-phone');
     const responsePromise = nextJson(socket);
-    socket.send(JSON.stringify({ type: 'command', message: 'Open Chrome' }));
+    socket.send(JSON.stringify({
+      type: 'command',
+      deviceId: 'unpaired-phone',
+      requestId: 'unpaired-command',
+      timestamp: now,
+      message: 'Open Chrome'
+    }));
 
     assert.deepEqual(await responsePromise, { type: 'error', message: 'Device not paired' });
     assert.equal(commandCount, 0);
@@ -129,18 +135,28 @@ describe('Phone device pairing', function() {
       deviceName: 'Galaxy S25',
       token: generated.token
     }));
-    assert.deepEqual(await responsePromise, { type: 'pair-success' });
+    const paired = await responsePromise;
+    assert.equal(paired.type, 'pair-success');
+    assert.equal(typeof paired.sessionToken, 'string');
     assert.equal(registry.isTrusted('phone001'), true);
     assert.equal(tokenManager.validateToken(generated.token), false);
 
     responsePromise = nextJson(socket);
-    socket.send(JSON.stringify({ type: 'command', message: 'Open Chrome' }));
+    socket.send(JSON.stringify({
+      type: 'command',
+      deviceId: 'phone001',
+      sessionToken: paired.sessionToken,
+      requestId: 'paired-command',
+      timestamp: now,
+      message: 'Open Chrome'
+    }));
     assert.equal((await responsePromise).type, 'response');
     assert.equal(commandCount, 1);
   });
 
   it('preserves device trust when the phone reconnects', async function() {
     registry.registerDevice('phone001', 'Galaxy S25');
+    const session = pairingService.sessionManager.createSession('phone001');
     const address = await createServer();
     let socket = await connect(address, 'phone001');
     socket.close();
@@ -149,7 +165,14 @@ describe('Phone device pairing', function() {
     now = 2000;
     socket = await connect(address, 'phone001');
     const responsePromise = nextJson(socket);
-    socket.send(JSON.stringify({ type: 'command', message: 'Open Chrome' }));
+    socket.send(JSON.stringify({
+      type: 'command',
+      deviceId: 'phone001',
+      sessionToken: session.sessionToken,
+      requestId: 'reconnect-command',
+      timestamp: now,
+      message: 'Open Chrome'
+    }));
 
     assert.equal((await responsePromise).type, 'response');
     assert.equal(commandCount, 1);

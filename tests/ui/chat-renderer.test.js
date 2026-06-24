@@ -76,9 +76,28 @@ describe('Chat Renderer UI', function() {
   it('should expose identity-protected phone pairing controls', function() {
     assert.match(html, /data-section-target="phone"/);
     assert.match(html, /id="phone-generate-token-btn"/);
+    assert.match(html, /id="phone-pairing-qr"/);
     assert.match(html, /id="phone-pairing-token"/);
-    assert.match(script, /window\.jarvis\.generatePairingToken\(\)/);
+    assert.match(script, /window\.jarvis\.generatePairingQR\(\)/);
     assert.match(script, /Identity verification required\./);
+    assert.match(script, /Generate New QR/);
+    assert.match(script, /function formatPairingCountdown\(/);
+    assert.match(script, /Expires in \$\{formatPairingCountdown\(remaining\)\}/);
+    assert.match(script, /setInterval\(update, 1000\)/);
+    assert.match(script, /Pairing code expired\./);
+  });
+
+  it('should manage trusted device permissions and device actions', function() {
+    assert.match(html, /id="phone-device-list"/);
+    assert.match(script, /Remote Commands/);
+    assert.match(script, /File Transfer/);
+    assert.match(script, /Receive Files/);
+    assert.match(script, /Send Files/);
+    assert.match(script, /Power Actions/);
+    assert.match(script, /Save Permissions/);
+    assert.match(script, /Remove Device/);
+    assert.match(script, /Disconnect Device/);
+    assert.match(script, /updatePhonePermissions/);
   });
 
   it('should bound long-session rendering and coalesce glass tint updates', function() {

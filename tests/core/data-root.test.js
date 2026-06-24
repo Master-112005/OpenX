@@ -23,6 +23,7 @@ describe('Assistant Data Root', function() {
     assert.equal(paths.phoneDevicesPath, path.join(paths.phoneDir, 'devices.json'));
     assert.equal(paths.phonePairingPath, path.join(paths.phoneDir, 'pairing.json'));
     assert.equal(paths.phonePermissionsPath, path.join(paths.phoneDir, 'permissions.json'));
+    assert.equal(paths.phoneTransferHistoryPath, path.join(paths.phoneDir, 'transfer-history.json'));
   });
 
   it('should keep managed paths under a configured data root', function() {

@@ -1,11 +1,20 @@
 const { URL } = require('url');
 const { WebSocket, WebSocketServer } = require('ws');
 const PhoneConnectionManager = require('./PhoneConnectionManager');
+const FileTransferProtocol = require('./FileTransferProtocol');
+const SecurityManager = require('./SecurityManager');
 
 const DEFAULT_HOST = '0.0.0.0';
 const DEFAULT_PORT = 8080;
 const MAX_COMMAND_LENGTH = 5000;
-const MAX_PAYLOAD_BYTES = 64 * 1024;
+const MAX_PAYLOAD_BYTES = FileTransferProtocol.MAX_WEBSOCKET_PAYLOAD_BYTES;
+const POWER_ACTION_IDS = new Set([
+  'system.shutdown',
+  'system.restart',
+  'system.sleep',
+  'system.logoff',
+  'system.lock'
+]);
 
 class PhoneServer {
   constructor(options = {}) {
@@ -20,7 +29,15 @@ class PhoneServer {
     this.port = options.port ?? DEFAULT_PORT;
     this.commandRouter = options.commandRouter;
     this.pairingService = options.pairingService;
+    this.fileTransferManager = options.fileTransferManager || null;
     this.logger = options.logger || console;
+    this.sessionManager = options.sessionManager || this.pairingService.sessionManager;
+    this.securityManager = options.securityManager || new SecurityManager({
+      deviceRegistry: this.pairingService.deviceRegistry,
+      sessionManager: this.sessionManager,
+      now: options.now || this.sessionManager.now,
+      logger: this.logger
+    });
     this.connectionManager = options.connectionManager || new PhoneConnectionManager();
     this.clients = this.connectionManager.clients;
     this.server = null;
@@ -121,6 +138,28 @@ class PhoneServer {
     return true;
   }
 
+  sendToDevice(deviceId, payload) {
+    for (const [clientId, client] of this.clients) {
+      if (client.deviceId === deviceId && this.sendToClient(clientId, payload)) return true;
+    }
+    return false;
+  }
+
+  disconnectDevice(deviceId) {
+    let disconnected = 0;
+    for (const client of this.clients.values()) {
+      if (client.deviceId !== deviceId) continue;
+      disconnected += 1;
+      client.socket.close(1008, 'Device disconnected by desktop');
+    }
+    return disconnected;
+  }
+
+  revokeDeviceSession(deviceId) {
+    this.securityManager.clearDevice(deviceId);
+    return this.sessionManager.revokeSession(deviceId);
+  }
+
   _handleConnection(socket, request) {
     const metadata = this._readClientMetadata(request);
     const clientId = this.connectionManager.add(socket, metadata);
@@ -159,6 +198,11 @@ class PhoneServer {
       return;
     }
 
+    if (payload?.type === 'file-transfer') {
+      await this._handleFileTransfer(clientId, payload);
+      return;
+    }
+
     if (
       !payload ||
       payload.type !== 'command' ||
@@ -171,10 +215,13 @@ class PhoneServer {
     }
 
     const client = this.connectionManager.get(clientId);
-    const deviceId = this._resolveDeviceId(client, payload);
+    const authentication = this._authenticateRequest(clientId, client, payload);
+    if (!authentication) return;
+    const deviceId = authentication.deviceId;
     const registry = this.pairingService.deviceRegistry;
-    if (!deviceId || !registry.isTrusted(deviceId)) {
-      this.sendToClient(clientId, { type: 'error', message: 'Device not paired' });
+    if (!registry.hasPermission(deviceId, 'remoteCommands')) {
+      this.logger.info('[PHONE] Permission denied', { deviceId, permission: 'remoteCommands' });
+      this.sendToClient(clientId, { type: 'error', message: 'Remote commands disabled.' });
       return;
     }
 
@@ -182,7 +229,9 @@ class PhoneServer {
     this.connectionManager.setDevice(clientId, device);
     registry.updateLastSeen(deviceId);
 
-    const result = await this.commandRouter.route(payload.message);
+    const result = await this.commandRouter.route(payload.message, {
+      permissionGuard: this._createPermissionGuard(deviceId)
+    });
     const message = result?.response || result?.message || 'Command completed';
     this.sendToClient(clientId, {
       type: 'response',
@@ -206,13 +255,71 @@ class PhoneServer {
       deviceId: result.device.deviceId,
       deviceName: result.device.deviceName
     });
-    this.sendToClient(clientId, { type: 'pair-success' });
+    this.sendToClient(clientId, {
+      type: 'pair-success',
+      sessionToken: result.session.sessionToken,
+      issuedAt: result.session.issuedAt,
+      expiresAt: result.session.expiresAt
+    });
+  }
+
+  async _handleFileTransfer(clientId, payload) {
+    const client = this.connectionManager.get(clientId);
+    const authentication = this._authenticateRequest(clientId, client, payload);
+    if (!authentication) return;
+    const deviceId = authentication.deviceId;
+    if (!this.fileTransferManager) {
+      this.sendToClient(clientId, { type: 'error', message: 'File transfer unavailable' });
+      return;
+    }
+
+    try {
+      await this.fileTransferManager.receiveFile({ ...payload, deviceId });
+      const device = this.pairingService.deviceRegistry.getDevice(deviceId);
+      if (device) this.connectionManager.setDevice(clientId, device);
+      this.sendToClient(clientId, { type: 'file-transfer-success' });
+    } catch (error) {
+      this.sendToClient(clientId, {
+        type: 'error',
+        message: error.publicMessage || 'File transfer failed'
+      });
+    }
   }
 
   _resolveDeviceId(client, payload) {
     const payloadDeviceId = typeof payload.deviceId === 'string' ? payload.deviceId.trim() : '';
     if (client?.deviceId && payloadDeviceId && client.deviceId !== payloadDeviceId) return '';
     return client?.deviceId || payloadDeviceId;
+  }
+
+  _authenticateRequest(clientId, client, payload) {
+    const deviceId = this._resolveDeviceId(client, payload);
+    if (!deviceId || deviceId !== payload.deviceId) {
+      this.logger.warn('[PHONE] Authentication failure', {
+        deviceId: payload?.deviceId || null,
+        reason: 'device-mismatch'
+      });
+      this.sendToClient(clientId, { type: 'error', message: 'Authentication failed.' });
+      return null;
+    }
+    const result = this.securityManager.validateConnection(payload);
+    if (!result.valid) {
+      this.sendToClient(clientId, { type: 'error', message: result.message });
+      return null;
+    }
+    return result;
+  }
+
+  _createPermissionGuard(deviceId) {
+    return intent => {
+      const intentId = String(intent?.id || intent?.action || '').toLowerCase();
+      if (!POWER_ACTION_IDS.has(intentId)) return { allowed: true };
+      if (this.pairingService.deviceRegistry.hasPermission(deviceId, 'powerActions')) {
+        return { allowed: true };
+      }
+      this.logger.info('[PHONE] Permission denied', { deviceId, permission: 'powerActions', intent: intentId });
+      return { allowed: false, response: 'Power actions disabled.' };
+    };
   }
 
   _readClientMetadata(request) {

@@ -28,8 +28,20 @@ contextBridge.exposeInMainWorld('jarvis', {
   getSettings: () =>
     ipcRenderer.invoke('settings:get'),
 
-  generatePairingToken: () =>
-    ipcRenderer.invoke('phone:pairingToken:create'),
+  generatePairingQR: () =>
+    ipcRenderer.invoke('phone:pairingQR:create'),
+
+  getPhoneDevices: () =>
+    ipcRenderer.invoke('phone:devices:list'),
+
+  updatePhonePermissions: (deviceId, permissions) =>
+    ipcRenderer.invoke('phone:device:permissions:update', { deviceId, permissions }),
+
+  removePhoneDevice: (deviceId) =>
+    ipcRenderer.invoke('phone:device:remove', { deviceId }),
+
+  disconnectPhoneDevice: (deviceId) =>
+    ipcRenderer.invoke('phone:device:disconnect', { deviceId }),
 
   saveSettings: (settings) =>
     ipcRenderer.invoke('settings:save', settings),

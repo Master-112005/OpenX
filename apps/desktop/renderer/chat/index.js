@@ -19,6 +19,9 @@ const phoneGenerateTokenBtn = document.getElementById('phone-generate-token-btn'
 const phonePairingTokenEl = document.getElementById('phone-pairing-token');
 const phonePairingStatusEl = document.getElementById('phone-pairing-status');
 const phonePairingExpiryEl = document.getElementById('phone-pairing-expiry');
+const phonePairingQrEl = document.getElementById('phone-pairing-qr');
+const phonePairingCountdownEl = document.getElementById('phone-pairing-countdown');
+const phoneDeviceListEl = document.getElementById('phone-device-list');
 const chatViewBtn = document.getElementById('chat-view-btn');
 const activityViewBtn = document.getElementById('activity-view-btn');
 const conversationView = document.getElementById('conversation-view');
@@ -59,6 +62,14 @@ let activeAlarmId = null;
 let isAssistantMuted = localStorage.getItem(ASSISTANT_MUTED_STORAGE_KEY) === 'true';
 let glassTintAnimationFrame = null;
 let pendingGlassTintValue = 42;
+let phonePairingCountdownHandle = null;
+const PHONE_PERMISSIONS = [
+  ['remoteCommands', 'Remote Commands'],
+  ['fileTransfer', 'File Transfer'],
+  ['receiveFiles', 'Receive Files'],
+  ['sendFiles', 'Send Files'],
+  ['powerActions', 'Power Actions']
+];
 const scheduleTimers = new Map();
 
 const fieldIds = {
@@ -1227,6 +1238,7 @@ function openSettingsPanel() {
   setActiveSettingsSection(activeSettingsSection || 'identity');
   settingsOverlay.classList.add('open');
   setSettingsStatus('Settings are stored locally on this machine.', 'info');
+  loadPhoneDevices();
 }
 
 function closeSettingsPanel() {
@@ -1273,24 +1285,167 @@ async function resetSettings() {
   }
 }
 
-async function generatePairingToken() {
+function formatPairingCountdown(milliseconds) {
+  const totalSeconds = Math.max(0, Math.ceil(milliseconds / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = String(totalSeconds % 60).padStart(2, '0');
+  return `${minutes}:${seconds}`;
+}
+
+function stopPairingCountdown() {
+  if (phonePairingCountdownHandle) clearInterval(phonePairingCountdownHandle);
+  phonePairingCountdownHandle = null;
+}
+
+function startPairingCountdown(expiresAt) {
+  stopPairingCountdown();
+  const update = () => {
+    const remaining = expiresAt - Date.now();
+    if (remaining <= 0) {
+      stopPairingCountdown();
+      phonePairingStatusEl.textContent = 'Pairing code expired.';
+      phonePairingCountdownEl.textContent = 'Expired';
+      phonePairingQrEl.classList.add('expired');
+      phoneGenerateTokenBtn.textContent = 'Generate New QR';
+      return;
+    }
+    phonePairingCountdownEl.textContent = `Expires in ${formatPairingCountdown(remaining)}`;
+  };
+  update();
+  phonePairingCountdownHandle = setInterval(update, 1000);
+}
+
+async function generatePairingQR() {
+  stopPairingCountdown();
   phoneGenerateTokenBtn.disabled = true;
   phonePairingTokenEl.textContent = '--------';
   phonePairingExpiryEl.textContent = '';
+  phonePairingCountdownEl.textContent = '';
+  phonePairingQrEl.hidden = true;
+  phonePairingQrEl.removeAttribute('src');
+  phonePairingQrEl.classList.remove('expired');
   phonePairingStatusEl.textContent = 'Waiting for Windows identity verification...';
   try {
-    const result = await window.jarvis.generatePairingToken();
+    const result = await window.jarvis.generatePairingQR();
     if (result?.success !== true) {
       phonePairingStatusEl.textContent = result?.message || 'Identity verification required.';
       return;
     }
-    phonePairingTokenEl.textContent = result.token;
-    phonePairingStatusEl.textContent = 'Identity verified. Enter this code on your phone.';
-    phonePairingExpiryEl.textContent = `Expires at ${new Date(result.expiresAt).toLocaleTimeString()}.`;
+    phonePairingQrEl.src = result.qrDataUrl;
+    phonePairingQrEl.hidden = false;
+    phonePairingTokenEl.textContent = result.payload.pairingToken;
+    phonePairingStatusEl.textContent = 'Identity verified. Scan this QR code with your phone.';
+    phonePairingExpiryEl.textContent = `Expires at ${new Date(result.payload.expiresAt).toLocaleTimeString()}.`;
+    phoneGenerateTokenBtn.textContent = 'Generate New QR';
+    startPairingCountdown(result.payload.expiresAt);
   } catch (_) {
-    phonePairingStatusEl.textContent = 'Identity verification required.';
+    phonePairingStatusEl.textContent = 'Unable to generate pairing QR.';
   } finally {
     phoneGenerateTokenBtn.disabled = false;
+  }
+}
+
+function formatDeviceDate(timestamp) {
+  const value = Number(timestamp);
+  return Number.isFinite(value) ? new Date(value).toLocaleString() : 'Unknown';
+}
+
+function renderPhoneDevices(devices) {
+  phoneDeviceListEl.replaceChildren();
+  if (!Array.isArray(devices) || devices.length === 0) {
+    const empty = document.createElement('div');
+    empty.className = 'phone-device-empty';
+    empty.textContent = 'No trusted phones paired.';
+    phoneDeviceListEl.appendChild(empty);
+    return;
+  }
+
+  devices.forEach(device => {
+    const card = document.createElement('article');
+    card.className = 'phone-device-card';
+    card.dataset.deviceId = device.deviceId;
+
+    const heading = document.createElement('div');
+    heading.className = 'phone-device-card-heading';
+    const identity = document.createElement('div');
+    const name = document.createElement('strong');
+    name.textContent = device.deviceName;
+    const id = document.createElement('span');
+    id.textContent = device.deviceId;
+    identity.append(name, id);
+    const dates = document.createElement('div');
+    dates.className = 'phone-device-dates';
+    dates.textContent = `Paired ${formatDeviceDate(device.pairedAt)} · Last seen ${formatDeviceDate(device.lastSeen)}`;
+    heading.append(identity, dates);
+
+    const permissions = document.createElement('div');
+    permissions.className = 'phone-device-permissions';
+    PHONE_PERMISSIONS.forEach(([permission, label]) => {
+      const control = document.createElement('label');
+      control.className = 'phone-permission-toggle';
+      const checkbox = document.createElement('input');
+      checkbox.type = 'checkbox';
+      checkbox.dataset.permission = permission;
+      checkbox.checked = device.permissions?.[permission] === true;
+      const text = document.createElement('span');
+      text.textContent = label;
+      control.append(checkbox, text);
+      permissions.appendChild(control);
+    });
+
+    const actions = document.createElement('div');
+    actions.className = 'phone-device-actions';
+    const save = document.createElement('button');
+    save.type = 'button';
+    save.className = 'primary-btn';
+    save.textContent = 'Save Permissions';
+    save.addEventListener('click', async () => {
+      const updates = {};
+      card.querySelectorAll('[data-permission]').forEach(input => {
+        updates[input.dataset.permission] = input.checked;
+      });
+      try {
+        await window.jarvis.updatePhonePermissions(device.deviceId, updates);
+        setSettingsStatus(`Permissions saved for ${device.deviceName}.`, 'success');
+      } catch (_) {
+        setSettingsStatus('Unable to save device permissions.', 'error');
+      }
+    });
+
+    const disconnect = document.createElement('button');
+    disconnect.type = 'button';
+    disconnect.className = 'secondary-btn';
+    disconnect.textContent = 'Disconnect Device';
+    disconnect.addEventListener('click', async () => {
+      await window.jarvis.disconnectPhoneDevice(device.deviceId);
+      setSettingsStatus(`${device.deviceName} disconnected.`, 'success');
+      await loadPhoneDevices();
+    });
+
+    const remove = document.createElement('button');
+    remove.type = 'button';
+    remove.className = 'danger-btn';
+    remove.textContent = 'Remove Device';
+    remove.addEventListener('click', async () => {
+      if (!window.confirm(`Remove ${device.deviceName} from trusted devices?`)) return;
+      await window.jarvis.removePhoneDevice(device.deviceId);
+      setSettingsStatus(`${device.deviceName} removed.`, 'success');
+      await loadPhoneDevices();
+    });
+
+    actions.append(save, disconnect, remove);
+    card.append(heading, permissions, actions);
+    phoneDeviceListEl.appendChild(card);
+  });
+}
+
+async function loadPhoneDevices() {
+  if (!window.jarvis?.getPhoneDevices) return;
+  try {
+    renderPhoneDevices(await window.jarvis.getPhoneDevices());
+  } catch (_) {
+    renderPhoneDevices([]);
+    setSettingsStatus('Unable to load trusted phones.', 'error');
   }
 }
 
@@ -1347,11 +1502,12 @@ settingsNavButtons.forEach(button => {
   button.addEventListener('click', () => {
     const sectionName = button.dataset.sectionTarget;
     setActiveSettingsSection(sectionName);
+    if (sectionName === 'phone') loadPhoneDevices();
   });
 });
 document.getElementById('settings-save-btn').addEventListener('click', saveSettings);
 document.getElementById('settings-reset-btn').addEventListener('click', resetSettings);
-phoneGenerateTokenBtn.addEventListener('click', generatePairingToken);
+phoneGenerateTokenBtn.addEventListener('click', generatePairingQR);
 modeAddBtn.addEventListener('click', () => {
   if (modeDrafts.length >= MODE_LIMIT) {
     setSettingsStatus(`Mode limit reached. Remove one of the ${MODE_LIMIT} saved modes before adding another.`, 'error');

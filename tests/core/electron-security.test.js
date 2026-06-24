@@ -65,11 +65,37 @@ describe('Electron Security Boundary', function() {
     assert.throws(() => IPC_VALIDATORS['settings:get']({}), /does not accept/);
   });
 
+  it('should validate phone device permission mutations', function() {
+    assert.deepEqual(
+      IPC_VALIDATORS['phone:device:permissions:update']({
+        deviceId: 'phone001',
+        permissions: { remoteCommands: false, powerActions: true }
+      }),
+      {
+        deviceId: 'phone001',
+        permissions: { remoteCommands: false, powerActions: true }
+      }
+    );
+    assert.throws(
+      () => IPC_VALIDATORS['phone:device:permissions:update']({
+        deviceId: 'phone001',
+        permissions: { administrator: true }
+      }),
+      /permissions are invalid/
+    );
+    assert.throws(
+      () => IPC_VALIDATORS['phone:device:remove']({ deviceId: '..\\bad' }),
+      /deviceId is invalid/
+    );
+  });
+
   it('should provide a validator for every registered IPC channel', function() {
     const expectedChannels = [
       'command:process', 'command:confirm', 'assistant:status', 'tts:speak', 'tts:stop',
       'window:openChat', 'window:openSettings', 'config:get', 'settings:get',
-      'phone:pairingToken:create', 'settings:save', 'settings:reset',
+      'phone:pairingQR:create', 'phone:devices:list',
+      'phone:device:permissions:update', 'phone:device:remove', 'phone:device:disconnect',
+      'settings:save', 'settings:reset',
       'schedule:alertAction', 'app:quit'
     ];
 

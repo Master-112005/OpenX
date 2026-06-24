@@ -111,7 +111,7 @@ class Assistant extends EventEmitter {
     this.pendingLearningRepair = null;
   }
 
-  async processCommand(input, source = 'chat') {
+  async processCommand(input, source = 'chat', options = {}) {
     if (!input || typeof input !== 'string' || input.trim().length === 0) {
       return {
         success: false,
@@ -168,7 +168,8 @@ class Assistant extends EventEmitter {
       const routedInput = this._buildRoutedInput(input);
       const result = await this.router.process(routedInput, source, {
         contextualRewrite: this._lastContextualRewrite,
-        conversation: this.context.buildConversationDigest({ limit: 4 })
+        conversation: this.context.buildConversationDigest({ limit: 4 }),
+        permissionGuard: options.permissionGuard
       });
       this.context.record(input, result.entities || {}, result);
       this._recordLearningOutcome(input, routedInput, result);
@@ -197,6 +198,7 @@ class Assistant extends EventEmitter {
           entities: { ...(pendingStep?.entities || result.entities || {}) },
           originalInput: input,
           source,
+          permissionGuard: options.permissionGuard,
           multiCommand: pendingStep ? {
             parentCommandId: result.commandId,
             originalInput: input,
@@ -307,7 +309,8 @@ class Assistant extends EventEmitter {
       pending.entities,
       {
         source: pending.source || 'confirmation',
-        originalInput: pending.multiCommand?.confirmedInput || pending.originalInput
+        originalInput: pending.multiCommand?.confirmedInput || pending.originalInput,
+        permissionGuard: pending.permissionGuard
       }
     );
     if (result.success && pending?.multiCommand) {
@@ -1125,7 +1128,8 @@ class Assistant extends EventEmitter {
         pending.entities,
         {
           source,
-          originalInput: pending.multiCommand?.confirmedInput || pending.originalInput
+          originalInput: pending.multiCommand?.confirmedInput || pending.originalInput,
+          permissionGuard: pending.permissionGuard
         }
       );
       if (pending.multiCommand) {
@@ -1200,7 +1204,10 @@ class Assistant extends EventEmitter {
     const remaining = Array.isArray(multi.remainingCommands) ? multi.remainingCommands : [];
     for (let index = 0; index < remaining.length; index += 1) {
       const clause = remaining[index];
-      const result = await this.router.process(clause, source, { allowMulti: false });
+      const result = await this.router.process(clause, source, {
+        allowMulti: false,
+        permissionGuard: pending.permissionGuard
+      });
       const step = {
         commandId: result.commandId || null,
         input: clause,
@@ -1222,6 +1229,7 @@ class Assistant extends EventEmitter {
           entities: { ...(step.entities || {}) },
           originalInput: pending.originalInput,
           source,
+          permissionGuard: pending.permissionGuard,
           multiCommand: {
             parentCommandId: multi.parentCommandId,
             originalInput: pending.originalInput,
