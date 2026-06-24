@@ -100,6 +100,11 @@ const CONFIG = {
     }
   },
 
+  phone: {
+    host: '0.0.0.0',
+    port: 8080
+  },
+
   logging: {
     level: 'info',
     maxFileSize: 10485760,

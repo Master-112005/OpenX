@@ -73,6 +73,14 @@ describe('Chat Renderer UI', function() {
     assert.match(glassCss, /Tint-aware foreground contrast/);
   });
 
+  it('should expose identity-protected phone pairing controls', function() {
+    assert.match(html, /data-section-target="phone"/);
+    assert.match(html, /id="phone-generate-token-btn"/);
+    assert.match(html, /id="phone-pairing-token"/);
+    assert.match(script, /window\.jarvis\.generatePairingToken\(\)/);
+    assert.match(script, /Identity verification required\./);
+  });
+
   it('should bound long-session rendering and coalesce glass tint updates', function() {
     assert.match(script, /MAX_RENDERED_MESSAGES\s*=\s*100/);
     assert.match(script, /renderedMessages\[index\]\.remove\(\)/);

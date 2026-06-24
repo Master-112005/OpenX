@@ -19,6 +19,10 @@ describe('Assistant Data Root', function() {
     assert.equal(paths.learningDir, path.join(paths.root, 'learning'));
     assert.equal(paths.logsDir, path.join(paths.root, 'logs'));
     assert.equal(paths.mediaProfileDir, path.join(paths.root, 'runtime', 'chrome-media-profile'));
+    assert.equal(paths.phoneDir, path.join(paths.root, 'phone'));
+    assert.equal(paths.phoneDevicesPath, path.join(paths.phoneDir, 'devices.json'));
+    assert.equal(paths.phonePairingPath, path.join(paths.phoneDir, 'pairing.json'));
+    assert.equal(paths.phonePermissionsPath, path.join(paths.phoneDir, 'permissions.json'));
   });
 
   it('should keep managed paths under a configured data root', function() {
@@ -32,6 +36,7 @@ describe('Assistant Data Root', function() {
     assert.ok(fs.existsSync(paths.runtimeDir));
     assert.ok(fs.existsSync(paths.cacheDir));
     assert.ok(fs.existsSync(paths.mediaProfileDir));
+    assert.ok(fs.existsSync(paths.phoneDir));
   });
 
   it('should purge deprecated contact-store files from managed data', function() {

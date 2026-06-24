@@ -27,6 +27,7 @@ function resolveLegacyDataRoot(config = {}) {
 function buildDataPaths(config = {}) {
   const root = resolveDataRoot(config);
   const runtimeDir = path.join(root, 'runtime');
+  const phoneDir = path.join(root, 'phone');
 
   return {
     root,
@@ -41,7 +42,11 @@ function buildDataPaths(config = {}) {
     logsDir: path.join(root, 'logs'),
     runtimeDir,
     cacheDir: path.join(root, 'cache'),
-    mediaProfileDir: path.join(runtimeDir, 'chrome-media-profile')
+    mediaProfileDir: path.join(runtimeDir, 'chrome-media-profile'),
+    phoneDir,
+    phoneDevicesPath: path.join(phoneDir, 'devices.json'),
+    phonePairingPath: path.join(phoneDir, 'pairing.json'),
+    phonePermissionsPath: path.join(phoneDir, 'permissions.json')
   };
 }
 
@@ -198,7 +203,8 @@ function ensureDataRoot(config = {}) {
     paths.learningDir,
     paths.runtimeDir,
     paths.cacheDir,
-    paths.mediaProfileDir
+    paths.mediaProfileDir,
+    paths.phoneDir
   ].forEach(ensureDirectory);
   purgeDeprecatedContactStorage(paths.root);
   return paths;

@@ -69,7 +69,8 @@ describe('Electron Security Boundary', function() {
     const expectedChannels = [
       'command:process', 'command:confirm', 'assistant:status', 'tts:speak', 'tts:stop',
       'window:openChat', 'window:openSettings', 'config:get', 'settings:get',
-      'settings:save', 'settings:reset', 'schedule:alertAction', 'app:quit'
+      'phone:pairingToken:create', 'settings:save', 'settings:reset',
+      'schedule:alertAction', 'app:quit'
     ];
 
     assert.deepEqual(Object.keys(IPC_VALIDATORS).sort(), expectedChannels.sort());

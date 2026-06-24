@@ -164,6 +164,10 @@
               <span class="nav-label">Access</span>
               <span class="nav-hint">Choose when automation commands require confirmation.</span>
             </button>
+            <button class="settings-nav-chip" data-section-target="phone" type="button">
+              <span class="nav-label">Phone</span>
+              <span class="nav-hint">Verify your Windows identity and connect a trusted phone.</span>
+            </button>
             <button class="settings-nav-chip" data-section-target="modes" type="button">
               <span class="nav-label">Modes</span>
               <span class="nav-hint">Create up to 5 app launch modes.</span>
@@ -301,6 +305,20 @@
             <select class="visually-hidden" id="system-permission-level" aria-hidden="true" tabindex="-1">
               <option value="low">Safe</option><option value="medium">Balanced</option><option value="high">Advanced</option><option value="critical">Full</option>
             </select>
+          </section>
+
+          <section class="settings-section" data-settings-section="phone" id="settings-section-phone">
+            <div class="section-heading">Connect Phone</div>
+            <div class="section-note">Windows will verify your identity before OpenX creates a five-minute pairing code. OpenX never receives or stores your Windows credentials.</div>
+            <div class="phone-pairing-card">
+              <div class="phone-pairing-copy">
+                <strong>Desktop identity verification</strong>
+                <span id="phone-pairing-status">Generate a code when your phone is ready to pair.</span>
+              </div>
+              <button class="primary-btn" id="phone-generate-token-btn" type="button">Generate Pairing Token</button>
+              <output class="phone-pairing-token" id="phone-pairing-token" aria-live="polite">--------</output>
+              <div class="section-note" id="phone-pairing-expiry"></div>
+            </div>
           </section>
 
           <section class="settings-section" data-settings-section="modes" id="settings-section-modes">

@@ -11,6 +11,14 @@ const { AssistantEventBus, EVENTS, Logger } = require('../../../core/assistant/D
 const { ensureDataRoot, migrateLegacyData } = require('../../../core/assistant/Data');
 const CrashRecoveryPolicy = require('./crash-recovery');
 const {
+  DeviceRegistry,
+  IdentityVerificationService,
+  PairingService,
+  PhoneCommandRouter,
+  PhoneServer
+} = require('../../../core/phone');
+const WindowsIdentityVerifier = require('../phone-verification');
+const {
   IPC_VALIDATORS,
   assertTrustedIpcSender,
   createSecureWebPreferences,
@@ -98,6 +106,7 @@ let cleanupPromise = null;
 let fatalErrorHandling = false;
 let signalHandling = false;
 let stableRuntimeHandle = null;
+let phoneServer = null;
 const rendererCrashHistory = new Map();
 const recoveryTimeouts = new Set();
 const unresponsiveTimeouts = new Map();
@@ -111,6 +120,7 @@ const IPC_CHANNELS = [
   'window:openSettings',
   'config:get',
   'settings:get',
+  'phone:pairingToken:create',
   'settings:save',
   'settings:reset',
   'schedule:alertAction',
@@ -435,6 +445,13 @@ function setupIPC() {
     return settingsService.getSnapshot();
   });
 
+  registerIpcHandler('phone:pairingToken:create', async () => {
+    if (!phoneServer?.pairingService) {
+      return { success: false, message: 'Phone service unavailable.' };
+    }
+    return phoneServer.pairingService.createPairingToken();
+  });
+
   registerIpcHandler('settings:save', async (_event, payload) => {
     settingsService.saveSettings(payload);
     await reloadRuntimeServices();
@@ -545,6 +562,15 @@ async function cleanupRuntime() {
     globalShortcut.unregisterAll();
     childProcessRegistry.killAll();
     teardownIPC();
+    if (phoneServer) {
+      try {
+        await phoneServer.stop();
+      } catch (error) {
+        mainLogger.error('Phone server cleanup failed', { error: error.message });
+      } finally {
+        phoneServer = null;
+      }
+    }
     destroyTextToSpeech();
     await destroyAssistantInstance();
     eventBus?.removeAllListeners?.();
@@ -626,6 +652,32 @@ async function initializeAssistant() {
   mainLogger.info('Assistant initialized', {
     name: runtimeConfig?.assistant?.displayName || 'JARVIS'
   });
+}
+
+async function initializePhoneServer() {
+  const commandRouter = new PhoneCommandRouter(() => assistant);
+  const deviceRegistry = new DeviceRegistry({
+    filePath: runtimeConfig.app.dataPaths.phoneDevicesPath
+  });
+  const identityVerificationService = new IdentityVerificationService({
+    verifier: new WindowsIdentityVerifier(),
+    logger: mainLogger
+  });
+  const pairingService = new PairingService({
+    deviceRegistry,
+    identityVerificationService,
+    pairingPath: runtimeConfig.app.dataPaths.phonePairingPath,
+    permissionsPath: runtimeConfig.app.dataPaths.phonePermissionsPath,
+    logger: mainLogger
+  });
+  phoneServer = new PhoneServer({
+    host: runtimeConfig?.phone?.host,
+    port: runtimeConfig?.phone?.port,
+    commandRouter,
+    pairingService,
+    logger: mainLogger
+  });
+  await phoneServer.start();
 }
 
 async function reloadRuntimeServices() {
@@ -735,6 +787,7 @@ app.whenReady().then(async () => {
   setupIPC();
   createTray();
   await initializeAssistant();
+  await initializePhoneServer();
   if (!app.isPackaged) {
     createChatWindow();
   }

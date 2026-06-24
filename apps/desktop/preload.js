@@ -28,6 +28,9 @@ contextBridge.exposeInMainWorld('jarvis', {
   getSettings: () =>
     ipcRenderer.invoke('settings:get'),
 
+  generatePairingToken: () =>
+    ipcRenderer.invoke('phone:pairingToken:create'),
+
   saveSettings: (settings) =>
     ipcRenderer.invoke('settings:save', settings),
 

@@ -470,6 +470,34 @@
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-color) 14%, transparent);
 }
 
+.phone-pairing-card {
+  align-items: start;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 18px;
+  display: grid;
+  gap: 14px;
+  margin-top: 18px;
+  padding: 18px;
+}
+
+.phone-pairing-copy {
+  display: grid;
+  gap: 5px;
+}
+
+.phone-pairing-copy span {
+  color: var(--muted-color);
+  font-size: 12px;
+}
+
+.phone-pairing-token {
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: clamp(28px, 5vw, 42px);
+  font-weight: 700;
+  letter-spacing: 0.16em;
+}
+
 .theme-grid {
   gap: 14px;
 }

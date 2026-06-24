@@ -1,6 +1,6 @@
 {
   "name": "openx",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "productName": "OpenX",
   "description": "Deterministic, local-first Windows desktop assistant",
@@ -39,7 +39,8 @@
   },
   "dependencies": {
     "active-win": "8.2.1",
-    "fuse.js": "7.4.1"
+    "fuse.js": "7.4.1",
+    "ws": "^8.21.0"
   },
   "devDependencies": {
     "@eslint/js": "8.57.0",

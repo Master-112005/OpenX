@@ -123,6 +123,7 @@ const IPC_VALIDATORS = Object.freeze({
   'window:openSettings': validateEmpty,
   'config:get': validateEmpty,
   'settings:get': validateEmpty,
+  'phone:pairingToken:create': validateEmpty,
   'settings:save': validateSettings,
   'settings:reset': validateEmpty,
   'schedule:alertAction': validateScheduleAction,

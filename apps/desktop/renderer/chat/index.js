@@ -15,6 +15,10 @@ const settingsStatusEl = document.getElementById('settings-status');
 const modeGridEl = document.getElementById('mode-grid');
 const modeUsageEl = document.getElementById('mode-usage');
 const modeAddBtn = document.getElementById('mode-add-btn');
+const phoneGenerateTokenBtn = document.getElementById('phone-generate-token-btn');
+const phonePairingTokenEl = document.getElementById('phone-pairing-token');
+const phonePairingStatusEl = document.getElementById('phone-pairing-status');
+const phonePairingExpiryEl = document.getElementById('phone-pairing-expiry');
 const chatViewBtn = document.getElementById('chat-view-btn');
 const activityViewBtn = document.getElementById('activity-view-btn');
 const conversationView = document.getElementById('conversation-view');
@@ -1269,6 +1273,27 @@ async function resetSettings() {
   }
 }
 
+async function generatePairingToken() {
+  phoneGenerateTokenBtn.disabled = true;
+  phonePairingTokenEl.textContent = '--------';
+  phonePairingExpiryEl.textContent = '';
+  phonePairingStatusEl.textContent = 'Waiting for Windows identity verification...';
+  try {
+    const result = await window.jarvis.generatePairingToken();
+    if (result?.success !== true) {
+      phonePairingStatusEl.textContent = result?.message || 'Identity verification required.';
+      return;
+    }
+    phonePairingTokenEl.textContent = result.token;
+    phonePairingStatusEl.textContent = 'Identity verified. Enter this code on your phone.';
+    phonePairingExpiryEl.textContent = `Expires at ${new Date(result.expiresAt).toLocaleTimeString()}.`;
+  } catch (_) {
+    phonePairingStatusEl.textContent = 'Identity verification required.';
+  } finally {
+    phoneGenerateTokenBtn.disabled = false;
+  }
+}
+
 inputBox.addEventListener('keydown', (event) => {
   if (event.key === 'Enter') {
     handleSend();
@@ -1326,6 +1351,7 @@ settingsNavButtons.forEach(button => {
 });
 document.getElementById('settings-save-btn').addEventListener('click', saveSettings);
 document.getElementById('settings-reset-btn').addEventListener('click', resetSettings);
+phoneGenerateTokenBtn.addEventListener('click', generatePairingToken);
 modeAddBtn.addEventListener('click', () => {
   if (modeDrafts.length >= MODE_LIMIT) {
     setSettingsStatus(`Mode limit reached. Remove one of the ${MODE_LIMIT} saved modes before adding another.`, 'error');
