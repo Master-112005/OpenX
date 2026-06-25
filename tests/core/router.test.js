@@ -104,6 +104,60 @@ describe('Action Router', function() {
     assert.notEqual(prepared.semanticFrame.actionVerb, 'minimize');
   });
 
+  it('should survive parser failures and fall back to direct routing', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const router = new ActionRouter(config, {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...(entities || {}) } };
+      }
+    });
+    router.parser.parse = () => {
+      throw new Error('parser exploded');
+    };
+
+    const result = await router.process('open chrome', 'chat');
+    assert.equal(result.success, true);
+    assert.equal(result.intent, 'app.open');
+  });
+
+  it('should survive NLP preparation failures and still route simple explicit commands', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const router = new ActionRouter(config, {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...(entities || {}) } };
+      }
+    });
+    router.nlp.prepare = () => {
+      throw new Error('nlp prepare exploded');
+    };
+
+    const result = await router.process('open chrome', 'chat');
+    assert.equal(result.success, true);
+    assert.equal(result.intent, 'app.open');
+  });
+
+  it('should survive individual resolver failures and continue routing with later resolvers', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const router = new ActionRouter(config, {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...(entities || {}) } };
+      }
+    });
+    router._resolveExplicitAppIntent = () => {
+      throw new Error('resolver exploded');
+    };
+
+    const result = await router.process('what is the cpu usage', 'chat');
+    assert.equal(result.success, true);
+    assert.equal(result.intent, 'system.cpu');
+  });
+
   it('should not claim generic capability fallback commands were executed', async function() {
     const config = {
       permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }

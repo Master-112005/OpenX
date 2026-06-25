@@ -84,7 +84,7 @@ class ActionRouter {
     const commandId = IdGenerator.generate();
     this.logger.info(`Processing command: ${commandId}`, { input: inputText, source });
 
-    const parseResult = this.parser.parse(inputText);
+    const parseResult = this._safeParseInput(inputText);
     if (!parseResult.hasCommand) {
       return {
         commandId,
@@ -94,7 +94,7 @@ class ActionRouter {
       };
     }
 
-    const initialPreparedInput = this.nlp.prepare(parseResult.commandText);
+    const initialPreparedInput = this._safePrepareInput(parseResult.commandText);
     const useNoisyRepair = !this._classifyCapabilityCommand(
       initialPreparedInput.correctedText,
       parseResult.rawCommandText || parseResult.commandText
@@ -109,16 +109,16 @@ class ActionRouter {
       : String(parseResult.commandText || '').trim();
     const preparedInput = effectiveCommandText === parseResult.commandText
       ? initialPreparedInput
-      : this.nlp.prepare(effectiveCommandText);
+      : this._safePrepareInput(effectiveCommandText);
     preparedInput.contextualRewrite = options.contextualRewrite || null;
     preparedInput.conversation = options.conversation || null;
     const rawCommandText = useNoisyRepair
       ? effectiveCommandText
       : (parseResult.rawCommandText || parseResult.commandText);
-    preparedInput.commandFrame = this.commandFrameParser.parse(rawCommandText, preparedInput);
-    preparedInput.semanticParse = this.naturalLanguageRouter.parse(rawCommandText, preparedInput);
-    preparedInput.appLanguage = this.appCommandLanguage.parse(rawCommandText, preparedInput.correctedText);
-    preparedInput.browserLanguage = this.browserCommandLanguage.parse(rawCommandText, preparedInput.correctedText);
+    preparedInput.commandFrame = this._safeCommandFrameParse(rawCommandText, preparedInput);
+    preparedInput.semanticParse = this._safeNaturalLanguageParse(rawCommandText, preparedInput);
+    preparedInput.appLanguage = this._safeAppLanguageParse(rawCommandText, preparedInput.correctedText);
+    preparedInput.browserLanguage = this._safeBrowserLanguageParse(rawCommandText, preparedInput.correctedText);
 
     if (this._isIncompleteCommand(rawCommandText, preparedInput)) {
       const capability = this._resolveCapabilityCommandIntent(
@@ -212,6 +212,74 @@ class ActionRouter {
     return this._completeIntent(commandId, intentResult, rawCommandText, source, preparedInput, options);
   }
 
+  _safeParseInput(inputText) {
+    try {
+      return this.parser.parse(inputText);
+    } catch (error) {
+      this.logger.error('Router parser failed', { error: error.message, inputText });
+      const text = String(inputText || '').trim();
+      return {
+        hasCommand: text.length > 0,
+        commandText: text,
+        rawCommandText: text
+      };
+    }
+  }
+
+  _safePrepareInput(inputText) {
+    try {
+      return this.nlp.prepare(inputText);
+    } catch (error) {
+      this.logger.error('Router NLP prepare failed', { error: error.message, inputText });
+      const correctedText = String(inputText || '').trim();
+      return {
+        originalText: correctedText,
+        correctedText,
+        repairedCommandText: correctedText,
+        intentText: correctedText,
+        tokens: correctedText ? correctedText.toLowerCase().split(/\s+/).filter(Boolean) : [],
+        semanticFrame: null,
+        learningDirective: null
+      };
+    }
+  }
+
+  _safeCommandFrameParse(rawCommandText, preparedInput) {
+    try {
+      return this.commandFrameParser.parse(rawCommandText, preparedInput);
+    } catch (error) {
+      this.logger.warn('Command frame parsing failed', { error: error.message, rawCommandText });
+      return null;
+    }
+  }
+
+  _safeNaturalLanguageParse(rawCommandText, preparedInput) {
+    try {
+      return this.naturalLanguageRouter.parse(rawCommandText, preparedInput);
+    } catch (error) {
+      this.logger.warn('Natural language routing parse failed', { error: error.message, rawCommandText });
+      return null;
+    }
+  }
+
+  _safeAppLanguageParse(rawCommandText, correctedText) {
+    try {
+      return this.appCommandLanguage.parse(rawCommandText, correctedText);
+    } catch (error) {
+      this.logger.warn('App language parse failed', { error: error.message, rawCommandText });
+      return null;
+    }
+  }
+
+  _safeBrowserLanguageParse(rawCommandText, correctedText) {
+    try {
+      return this.browserCommandLanguage.parse(rawCommandText, correctedText);
+    } catch (error) {
+      this.logger.warn('Browser language parse failed', { error: error.message, rawCommandText });
+      return null;
+    }
+  }
+
   _resolveIntent(rawCommandText, preparedInput, source) {
     if (this._isIncompleteCommand(rawCommandText, preparedInput)) {
       return this._resolveCapabilityCommandIntent(
@@ -221,54 +289,74 @@ class ActionRouter {
       );
     }
 
-    return (
-      this._resolveLearningRepairIntent(rawCommandText, preparedInput) ||
-      this._resolveScheduleManagementIntent(rawCommandText, preparedInput) ||
-      this._resolveExplicitReminderIntent(rawCommandText, preparedInput) ||
-      this._resolveExplicitAlarmIntent(rawCommandText, preparedInput) ||
-      this._resolveExplicitTimerIntent(rawCommandText, preparedInput) ||
-      this._resolveSystemSettingsIntent(rawCommandText, preparedInput) ||
-      this._resolveSystemInsightIntent(rawCommandText, preparedInput) ||
-      this._resolveFolderOpenInAppIntent(rawCommandText, preparedInput) ||
-      this._resolveWorkspaceSetupIntent(rawCommandText, preparedInput) ||
-      this._resolveScreenshotIntent(rawCommandText, preparedInput) ||
-      this._resolveFormFillIntent(rawCommandText, preparedInput) ||
-      this._resolveYouTubeMediaIntent(rawCommandText, preparedInput) ||
-      this._resolveAppLanguageIntent(rawCommandText, preparedInput) ||
-      this._resolveBrowserLanguageIntent(rawCommandText, preparedInput) ||
-      this._resolveBrowserTabIntent(rawCommandText, preparedInput) ||
-      this._resolveNaturalLanguageRouteIntent(rawCommandText, preparedInput) ||
-      this._resolveCommandFrameIntent(rawCommandText, preparedInput) ||
-      this._resolveExplicitMediaControlIntent(rawCommandText, preparedInput) ||
-      this._resolveMediaIntent(rawCommandText, source) ||
-      this._resolveExplicitMediaIntent(rawCommandText, preparedInput) ||
-      this._resolveSmartFileIntent(rawCommandText, preparedInput) ||
-      this._resolveExplicitFileIntent(rawCommandText, preparedInput) ||
-      this._resolveExplicitFolderMoveIntent(rawCommandText, preparedInput) ||
-      this._resolveExplicitModeIntent(rawCommandText, preparedInput) ||
-      this._resolveLocalInfoIntent(rawCommandText, preparedInput) ||
-      this._resolveExplicitAppIntent(rawCommandText, preparedInput) ||
-      this._resolveExplicitWindowIntent(rawCommandText, preparedInput) ||
-      this._resolveExplicitCommunicationIntent(rawCommandText, preparedInput) ||
-      this._resolveBrowserFollowupIntent(rawCommandText, preparedInput) ||
-      this._resolveKnownWebOpenIntent(rawCommandText, preparedInput) ||
-      this._resolveSiteSearchIntent(rawCommandText, preparedInput) ||
-      this._resolvePersonalPhotoIntent(rawCommandText, preparedInput) ||
-      this._resolveNaturalConditionIntent(rawCommandText, preparedInput) ||
-      this._resolveExplicitOpenIntent(rawCommandText, preparedInput) ||
-      this._resolveExplicitAppOpenIntent(rawCommandText, preparedInput) ||
-      this._resolveCalculationIntent(rawCommandText, preparedInput) ||
-      this._resolveLocalFileListIntent(rawCommandText, preparedInput) ||
-      this._resolveAssistantConversationIntent(rawCommandText, preparedInput) ||
-      this._resolveLocalFileSearchIntent(rawCommandText, preparedInput) ||
-      this._resolveExplicitSearchIntent(rawCommandText, preparedInput) ||
-      this._resolveBareKnowledgeSearchIntent(rawCommandText, preparedInput) ||
-      this._resolveGeneralQuestionSearchIntent(rawCommandText, preparedInput) ||
-      this._matchIntent(preparedInput) ||
-      this._resolveCapabilityCommandIntent(rawCommandText, preparedInput) ||
-      this._resolveSemanticFrameIntent(rawCommandText, preparedInput) ||
-      null
-    );
+    return this._runResolverChain([
+      ['_resolveLearningRepairIntent', () => this._resolveLearningRepairIntent(rawCommandText, preparedInput)],
+      ['_resolveScheduleManagementIntent', () => this._resolveScheduleManagementIntent(rawCommandText, preparedInput)],
+      ['_resolveExplicitReminderIntent', () => this._resolveExplicitReminderIntent(rawCommandText, preparedInput)],
+      ['_resolveExplicitAlarmIntent', () => this._resolveExplicitAlarmIntent(rawCommandText, preparedInput)],
+      ['_resolveExplicitTimerIntent', () => this._resolveExplicitTimerIntent(rawCommandText, preparedInput)],
+      ['_resolveSystemSettingsIntent', () => this._resolveSystemSettingsIntent(rawCommandText, preparedInput)],
+      ['_resolveSystemInsightIntent', () => this._resolveSystemInsightIntent(rawCommandText, preparedInput)],
+      ['_resolveFolderOpenInAppIntent', () => this._resolveFolderOpenInAppIntent(rawCommandText, preparedInput)],
+      ['_resolveWorkspaceSetupIntent', () => this._resolveWorkspaceSetupIntent(rawCommandText, preparedInput)],
+      ['_resolveScreenshotIntent', () => this._resolveScreenshotIntent(rawCommandText, preparedInput)],
+      ['_resolveFormFillIntent', () => this._resolveFormFillIntent(rawCommandText, preparedInput)],
+      ['_resolveYouTubeMediaIntent', () => this._resolveYouTubeMediaIntent(rawCommandText, preparedInput)],
+      ['_resolveAppLanguageIntent', () => this._resolveAppLanguageIntent(rawCommandText, preparedInput)],
+      ['_resolveBrowserLanguageIntent', () => this._resolveBrowserLanguageIntent(rawCommandText, preparedInput)],
+      ['_resolveBrowserTabIntent', () => this._resolveBrowserTabIntent(rawCommandText, preparedInput)],
+      ['_resolveNaturalLanguageRouteIntent', () => this._resolveNaturalLanguageRouteIntent(rawCommandText, preparedInput)],
+      ['_resolveCommandFrameIntent', () => this._resolveCommandFrameIntent(rawCommandText, preparedInput)],
+      ['_resolveExplicitMediaControlIntent', () => this._resolveExplicitMediaControlIntent(rawCommandText, preparedInput)],
+      ['_resolveMediaIntent', () => this._resolveMediaIntent(rawCommandText, source)],
+      ['_resolveExplicitMediaIntent', () => this._resolveExplicitMediaIntent(rawCommandText, preparedInput)],
+      ['_resolveSmartFileIntent', () => this._resolveSmartFileIntent(rawCommandText, preparedInput)],
+      ['_resolveExplicitFileIntent', () => this._resolveExplicitFileIntent(rawCommandText, preparedInput)],
+      ['_resolveExplicitFolderMoveIntent', () => this._resolveExplicitFolderMoveIntent(rawCommandText, preparedInput)],
+      ['_resolveExplicitModeIntent', () => this._resolveExplicitModeIntent(rawCommandText, preparedInput)],
+      ['_resolveLocalInfoIntent', () => this._resolveLocalInfoIntent(rawCommandText, preparedInput)],
+      ['_resolveExplicitAppIntent', () => this._resolveExplicitAppIntent(rawCommandText, preparedInput)],
+      ['_resolveExplicitWindowIntent', () => this._resolveExplicitWindowIntent(rawCommandText, preparedInput)],
+      ['_resolveExplicitCommunicationIntent', () => this._resolveExplicitCommunicationIntent(rawCommandText, preparedInput)],
+      ['_resolveBrowserFollowupIntent', () => this._resolveBrowserFollowupIntent(rawCommandText, preparedInput)],
+      ['_resolveKnownWebOpenIntent', () => this._resolveKnownWebOpenIntent(rawCommandText, preparedInput)],
+      ['_resolveSiteSearchIntent', () => this._resolveSiteSearchIntent(rawCommandText, preparedInput)],
+      ['_resolvePersonalPhotoIntent', () => this._resolvePersonalPhotoIntent(rawCommandText, preparedInput)],
+      ['_resolveNaturalConditionIntent', () => this._resolveNaturalConditionIntent(rawCommandText, preparedInput)],
+      ['_resolveExplicitOpenIntent', () => this._resolveExplicitOpenIntent(rawCommandText, preparedInput)],
+      ['_resolveExplicitAppOpenIntent', () => this._resolveExplicitAppOpenIntent(rawCommandText, preparedInput)],
+      ['_resolveCalculationIntent', () => this._resolveCalculationIntent(rawCommandText, preparedInput)],
+      ['_resolveLocalFileListIntent', () => this._resolveLocalFileListIntent(rawCommandText, preparedInput)],
+      ['_resolveAssistantConversationIntent', () => this._resolveAssistantConversationIntent(rawCommandText, preparedInput)],
+      ['_resolveLocalFileSearchIntent', () => this._resolveLocalFileSearchIntent(rawCommandText, preparedInput)],
+      ['_resolveExplicitSearchIntent', () => this._resolveExplicitSearchIntent(rawCommandText, preparedInput)],
+      ['_resolveBareKnowledgeSearchIntent', () => this._resolveBareKnowledgeSearchIntent(rawCommandText, preparedInput)],
+      ['_resolveGeneralQuestionSearchIntent', () => this._resolveGeneralQuestionSearchIntent(rawCommandText, preparedInput)],
+      ['_matchIntent', () => this._matchIntent(preparedInput)],
+      ['_resolveCapabilityCommandIntent', () => this._resolveCapabilityCommandIntent(rawCommandText, preparedInput)],
+      ['_resolveSemanticFrameIntent', () => this._resolveSemanticFrameIntent(rawCommandText, preparedInput)]
+    ], { rawCommandText });
+  }
+
+  _runResolverChain(resolvers = [], context = {}) {
+    for (const [name, resolver] of resolvers) {
+      const result = this._safeInvokeResolver(name, resolver, context);
+      if (result) return result;
+    }
+    return null;
+  }
+
+  _safeInvokeResolver(name, resolver, context = {}) {
+    try {
+      return typeof resolver === 'function' ? resolver() : null;
+    } catch (error) {
+      this.logger.error('Intent resolver failed', {
+        resolver: name,
+        error: error.message,
+        input: context.rawCommandText || ''
+      });
+      return null;
+    }
   }
 
   _resolveNaturalConditionIntent(rawText, preparedInput = {}) {
@@ -995,20 +1083,56 @@ class ActionRouter {
   }
 
   async _completeIntent(commandId, intentResult, rawCommandText, source, preparedInput = null, options = {}) {
-    let entities = intentResult.entities || this.entityExtractor.extract(
-      intentResult.intent,
-      rawCommandText
-    );
+    let entities;
+    try {
+      entities = intentResult.entities || this.entityExtractor.extract(
+        intentResult.intent,
+        rawCommandText
+      );
+    } catch (error) {
+      this.logger.error('Entity extraction failed during intent completion', {
+        error: error.message,
+        intent: intentResult?.intent?.id,
+        input: rawCommandText
+      });
+      return {
+        commandId,
+        success: false,
+        error: 'Entity extraction failed',
+        response: this._buildResponse('error', 'executionFailed', { error: error.message }),
+        intent: intentResult?.intent?.id || null,
+        confidence: intentResult?.confidence || 0,
+        entities: {}
+      };
+    }
     if (this.learningStore?.adaptEntities) {
       entities = this.learningStore.adaptEntities(intentResult.intent.id, entities, {
         rawCommandText,
         source
       });
     }
-    const actionValidation = this.actionValidation.validate(intentResult.intent, entities);
+    let actionValidation;
+    try {
+      actionValidation = this.actionValidation.validate(intentResult.intent, entities);
+    } catch (error) {
+      this.logger.error('Action validation failed during intent completion', {
+        error: error.message,
+        intent: intentResult?.intent?.id,
+        input: rawCommandText
+      });
+      return {
+        commandId,
+        success: false,
+        error: 'Action validation failed',
+        response: this._buildResponse('error', 'executionFailed', { error: error.message }),
+        intent: intentResult?.intent?.id || null,
+        confidence: intentResult?.confidence || 0,
+        entities
+      };
+    }
     const missingRequired = actionValidation.missing;
     const languageUnderstanding = this._buildLanguageUnderstanding(
-      preparedInput || this.nlp.prepare(rawCommandText),
+      preparedInput || this._safePrepareInput(rawCommandText),
       intentResult,
       missingRequired,
       missingRequired.length > 0 ? 'incomplete' : 'passed'
