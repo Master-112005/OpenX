@@ -93,7 +93,7 @@ describe('Electron Security Boundary', function() {
     const expectedChannels = [
       'command:process', 'command:confirm', 'assistant:status', 'tts:speak', 'tts:stop',
       'window:openChat', 'window:openSettings', 'config:get', 'settings:get',
-      'phone:pairingQR:create', 'phone:devices:list',
+      'phone:pairingQR:create', 'phone:server:status', 'phone:devices:list',
       'phone:device:permissions:update', 'phone:device:remove', 'phone:device:disconnect',
       'settings:save', 'settings:reset',
       'schedule:alertAction', 'app:quit'

@@ -299,6 +299,7 @@ class ActionRouter {
       ['_resolveSystemInsightIntent', () => this._resolveSystemInsightIntent(rawCommandText, preparedInput)],
       ['_resolveFolderOpenInAppIntent', () => this._resolveFolderOpenInAppIntent(rawCommandText, preparedInput)],
       ['_resolveWorkspaceSetupIntent', () => this._resolveWorkspaceSetupIntent(rawCommandText, preparedInput)],
+      ['_resolvePhoneTransferIntent', () => this._resolvePhoneTransferIntent(rawCommandText, preparedInput, source)],
       ['_resolveScreenshotIntent', () => this._resolveScreenshotIntent(rawCommandText, preparedInput)],
       ['_resolveFormFillIntent', () => this._resolveFormFillIntent(rawCommandText, preparedInput)],
       ['_resolveYouTubeMediaIntent', () => this._resolveYouTubeMediaIntent(rawCommandText, preparedInput)],
@@ -1223,7 +1224,7 @@ class ActionRouter {
         languageUnderstanding
       };
     }
-    return this._execute(commandId, intentResult, entities, rawCommandText, source, languageUnderstanding);
+    return this._execute(commandId, intentResult, entities, rawCommandText, source, languageUnderstanding, options);
   }
 
   _buildMultiCommandPlan(rawText, source) {
@@ -1565,7 +1566,7 @@ class ActionRouter {
       };
     }
 
-    return this._execute(commandId, { intent, confidence: 1.0 }, entities, '', options.source || 'confirmation');
+    return this._execute(commandId, { intent, confidence: 1.0 }, entities, '', options.source || 'confirmation', null, options);
   }
 
   _validateExternalPermission(permissionGuard, intent, entities) {
@@ -1579,7 +1580,7 @@ class ActionRouter {
     }
   }
 
-  async _execute(commandId, intentResult, entities, rawCommandText = '', source = 'chat', languageUnderstanding = null) {
+  async _execute(commandId, intentResult, entities, rawCommandText = '', source = 'chat', languageUnderstanding = null, executionOptions = {}) {
     try {
       const result = await this.nle.execute(intentResult.intent.action, entities, {
         commandId,
@@ -1587,7 +1588,8 @@ class ActionRouter {
         input: rawCommandText,
         source,
         languageUnderstanding,
-        contextualRewrite: languageUnderstanding?.contextualRewrite || null
+        contextualRewrite: languageUnderstanding?.contextualRewrite || null,
+        phoneContext: executionOptions.phoneContext || null
       });
       const confirmation = this.actionConfirmation.confirm(result);
       this.logger.info(`Execution result: ${commandId}`, {
@@ -2526,6 +2528,60 @@ class ActionRouter {
     }
 
     return { intent, confidence: 1 };
+  }
+
+  _resolvePhoneTransferIntent(rawText, preparedInput, source = 'chat') {
+    const input = String(preparedInput?.correctedText || rawText || '').trim();
+    const raw = String(rawText || '').trim();
+    if (!input) {
+      return null;
+    }
+
+    const lower = input.toLowerCase();
+    if (!/^(?:send|share|transfer)\b/.test(lower)) {
+      return null;
+    }
+
+    const phoneTargetMatch = raw.match(/\s+(?:to|with)\s+(?:my\s+)?(?:phone|mobile|iphone|android|device|this\s+phone)\s*$/i);
+    if (!phoneTargetMatch) {
+      return null;
+    }
+
+    const intent = this.intentRegistry.get('phone.sendFile');
+    if (!intent) {
+      return null;
+    }
+
+    const withoutTarget = raw.slice(0, phoneTargetMatch.index).trim();
+    const sourceText = withoutTarget
+      .replace(/^(?:send|share|transfer)\s+/i, '')
+      .replace(/^(?:me\s+)?/i, '')
+      .trim();
+
+    const transferKind = /\b(?:folder|directory)\b/i.test(sourceText)
+      ? 'folder'
+      : /\b(?:image|images|photo|photos|picture|pictures|screenshot|screenshots)\b/i.test(sourceText)
+        ? 'image'
+        : 'file';
+
+    const normalizedSource = sourceText
+      .replace(/^(?:the|a|an|my)\s+/i, '')
+      .replace(/\s+(?:file|files|image|images|photo|photos|picture|pictures)$/i, '')
+      .trim();
+
+    const pathValue = normalizedSource || sourceText;
+    if (!pathValue) {
+      return null;
+    }
+
+    return {
+      intent,
+      confidence: source === 'phone' ? 1 : 0.94,
+      entities: {
+        path: pathValue,
+        transferKind
+      }
+    };
   }
 
   _resolveExplicitFileIntent(rawText, preparedInput) {

@@ -17,12 +17,14 @@ class PhoneCommandRouter {
       throw new Error('Assistant not initialized');
     }
 
+    const commandOptions = {};
     if (typeof options.permissionGuard === 'function') {
-      return assistant.processCommand(command.trim(), 'phone', {
-        permissionGuard: options.permissionGuard
-      });
+      commandOptions.permissionGuard = options.permissionGuard;
     }
-    return assistant.processCommand(command.trim(), 'phone');
+    if (options.phoneContext && typeof options.phoneContext === 'object') {
+      commandOptions.phoneContext = options.phoneContext;
+    }
+    return assistant.processCommand(command.trim(), 'phone', commandOptions);
   }
 }
 

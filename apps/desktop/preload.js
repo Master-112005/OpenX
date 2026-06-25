@@ -31,6 +31,9 @@ contextBridge.exposeInMainWorld('jarvis', {
   generatePairingQR: () =>
     ipcRenderer.invoke('phone:pairingQR:create'),
 
+  getPhoneServerStatus: () =>
+    ipcRenderer.invoke('phone:server:status'),
+
   getPhoneDevices: () =>
     ipcRenderer.invoke('phone:devices:list'),
 

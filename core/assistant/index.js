@@ -74,6 +74,8 @@ const CONFIRM_PATTERNS = [
   /\b(?:carry\s+on|do\s+it|execute\s+it|go\s+ahead|run\s+it)\b/
 ];
 
+const DEFAULT_COMMAND_TIMEOUT_MS = 15000;
+
 class Assistant extends EventEmitter {
   constructor(config, dependencies = {}) {
     super();
@@ -109,6 +111,9 @@ class Assistant extends EventEmitter {
     this.pendingFeedback = null;
     this.pendingLearningCorrection = null;
     this.pendingLearningRepair = null;
+    this.commandTimeoutMs = Number.isFinite(config?.assistant?.commandTimeoutMs)
+      ? Math.max(25, config.assistant.commandTimeoutMs)
+      : DEFAULT_COMMAND_TIMEOUT_MS;
   }
 
   async processCommand(input, source = 'chat', options = {}) {
@@ -166,11 +171,12 @@ class Assistant extends EventEmitter {
       }
 
       const routedInput = this._buildRoutedInput(input);
-      const result = await this.router.process(routedInput, source, {
+      const result = await this._runWithCommandTimeout(this.router.process(routedInput, source, {
         contextualRewrite: this._lastContextualRewrite,
         conversation: this.context.buildConversationDigest({ limit: 4 }),
-        permissionGuard: options.permissionGuard
-      });
+        permissionGuard: options.permissionGuard,
+        phoneContext: options.phoneContext || null
+      }), { input, routedInput, source, stage: 'router.process' });
       this.context.record(input, result.entities || {}, result);
       this._recordLearningOutcome(input, routedInput, result);
 
@@ -260,9 +266,12 @@ class Assistant extends EventEmitter {
       this.emit('result', { ...result, response, source });
       return { ...result, response, source };
     } catch (err) {
-      this.logger.error('Command processing error', err);
+      const timedOut = err?.code === 'command_timeout';
+      this.logger.error(timedOut ? 'Command processing timed out' : 'Command processing error', err);
       const response = this.personality.applyToResponse(
-        this.responses.generate('error', 'executionFailed', { error: err.message })
+        timedOut
+          ? this.responses.generate('error', 'timeout')
+          : this.responses.generate('error', 'executionFailed', { error: err.message })
       );
       this.eventBus.publish(EVENTS.COMMAND_EXECUTED, {
         commandId: null,
@@ -303,7 +312,7 @@ class Assistant extends EventEmitter {
     }
 
     this.pendingConfirmation = null;
-    const result = await this.router.confirmAndExecute(
+    const result = await this._runWithCommandTimeout(this.router.confirmAndExecute(
       pending.commandId,
       pending.intentId,
       pending.entities,
@@ -312,7 +321,12 @@ class Assistant extends EventEmitter {
         originalInput: pending.multiCommand?.confirmedInput || pending.originalInput,
         permissionGuard: pending.permissionGuard
       }
-    );
+    ), {
+      input: pending.originalInput || '',
+      routedInput: pending.multiCommand?.confirmedInput || pending.originalInput || '',
+      source: pending.source || 'confirmation',
+      stage: 'confirmAction'
+    });
     if (result.success && pending?.multiCommand) {
       return this._continuePendingMultiCommand(pending, result, pending.source || 'chat');
     }
@@ -1122,7 +1136,7 @@ class Assistant extends EventEmitter {
     if (this._isConfirmPhrase(normalized)) {
       const pending = this.pendingConfirmation;
       this.pendingConfirmation = null;
-      const result = await this.router.confirmAndExecute(
+      const result = await this._runWithCommandTimeout(this.router.confirmAndExecute(
         pending.commandId,
         pending.intentId,
         pending.entities,
@@ -1131,7 +1145,12 @@ class Assistant extends EventEmitter {
           originalInput: pending.multiCommand?.confirmedInput || pending.originalInput,
           permissionGuard: pending.permissionGuard
         }
-      );
+      ), {
+        input,
+        routedInput: pending.multiCommand?.confirmedInput || pending.originalInput || '',
+        source,
+        stage: 'pending-confirmation'
+      });
       if (pending.multiCommand) {
         return this._continuePendingMultiCommand(pending, result, source);
       }
@@ -1204,9 +1223,14 @@ class Assistant extends EventEmitter {
     const remaining = Array.isArray(multi.remainingCommands) ? multi.remainingCommands : [];
     for (let index = 0; index < remaining.length; index += 1) {
       const clause = remaining[index];
-      const result = await this.router.process(clause, source, {
+      const result = await this._runWithCommandTimeout(this.router.process(clause, source, {
         allowMulti: false,
         permissionGuard: pending.permissionGuard
+      }), {
+        input: pending.originalInput || clause,
+        routedInput: clause,
+        source,
+        stage: 'multi-command'
       });
       const step = {
         commandId: result.commandId || null,
@@ -1317,7 +1341,7 @@ class Assistant extends EventEmitter {
       normalized === 'ya';
     if (pending.data?.confirmEntities && (this._isConfirmPhrase(normalized) || confirmsBlankTab)) {
       this.pendingClarification = null;
-      const result = await this.router.confirmAndExecute(
+      const result = await this._runWithCommandTimeout(this.router.confirmAndExecute(
         pending.commandId,
         pending.intentId,
         {
@@ -1325,7 +1349,12 @@ class Assistant extends EventEmitter {
           ...pending.data.confirmEntities
         },
         { source }
-      );
+      ), {
+        input,
+        routedInput: pending.originalInput || input,
+        source,
+        stage: 'clarification-confirmation'
+      });
       const response = this.personality.applyToResponse(result.response || '');
       return {
         ...result,
@@ -1354,12 +1383,17 @@ class Assistant extends EventEmitter {
 
     this.pendingClarification = null;
     const clarifiedEntities = this._buildClarifiedEntities(pending.entities, choice);
-    const result = await this.router.confirmAndExecute(
+    const result = await this._runWithCommandTimeout(this.router.confirmAndExecute(
       pending.commandId,
       pending.intentId,
       clarifiedEntities,
       { source }
-    );
+    ), {
+      input,
+      routedInput: pending.originalInput || input,
+      source,
+      stage: 'clarification-choice'
+    });
     this.context.record(
       pending.originalInput || input,
       result.entities || clarifiedEntities,
@@ -1606,6 +1640,7 @@ class Assistant extends EventEmitter {
 
     const earlyLastFileEntry = this.context.getLastFileReference();
     const earlyLastFile = this.context.getFileReference(earlyLastFileEntry);
+    const earlyLastFolderPath = this._getLastFolderReferencePath();
     if (/^(?:where\s+is\s+(?:it|that)\s+(?:located|saved)|where\s+did\s+i\s+save\s+(?:it|that))$/i.test(normalized)) {
       return earlyLastFile?.path || earlyLastFile?.name
         ? `what is the location of ${earlyLastFile.path || earlyLastFile.name}`
@@ -1618,6 +1653,11 @@ class Assistant extends EventEmitter {
         return `open ${path.dirname(earlyLastFile.path)}`;
       }
       return '';
+    }
+
+    const phoneTransferFollowUp = this._resolvePhoneTransferFollowUp(normalized, earlyLastFile, earlyLastFolderPath);
+    if (phoneTransferFollowUp) {
+      return phoneTransferFollowUp;
     }
 
     const lastReference = this._getLastReferenceTarget();
@@ -1696,6 +1736,70 @@ class Assistant extends EventEmitter {
     }
 
     return `list ${type ? `${type} ` : ''}files in ${path}`;
+  }
+
+  _getLastFolderReferencePath() {
+    const entry = this.context.findRecent(candidate =>
+      candidate?.success &&
+      (
+        candidate?.intent === 'folder.open' ||
+        (candidate?.intent === 'file.list' && candidate?.entities?.path)
+      )
+    , 30);
+    return String(entry?.data?.path || entry?.entities?.path || '').trim();
+  }
+
+  _resolvePhoneTransferFollowUp(normalized, lastFile, lastFolderPath) {
+    const phoneTargetPattern = /\b(?:to|with)\s+(?:my\s+)?(?:phone|mobile|iphone|android|device|this\s+phone)\b/;
+    if (!phoneTargetPattern.test(normalized)) {
+      return '';
+    }
+
+    const transferVerbMatch = normalized.match(/^(send|share|transfer)\b/);
+    if (!transferVerbMatch) {
+      return '';
+    }
+    const verb = transferVerbMatch[1];
+    const path = require('path');
+
+    if (/^(?:send|share|transfer)\s+(?:it|that|this)(?:\s+file)?\s+(?:to|with)\s+(?:my\s+)?(?:phone|mobile|iphone|android|device|this\s+phone)$/i.test(normalized)) {
+      return lastFile?.path ? `${verb} ${lastFile.path} to my phone` : '';
+    }
+
+    if (/^(?:send|share|transfer)\s+(?:it|that|this)\s+image\s+(?:to|with)\s+(?:my\s+)?(?:phone|mobile|iphone|android|device|this\s+phone)$/i.test(normalized)) {
+      return lastFile?.path ? `${verb} ${lastFile.path} to my phone` : '';
+    }
+
+    if (/^(?:send|share|transfer)\s+(?:its|it'?s|that|the)\s+folder\s+(?:to|with)\s+(?:my\s+)?(?:phone|mobile|iphone|android|device|this\s+phone)$/i.test(normalized)) {
+      if (lastFile?.path) {
+        return `${verb} ${path.dirname(lastFile.path)} to my phone`;
+      }
+      return lastFolderPath ? `${verb} ${lastFolderPath} to my phone` : '';
+    }
+
+    if (/^(?:send|share|transfer)\s+(?:this|that|the)\s+folder\s+(?:to|with)\s+(?:my\s+)?(?:phone|mobile|iphone|android|device|this\s+phone)$/i.test(normalized)) {
+      return lastFolderPath ? `${verb} ${lastFolderPath} to my phone` : '';
+    }
+
+    return '';
+  }
+
+  async _runWithCommandTimeout(promise, context = {}) {
+    let timer = null;
+    try {
+      return await Promise.race([
+        Promise.resolve(promise),
+        new Promise((_, reject) => {
+          timer = setTimeout(() => {
+            const error = new Error('Command timed out');
+            error.code = 'command_timeout';
+            reject(error);
+          }, this.commandTimeoutMs);
+        })
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
   }
 
   _resolveScheduleFollowUp(normalized) {

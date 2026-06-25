@@ -149,6 +149,7 @@ const IPC_VALIDATORS = Object.freeze({
   'config:get': validateEmpty,
   'settings:get': validateEmpty,
   'phone:pairingQR:create': validateEmpty,
+  'phone:server:status': validateEmpty,
   'phone:devices:list': validateEmpty,
   'phone:device:permissions:update': validatePhonePermissions,
   'phone:device:remove': validatePhoneDevice,
@@ -198,7 +199,7 @@ function createSecureWebPreferences(preloadPath) {
     allowRunningInsecureContent: false,
     enableRemoteModule: false,
     webviewTag: false,
-    spellcheck: true
+    spellcheck: false
   });
 }
 

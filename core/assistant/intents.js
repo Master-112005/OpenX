@@ -250,6 +250,23 @@ const INTENT_DEFINITIONS = [
     description: 'Search for local folders'
   },
   {
+    id: 'phone.sendFile',
+    patterns: [
+      'send file to my phone',
+      'share file with my phone',
+      'transfer file to my phone',
+      'send folder to my phone',
+      'share image to my phone'
+    ],
+    permissionLevel: 'low',
+    action: 'phone.sendFile',
+    entities: [
+      { name: 'path', type: 'string', required: true },
+      { name: 'transferKind', type: 'string', required: false }
+    ],
+    description: 'Send a local file, image, or folder to the connected phone that issued the request'
+  },
+  {
     id: 'browser.open',
     patterns: ['open website', 'go to website', 'open url', 'open new tab', 'open new chrome tab', 'navigate to', 'browse to', 'open', 'go to'],
     permissionLevel: 'low',

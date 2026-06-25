@@ -92,6 +92,9 @@ const ACTION_ALIASES = new Map([
   ['continue', 'resume'],
   ['unpause', 'resume'],
   ['play', 'play'],
+  ['send', 'send'],
+  ['share', 'send'],
+  ['transfer', 'send'],
   ['open', 'open'],
   ['launch', 'open'],
   ['start', 'open'],
@@ -250,6 +253,10 @@ class CommandFrameParser {
 
     if (action === 'open' && /\bnew\s+(?:chrome\s+)?tab\b/.test(normalizedText)) {
       return 'browser-tab';
+    }
+
+    if (hasFile && action === 'send' && /\b(?:phone|mobile|iphone|android|device)\b/.test(normalizedText)) {
+      return 'phone-transfer';
     }
 
     if (hasFile) {

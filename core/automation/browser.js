@@ -2,7 +2,12 @@ const Logger = require('../assistant/Data').Logger;
 const { launchTarget } = require('./common/launcher');
 const WindowsSessionController = require('./common/windows-session');
 const { resolveTrustedWebTarget } = require('../assistant/nlp/web-targets');
+const dns = require('dns');
 const https = require('https');
+
+const INTERNET_ERROR_MESSAGE = 'Please check your connection.';
+const CONNECTIVITY_CACHE_TTL_MS = 10000;
+const CONNECTIVITY_TIMEOUT_MS = 1500;
 
 const SITE_SEARCH_TARGETS = [
   {
@@ -69,6 +74,63 @@ class BrowserController {
     this.defaultBrowser = this._detectBrowser();
     this.windowSession = new WindowsSessionController(config);
     this.lastSearch = null;
+    this.connectivityCacheTtlMs = config?.system?.connectivityCacheTtlMs || CONNECTIVITY_CACHE_TTL_MS;
+    this.connectivityTimeoutMs = config?.system?.connectivityTimeoutMs || CONNECTIVITY_TIMEOUT_MS;
+    this._connectivityStatus = {
+      checkedAt: 0,
+      online: null
+    };
+  }
+
+  isInternetRequiredAction(actionId, entities = {}) {
+    switch (String(actionId || '')) {
+      case 'browser.search':
+      case 'browser.openFirstResult':
+        return true;
+      case 'browser.siteSearch': {
+        const target = this._resolveSiteSearchTarget(entities.site);
+        return this._isInternetRequiredUrl(target?.homeUrl || '');
+      }
+      case 'browser.open':
+        return this._isInternetRequiredUrl(entities.url || '');
+      case 'media.play':
+      case 'media.search':
+        return String(entities.mediaPlatform || '').trim().toLowerCase() !== 'local';
+      default:
+        return false;
+    }
+  }
+
+  async checkInternetConnection(force = false) {
+    const now = Date.now();
+    if (!force &&
+        this._connectivityStatus.online !== null &&
+        now - this._connectivityStatus.checkedAt < this.connectivityCacheTtlMs) {
+      return this._connectivityStatus.online;
+    }
+
+    const lookupHost = hostname => new Promise(resolve => {
+      dns.lookup(hostname, error => resolve(!error));
+    });
+    const timeout = new Promise(resolve => setTimeout(() => resolve(false), this.connectivityTimeoutMs));
+    const online = await Promise.race([
+      Promise.any([
+        lookupHost('example.com'),
+        lookupHost('cloudflare.com'),
+        lookupHost('google.com')
+      ]).catch(() => false),
+      timeout
+    ]);
+
+    this._connectivityStatus = {
+      checkedAt: now,
+      online: online === true
+    };
+    return this._connectivityStatus.online;
+  }
+
+  offlineResponse() {
+    return { success: false, error: INTERNET_ERROR_MESSAGE };
   }
 
   _detectBrowser() {
@@ -181,6 +243,9 @@ class BrowserController {
     if (!query) {
       return { success: false, error: 'No search query provided' };
     }
+    if (!(await this.checkInternetConnection())) {
+      return this.offlineResponse();
+    }
 
     const searchUrl = `https://www.google.com/search?q=${encodeURIComponent(query)}`;
     this.lastSearch = { query, searchUrl, results: [], openedInBrowser: false };
@@ -250,6 +315,9 @@ class BrowserController {
     const requestedQuery = String(query || this.lastSearch?.query || '').trim();
     if (!requestedQuery) {
       return { success: false, error: 'No previous search to open' };
+    }
+    if (!(await this.checkInternetConnection())) {
+      return this.offlineResponse();
     }
 
     const followsVisibleGoogleSearch = Boolean(
@@ -332,6 +400,10 @@ class BrowserController {
 
   _resolveTrustedWebTarget(query) {
     return resolveTrustedWebTarget(query);
+  }
+
+  _isInternetRequiredUrl(url) {
+    return /^https?:\/\//i.test(String(url || '').trim());
   }
 
   _normalizeResultUrl(url) {
@@ -819,5 +891,7 @@ class BrowserController {
       /\b(?:winner|champion)\s+of\b/.test(normalized);
   }
 }
+
+BrowserController.INTERNET_ERROR_MESSAGE = INTERNET_ERROR_MESSAGE;
 
 module.exports = BrowserController;

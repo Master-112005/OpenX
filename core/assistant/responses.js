@@ -137,6 +137,10 @@ function humanizeError(error) {
   if (lowered.includes('source not found')) return 'Unable to find the source item';
   if (lowered.includes('destination could not be resolved')) return 'Unable to determine the destination for that move or copy operation';
   if (lowered.includes('permission')) return 'I cannot complete that with the current permission setting';
+  if (lowered.includes('trusted device is not connected')) return 'Your phone is paired, but it is not connected right now';
+  if (lowered.includes('device not paired')) return 'That phone is not paired';
+  if (lowered.includes('transfer source path is required')) return 'I need a file, folder, or image to send';
+  if (lowered.includes('could not determine which file or folder to send')) return 'I could not determine which file, folder, or image you want me to send';
   if (lowered.includes('invalid filename')) return 'That filename is not valid on this system';
   if (lowered.includes('invalid folder name')) return 'That folder name is not valid on this system';
   if (lowered.includes('already exists')) return 'That item already exists';
@@ -763,6 +767,16 @@ const RESPONSE_BUILDERS = {
       const entries = valueFromContext(context, 'entries', []);
       if (!Array.isArray(entries) || entries.length === 0) return 'You have no matching reminders.';
       return `Your reminders are: ${entries.slice(0, 5).map(entry => entry.message).join(', ')}.`;
+    },
+    'phone.sendFile': context => {
+      const transferredName = valueFromContext(context, 'transferredName') ||
+        basenameOrValue(valueFromContext(context, 'path'));
+      const deviceName = valueFromContext(context, 'deviceName', 'your phone');
+      return chooseVariant(`phone.sendFile:${transferredName}:${deviceName}`, [
+        `Sent ${transferredName} to ${deviceName}.`,
+        `${transferredName} has been transferred to ${deviceName}.`,
+        `I sent ${transferredName} to ${deviceName}.`
+      ]);
     },
     'reminder.cancel': () => 'Cancelled the latest reminder.',
     'reminder.clear': context => `Cancelled ${valueFromContext(context, 'count', 0)} reminder${valueFromContext(context, 'count', 0) === 1 ? '' : 's'}.`,

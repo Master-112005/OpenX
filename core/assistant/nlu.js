@@ -43,14 +43,17 @@ const ACTION_ALIASES = new Map([
   ['resume', 'resume'],
   ['run', 'open'],
   ['search', 'search'],
+  ['send', 'send'],
   ['set', 'set'],
   ['show', 'show'],
+  ['share', 'send'],
   ['skip', 'next'],
   ['start', 'open'],
   ['stop', 'stop'],
   ['stream', 'play'],
   ['switch', 'switch'],
   ['terminate', 'close'],
+  ['transfer', 'send'],
   ['turn', 'set'],
   ['unmute', 'unmute'],
   ['unpause', 'resume'],
@@ -65,6 +68,7 @@ const DOMAIN_TERMS = {
   brightness: new Set(['brightness', 'display', 'light', 'screen']),
   window: new Set(['fullscreen', 'maximize', 'minimize', 'screen', 'tab', 'window']),
   file: new Set(['directory', 'document', 'documents', 'file', 'files', 'folder', 'folders', 'pdf', 'photo', 'photos', 'picture', 'pictures']),
+  phoneTransfer: new Set(['android', 'device', 'iphone', 'mobile', 'phone']),
   web: new Set(['browser', 'chrome', 'edge', 'firefox', 'google', 'internet', 'site', 'website', 'web', 'youtube']),
   schedule: new Set(['alarm', 'alarms', 'clock', 'remind', 'reminder', 'reminders', 'timer', 'timers'])
 };
@@ -255,6 +259,9 @@ class NaturalLanguageRouter {
       return 'browser-tab';
     }
 
+    if ((/\.[a-z0-9]{1,10}\b/i.test(text) || has('file')) && action === 'send' && has('phoneTransfer')) {
+      return 'phone-transfer';
+    }
     if (/\.[a-z0-9]{1,10}\b/i.test(text) || has('file')) {
       return 'local-file';
     }
@@ -345,6 +352,10 @@ class NaturalLanguageRouter {
       if (action === 'switch') return 'app.switch';
     }
 
+    if (domain === 'phone-transfer' && action === 'send') {
+      return 'phone.sendFile';
+    }
+
     if (domain === 'local-file' && action === 'search') {
       return /\b(?:folder|folders|directory|directories)\b/.test(text)
         ? 'folder.search'
@@ -378,6 +389,19 @@ class NaturalLanguageRouter {
 
     if (intent.id === 'file.search' || intent.id === 'folder.search') {
       entities.query = this._extractLocalSearchQuery(rawText, frame);
+    }
+
+    if (intent.id === 'phone.sendFile') {
+      entities.transferKind = /\b(?:folder|directory)\b/i.test(rawText)
+        ? 'folder'
+        : /\b(?:image|images|photo|photos|picture|pictures|screenshot|screenshots)\b/i.test(rawText)
+          ? 'image'
+          : 'file';
+      const source = rawText
+        .replace(/^(?:send|share|transfer)\s+/i, '')
+        .replace(/\s+(?:to|with)\s+(?:my\s+)?(?:phone|mobile|iphone|android|device|this\s+phone)\s*$/i, '')
+        .trim();
+      entities.path = entities.path || source;
     }
 
     if (intent.id === 'browser.open' && frame.domain === 'browser-tab') {

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, globalShortcut } = require('electron');
+const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, globalShortcut, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -41,6 +41,31 @@ const STABLE_RUNTIME_MS = 2 * 60 * 1000;
 if (!app.isPackaged) {
   app.setPath('userData', path.join(app.getPath('appData'), 'OpenX-Development'));
 }
+
+try {
+  app.commandLine.appendSwitch('disable-background-networking');
+  app.commandLine.appendSwitch('disable-component-update');
+  app.commandLine.appendSwitch('disable-client-side-phishing-detection');
+  app.commandLine.appendSwitch('disable-domain-reliability');
+  app.commandLine.appendSwitch('no-default-browser-check');
+  app.commandLine.appendSwitch('disable-sync');
+  app.commandLine.appendSwitch('metrics-recording-only');
+  app.commandLine.appendSwitch('no-pings');
+  app.commandLine.appendSwitch(
+    'disable-features',
+    [
+      'WinRetrieveSuggestionsOnlyOnDemand',
+      'AutofillServerCommunication',
+      'CertificateTransparencyComponentUpdater',
+      'DnsOverHttps',
+      'InterestFeedContentSuggestions',
+      'MediaRouter',
+      'NetworkTimeServiceQuerying',
+      'OptimizationHints',
+      'UseDnsHttpsSvcb'
+    ].join(',')
+  );
+} catch (_) {}
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
@@ -126,6 +151,7 @@ const IPC_CHANNELS = [
   'config:get',
   'settings:get',
   'phone:pairingQR:create',
+  'phone:server:status',
   'phone:devices:list',
   'phone:device:permissions:update',
   'phone:device:remove',
@@ -143,6 +169,14 @@ function ensureDataDir() {
   }
   if (!fs.existsSync(paths.logsDir)) {
     fs.mkdirSync(paths.logsDir, { recursive: true });
+  }
+}
+
+function disableSpellChecker() {
+  try {
+    session.defaultSession?.setSpellCheckerEnabled?.(false);
+  } catch (error) {
+    mainLogger.warn('Failed to disable spell checker', { error: error.message });
   }
 }
 
@@ -461,6 +495,19 @@ function setupIPC() {
     return qrPairingService.generatePairingQR();
   });
 
+  registerIpcHandler('phone:server:status', async () => {
+    return phoneServer?.getStatus?.() || {
+      serverStatus: 'stopped',
+      running: false,
+      currentIp: null,
+      currentPort: runtimeConfig?.phone?.port || null,
+      currentVersion: QRPairingService.PROTOCOL_VERSION,
+      protocolVersion: QRPairingService.PROTOCOL_VERSION,
+      host: runtimeConfig?.phone?.host || null,
+      connectedDevices: []
+    };
+  });
+
   registerIpcHandler('phone:devices:list', async () => {
     return phoneDeviceRegistry?.listDevices() || [];
   });
@@ -690,6 +737,7 @@ async function initializeAssistant() {
 
 async function initializePhoneServer() {
   const commandRouter = new PhoneCommandRouter(() => assistant);
+  const resolvePhoneServerIp = () => QRPairingService.resolveDesktopIpv4();
   const deviceRegistry = new DeviceRegistry({
     filePath: runtimeConfig.app.dataPaths.phoneDevicesPath,
     logger: mainLogger
@@ -716,14 +764,20 @@ async function initializePhoneServer() {
     logger: mainLogger,
     sendToDevice: (deviceId, payload) => phoneServer?.sendToDevice(deviceId, payload) === true
   });
+  if (assistant?.automation) {
+    assistant.automation.fileTransferManager = fileTransferManager;
+  }
   qrPairingService = new QRPairingService({
     pairingService,
     serverPort: runtimeConfig?.phone?.port,
+    resolveServerIp: resolvePhoneServerIp,
     logger: mainLogger
   });
   phoneServer = new PhoneServer({
     host: runtimeConfig?.phone?.host,
     port: runtimeConfig?.phone?.port,
+    protocolVersion: QRPairingService.PROTOCOL_VERSION,
+    resolveServerIp: resolvePhoneServerIp,
     commandRouter,
     pairingService,
     fileTransferManager,
@@ -832,6 +886,7 @@ app.on('child-process-gone', (_event, details) => {
 });
 
 app.whenReady().then(async () => {
+  disableSpellChecker();
   settingsService = new SettingsService(BASE_CONFIG);
   runtimeConfig = settingsService.buildRuntimeConfig();
   eventBus = new AssistantEventBus();

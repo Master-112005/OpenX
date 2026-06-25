@@ -39,10 +39,11 @@ describe('Phone QR pairing', function() {
         serverIp: '192.168.1.20',
         serverPort: 8080,
         pairingToken: 'ABC123XY',
-        expiresAt: 301000
+        expiresAt: 301000,
+        protocolVersion: 1
       });
       assert.deepEqual(Object.keys(result.payload).sort(), [
-        'expiresAt', 'pairingToken', 'serverIp', 'serverPort'
+        'expiresAt', 'pairingToken', 'protocolVersion', 'serverIp', 'serverPort'
       ]);
       assert.deepEqual(service.getPairingPayload(), result.payload);
     } finally {

@@ -139,8 +139,11 @@ describe('Phone security hardening', function() {
     }));
     const paired = await responsePromise;
     assert.equal(paired.type, 'pair-success');
+    assert.equal(paired.deviceId, 'phone001');
     assert.equal(paired.sessionToken, 'a'.repeat(64));
     assert.equal(paired.expiresAt, now + 24 * 60 * 60 * 1000);
+    assert.equal(typeof paired.serverIp, 'string');
+    assert.equal(paired.serverPort, address.port);
 
     responsePromise = nextJson(socket);
     socket.send(JSON.stringify({

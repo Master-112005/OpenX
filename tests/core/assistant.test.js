@@ -857,6 +857,92 @@ describe('Assistant Confirmation Flow', function() {
     assert.equal(routedInputs[1], `open ${filePath}`);
   });
 
+  it('should rewrite phone transfer follow-ups using the last file reference', async function() {
+    const routedInputs = [];
+    const filePath = 'C:\\Users\\rakes\\Documents\\PASSWORDS.txt';
+    const router = {
+      process: async (input) => {
+        routedInputs.push(input);
+        if (routedInputs.length === 1) {
+          return {
+            commandId: 'cmd-file-search-phone',
+            success: true,
+            intent: 'file.search',
+            entities: { query: 'passwords' },
+            data: {
+              query: 'passwords',
+              count: 1,
+              entries: [{ name: 'PASSWORDS.txt', type: 'file', path: filePath }]
+            },
+            response: 'I found 1 matching item: PASSWORDS.txt.'
+          };
+        }
+
+        return {
+          commandId: 'cmd-phone-send',
+          success: true,
+          intent: 'phone.sendFile',
+          entities: { path: input.replace(/^send\s+/i, '').replace(/\s+to my phone$/i, '') },
+          data: { transferredName: 'PASSWORDS.txt', deviceName: 'Galaxy S25' },
+          response: 'Sent PASSWORDS.txt to Galaxy S25.'
+        };
+      }
+    };
+
+    const assistant = new Assistant({ activeLearning: { enabled: false } }, {
+      router,
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    await assistant.processCommand('find passwords file', 'phone');
+    const sent = await assistant.processCommand('send it to my phone', 'phone');
+
+    assert.equal(sent.success, true);
+    assert.equal(routedInputs[1], `send ${filePath} to my phone`);
+  });
+
+  it('should rewrite folder transfer follow-ups using the last folder reference', async function() {
+    const routedInputs = [];
+    const folderPath = 'C:\\Users\\rakes\\Pictures\\Screenshots';
+    const router = {
+      process: async (input) => {
+        routedInputs.push(input);
+        if (routedInputs.length === 1) {
+          return {
+            commandId: 'cmd-folder-open-phone',
+            success: true,
+            intent: 'folder.open',
+            entities: { folderName: 'screenshots' },
+            data: { path: folderPath, folderName: 'Screenshots' },
+            response: 'Opening Screenshots.'
+          };
+        }
+
+        return {
+          commandId: 'cmd-folder-send-phone',
+          success: true,
+          intent: 'phone.sendFile',
+          entities: { path: folderPath, transferKind: 'folder' },
+          data: { transferredName: 'Screenshots.zip', deviceName: 'Galaxy S25' },
+          response: 'Sent Screenshots.zip to Galaxy S25.'
+        };
+      }
+    };
+
+    const assistant = new Assistant({ activeLearning: { enabled: false } }, {
+      router,
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    await assistant.processCommand('open screenshots folder', 'phone');
+    const sent = await assistant.processCommand('send this folder to my phone', 'phone');
+
+    assert.equal(sent.success, true);
+    assert.equal(routedInputs[1], `send ${folderPath} to my phone`);
+  });
+
   it('should allow the user to cancel a pending confirmation', async function() {
     const router = {
       process: async () => ({
@@ -1868,5 +1954,25 @@ describe('Assistant Confirmation Flow', function() {
     assert.equal(history[0].verification.check, 'file-exists');
     assert.equal(summary.verifiedCommands, 1);
     assert.equal(summary.failedVerificationCommands, 0);
+  });
+
+  it('should fail fast when command routing stalls', async function() {
+    const router = {
+      process: async () => new Promise(() => {})
+    };
+    const assistant = new Assistant({
+      assistant: { commandTimeoutMs: 25 }
+    }, {
+      router,
+      learning: { enabled: false },
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    const result = await assistant.processCommand('open chrome');
+
+    assert.equal(result.success, false);
+    assert.equal(result.error, 'Command timed out');
+    assert.match(result.response, /timed out/i);
   });
 });

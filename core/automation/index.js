@@ -1,3 +1,5 @@
+const fs = require('fs');
+const path = require('path');
 const Logger = require('../assistant/Data').Logger;
 const Normalizer = require('../assistant/Data').Normalizer;
 const VolumeController = require('./volume');
@@ -14,6 +16,11 @@ const SchedulerController = require('./scheduler');
 const ScreenshotController = require('./screenshot-recording');
 const FormAutomation = require('../../plugins/forms');
 const ActionVerifier = require('./common/action-verification');
+const {
+  cleanEntityName,
+  requireSafeUserPath,
+  resolveDirectory
+} = require('./common/path-utils');
 
 class AutomationEngine {
   constructor(config) {
@@ -37,6 +44,7 @@ class AutomationEngine {
       browser: this.browser,
       windows: this.windows
     });
+    this.fileTransferManager = config?.fileTransferManager || null;
     this.verifier = new ActionVerifier({
       apps: this.apps,
       browser: this.browser,
@@ -107,6 +115,7 @@ class AutomationEngine {
       'folder.move': (entities) => this.folders.move(entities.source, entities.destination),
       'folder.open': (entities) => this.folders.open(entities.folderName, entities),
       'folder.search': (entities) => this.folders.search(entities.query),
+      'phone.sendFile': (entities, context) => this._sendFileToPhone(entities, context),
       'browser.open': (entities) => this.browser.open(entities.url, entities),
       'browser.search': (entities) => this.browser.search(entities.query, entities),
       'browser.siteSearch': (entities) => this.browser.siteSearch(entities.site, entities.query, entities),
@@ -211,7 +220,7 @@ class AutomationEngine {
     };
   }
 
-  async execute(actionId, entities) {
+  async execute(actionId, entities, context = {}) {
     const handler = this._actionMap[actionId];
     if (!handler) {
       this.logger.error(`Unknown action: ${actionId}`);
@@ -222,8 +231,14 @@ class AutomationEngine {
     }
 
     try {
+      if (this.browser?.isInternetRequiredAction?.(actionId, entities || {})) {
+        const online = await this.browser.checkInternetConnection();
+        if (!online) {
+          return this.verifier.verify(actionId, entities || {}, this.browser.offlineResponse());
+        }
+      }
       this.logger.info(`Executing: ${actionId}`, entities);
-      const result = await handler(entities || {});
+      const result = await handler(entities || {}, context || {});
       return this.verifier.verify(actionId, entities || {}, result);
     } catch (err) {
       this.logger.error(`Action execution failed: ${actionId}`, err);
@@ -232,6 +247,160 @@ class AutomationEngine {
         error: err.message
       });
     }
+  }
+
+  async _sendFileToPhone(entities = {}, context = {}) {
+    if (!this.fileTransferManager || typeof this.fileTransferManager.sendFileToDevice !== 'function') {
+      return { success: false, error: 'Phone file transfer is unavailable' };
+    }
+
+    const phoneContext = context?.phoneContext || {};
+    const deviceId = String(entities.deviceId || phoneContext.deviceId || '').trim();
+    if (!deviceId) {
+      return { success: false, error: 'Phone device context is missing' };
+    }
+
+    const resolved = await this._resolvePhoneTransferSource(entities);
+    if (resolved?.needsClarification) {
+      return resolved;
+    }
+    if (!resolved?.path) {
+      return { success: false, error: 'Could not determine which file or folder to send' };
+    }
+
+    const transfer = await this.fileTransferManager.sendFileToDevice(deviceId, resolved.path);
+    return {
+      success: true,
+      data: {
+        deviceId,
+        deviceName: phoneContext.deviceName || 'your phone',
+        path: resolved.path,
+        transferKind: resolved.transferKind,
+        transferredName: transfer?.record?.fileName || path.basename(resolved.path),
+        record: transfer?.record || null
+      }
+    };
+  }
+
+  async _resolvePhoneTransferSource(entities = {}) {
+    const explicitPath = String(entities.selectedPath || entities.path || entities.sourcePath || '').trim();
+    const transferKind = String(entities.transferKind || '').trim().toLowerCase() || 'file';
+
+    if (explicitPath && path.isAbsolute(explicitPath) && fs.existsSync(explicitPath)) {
+      const stats = fs.statSync(explicitPath);
+      return {
+        path: stats.isDirectory()
+          ? requireSafeUserPath(explicitPath, { allowRoot: true })
+          : requireSafeUserPath(explicitPath),
+        transferKind: stats.isDirectory() ? 'folder' : transferKind
+      };
+    }
+
+    const rawSource = String(
+      entities.sourcePath ||
+      entities.path ||
+      entities.source ||
+      entities.filename ||
+      entities.folderName ||
+      entities.query ||
+      ''
+    ).trim();
+    if (!rawSource) {
+      return null;
+    }
+
+    const normalizedSource = rawSource
+      .replace(/^["']|["']$/g, '')
+      .replace(/\s+(?:to|with)\s+(?:my\s+)?(?:phone|mobile|iphone|android|device|this\s+phone)\s*$/i, '')
+      .trim();
+
+    const imageLike = transferKind === 'image' || /\b(?:image|images|photo|photos|picture|pictures|screenshot|screenshots)\b/i.test(normalizedSource);
+    if (/\b(?:latest|newest|recent)\b/i.test(normalizedSource) && imageLike) {
+      const smart = this.files.smartFind({
+        query: normalizedSource,
+        fileType: 'image',
+        sortBy: 'recent',
+        openResult: false
+      });
+      const smartPath = String(
+        smart?.data?.opened?.path ||
+        smart?.data?.entries?.[0]?.path ||
+        smart?.data?.results?.[0] ||
+        ''
+      ).trim();
+      if (smartPath) {
+        return { path: requireSafeUserPath(smartPath), transferKind: 'image' };
+      }
+    }
+
+    const folderCandidate = normalizedSource
+      .replace(/^(?:the|a|an|my)\s+/i, '')
+      .replace(/\s+(?:folder|directory)$/i, '')
+      .trim();
+    if (transferKind === 'folder' || /\b(?:folder|directory)\b/i.test(normalizedSource)) {
+      const specialFolder = resolveDirectory(folderCandidate, { mustExist: true });
+      if (specialFolder) {
+        return { path: requireSafeUserPath(specialFolder, { allowRoot: true }), transferKind: 'folder' };
+      }
+      const folderMatches = this.folders._findFolderMatches(folderCandidate);
+      if (folderMatches.length > 1) {
+        return {
+          success: false,
+          needsClarification: true,
+          error: this.folders._buildAmbiguousFolderMessage(folderCandidate, folderMatches.slice(0, 8).map((folderPath, index) => ({
+            index: index + 1,
+            path: folderPath
+          })))
+        };
+      }
+      if (folderMatches[0]) {
+        return { path: requireSafeUserPath(folderMatches[0], { allowRoot: true }), transferKind: 'folder' };
+      }
+    }
+
+    const specialDirectory = resolveDirectory(folderCandidate, { mustExist: true });
+    if (specialDirectory && fs.statSync(specialDirectory).isDirectory()) {
+      return { path: requireSafeUserPath(specialDirectory, { allowRoot: true }), transferKind: 'folder' };
+    }
+
+    const fileCandidate = cleanEntityName(normalizedSource, { stripTypeWords: true }) || normalizedSource;
+    const fileMatches = this.files._findFileMatches(fileCandidate, entities);
+    if (fileMatches.length > 1) {
+      return {
+        success: false,
+        needsClarification: true,
+        error: this.files._buildAmbiguousFileMessage(fileCandidate, fileMatches.slice(0, 8).map((filePath, index) => ({
+          index: index + 1,
+          path: filePath
+        })))
+      };
+    }
+    if (fileMatches[0]) {
+      return {
+        path: requireSafeUserPath(fileMatches[0]),
+        transferKind: imageLike ? 'image' : 'file'
+      };
+    }
+
+    const fallbackSmart = this.files.smartFind({
+      query: normalizedSource,
+      fileType: imageLike ? 'image' : undefined,
+      openResult: false
+    });
+    const fallbackPath = String(
+      fallbackSmart?.data?.opened?.path ||
+      fallbackSmart?.data?.entries?.[0]?.path ||
+      fallbackSmart?.data?.results?.[0] ||
+      ''
+    ).trim();
+    if (fallbackPath && fs.existsSync(fallbackPath)) {
+      return {
+        path: requireSafeUserPath(fallbackPath),
+        transferKind: imageLike ? 'image' : 'file'
+      };
+    }
+
+    return null;
   }
 
   async _closeBrowserTab(entities = {}) {

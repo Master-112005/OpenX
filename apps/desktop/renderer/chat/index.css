@@ -531,6 +531,43 @@
   font-weight: 700;
 }
 
+.phone-server-card {
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 18px;
+  display: grid;
+  gap: 14px;
+  margin-top: 14px;
+  padding: 16px;
+}
+
+.phone-server-heading {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.phone-server-heading span,
+.phone-server-item span {
+  color: var(--muted-color);
+  font-size: 11px;
+}
+
+.phone-server-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.phone-server-item {
+  background: rgba(255, 255, 255, 0.055);
+  border-radius: 12px;
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+}
+
 .phone-devices-heading {
   align-items: center;
   display: flex;

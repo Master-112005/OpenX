@@ -9,6 +9,7 @@ describe('Browser Controller', function() {
 
   it('should search in the background by default', async function() {
     const controller = new BrowserController({});
+    controller.checkInternetConnection = async () => true;
     let opened = false;
 
     controller.open = () => {
@@ -31,6 +32,7 @@ describe('Browser Controller', function() {
 
   it('should open the browser when explicitly requested', async function() {
     const controller = new BrowserController({});
+    controller.checkInternetConnection = async () => true;
     let openedUrl = '';
 
     controller.open = (url) => {
@@ -150,6 +152,7 @@ describe('Browser Controller', function() {
 
   it('should open the first result from the last search query', async function() {
     const controller = new BrowserController({});
+    controller.checkInternetConnection = async () => true;
     let openedUrl = '';
 
     controller.open = (url) => {
@@ -179,6 +182,7 @@ describe('Browser Controller', function() {
 
   it('should use the visible Google search when opening the first link', async function() {
     const controller = new BrowserController({});
+    controller.checkInternetConnection = async () => true;
     const openedUrls = [];
     controller.open = url => {
       openedUrls.push(url);
@@ -200,6 +204,7 @@ describe('Browser Controller', function() {
 
   it('should open trusted web app URLs instead of blindly opening the first search result', async function() {
     const controller = new BrowserController({});
+    controller.checkInternetConnection = async () => true;
     let openedUrl = '';
     let searched = false;
 
@@ -231,6 +236,7 @@ describe('Browser Controller', function() {
 
   it('should enhance and extract direct answers for who-won searches', async function() {
     const controller = new BrowserController({});
+    controller.checkInternetConnection = async () => true;
     let requestedQuery = '';
 
     controller._searchWebInBackground = async function(query) {
@@ -259,6 +265,7 @@ describe('Browser Controller', function() {
 
   it('should avoid direct winner answers when search results do not provide evidence', async function() {
     const controller = new BrowserController({});
+    controller.checkInternetConnection = async () => true;
     let requestedQuery = '';
 
     controller._searchWebInBackground = async function(query) {
@@ -274,6 +281,7 @@ describe('Browser Controller', function() {
 
   it('should not use winner snippets that do not match the requested year', async function() {
     const controller = new BrowserController({});
+    controller.checkInternetConnection = async () => true;
 
     controller._searchWebInBackground = async function(query) {
       return this._rankSearchResults(query, [
@@ -291,6 +299,7 @@ describe('Browser Controller', function() {
 
   it('should extract direct answers for older IPL winner questions', async function() {
     const controller = new BrowserController({});
+    controller.checkInternetConnection = async () => true;
     let requestedQuery = '';
 
     controller._searchWebInBackground = async function(query) {
@@ -312,6 +321,7 @@ describe('Browser Controller', function() {
 
   it('should prefer instant answers before generic search snippets', async function() {
     const controller = new BrowserController({});
+    controller.checkInternetConnection = async () => true;
 
     controller._searchInstantAnswer = async () => ([{
       title: 'Dune',
@@ -334,6 +344,7 @@ describe('Browser Controller', function() {
 
   it('should extract release-date answers from ranked result snippets', async function() {
     const controller = new BrowserController({});
+    controller.checkInternetConnection = async () => true;
 
     controller._searchInstantAnswer = async () => [];
     controller._searchDuckDuckGoHtml = async function(query) {
@@ -356,6 +367,7 @@ describe('Browser Controller', function() {
 
   it('should enhance and answer schedule and best-movie searches from snippets', async function() {
     const controller = new BrowserController({});
+    controller.checkInternetConnection = async () => true;
     const requested = [];
 
     controller._searchInstantAnswer = async () => [];
@@ -378,5 +390,17 @@ describe('Browser Controller', function() {
     assert.ok(requested[1].includes('ranked list'));
     assert.match(schedule.data.answer.text, /FIFA World Cup schedule/);
     assert.match(movies.data.answer.text, /Top Tom Cruise movies/);
+  });
+
+  it('should return a clean message when web search is requested offline', async function() {
+    const controller = new BrowserController({});
+    controller.checkInternetConnection = async () => false;
+
+    const result = await controller.search('apple wwdc');
+
+    assert.deepEqual(result, {
+      success: false,
+      error: 'Please check your connection.'
+    });
   });
 });

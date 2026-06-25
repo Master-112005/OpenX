@@ -3,6 +3,7 @@ const os = require('os');
 const QRCode = require('qrcode');
 
 const DEFAULT_SERVER_PORT = 8080;
+const PROTOCOL_VERSION = 1;
 
 function isPrivateIpv4(address) {
   if (/^10\./.test(address) || /^192\.168\./.test(address)) return true;
@@ -46,7 +47,8 @@ class QRPairingService {
       serverIp: this.resolveServerIp(),
       serverPort: this.serverPort,
       pairingToken: tokenResult.token,
-      expiresAt: tokenResult.expiresAt
+      expiresAt: tokenResult.expiresAt,
+      protocolVersion: PROTOCOL_VERSION
     };
 
     try {
@@ -76,19 +78,30 @@ class QRPairingService {
     return { ...this.currentPairing.payload };
   }
 
+  getPairingConnectionInfo() {
+    return {
+      serverIp: this.resolveServerIp(),
+      serverPort: this.serverPort,
+      protocolVersion: PROTOCOL_VERSION
+    };
+  }
+
   destroy() {
     this._discardCurrentPairing();
   }
 
   _validatePayload(payload) {
     const keys = Object.keys(payload).sort();
-    const requiredKeys = ['expiresAt', 'pairingToken', 'serverIp', 'serverPort'];
+    const requiredKeys = ['expiresAt', 'pairingToken', 'protocolVersion', 'serverIp', 'serverPort'];
     if (keys.length !== requiredKeys.length || keys.some((key, index) => key !== requiredKeys[index])) {
       throw new TypeError('Invalid QR pairing payload fields');
     }
     if (net.isIP(payload.serverIp) !== 4) throw new TypeError('Invalid desktop IP address');
     if (!Number.isInteger(payload.serverPort) || payload.serverPort < 1 || payload.serverPort > 65535) {
       throw new TypeError('Invalid desktop server port');
+    }
+    if (payload.protocolVersion !== PROTOCOL_VERSION) {
+      throw new TypeError('Invalid protocol version');
     }
     if (typeof payload.pairingToken !== 'string' || !/^[A-Z0-9]{8}$/.test(payload.pairingToken)) {
       throw new TypeError('Invalid pairing token');
@@ -128,5 +141,7 @@ class QRPairingService {
 }
 
 QRPairingService.DEFAULT_SERVER_PORT = DEFAULT_SERVER_PORT;
+QRPairingService.PROTOCOL_VERSION = PROTOCOL_VERSION;
+QRPairingService.resolveDesktopIpv4 = resolveDesktopIpv4;
 
 module.exports = QRPairingService;

@@ -137,7 +137,10 @@ describe('Phone device pairing', function() {
     }));
     const paired = await responsePromise;
     assert.equal(paired.type, 'pair-success');
+    assert.equal(paired.deviceId, 'phone001');
     assert.equal(typeof paired.sessionToken, 'string');
+    assert.equal(typeof paired.serverIp, 'string');
+    assert.equal(paired.serverPort, address.port);
     assert.equal(registry.isTrusted('phone001'), true);
     assert.equal(tokenManager.validateToken(generated.token), false);
 

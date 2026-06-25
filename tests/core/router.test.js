@@ -2271,6 +2271,54 @@ describe('Action Router', function() {
     assert.match(result.response, /JARVIS/);
   });
 
+  it('should route send file, folder, and image requests to the phone transfer action', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const executed = [];
+    const stubEngine = {
+      execute(actionId, entities, context) {
+        executed.push({ actionId, entities, context });
+        return {
+          success: true,
+          data: {
+            actionId,
+            ...entities,
+            deviceId: context?.phoneContext?.deviceId || null,
+            deviceName: context?.phoneContext?.deviceName || 'your phone',
+            transferredName: entities.path
+          }
+        };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const fileResult = await router.process('send report.pdf to my phone', 'phone', {
+      phoneContext: { deviceId: 'phone001', deviceName: 'Galaxy S25' }
+    });
+    const folderResult = await router.process('share downloads folder to my phone', 'phone', {
+      phoneContext: { deviceId: 'phone001', deviceName: 'Galaxy S25' }
+    });
+    const imageResult = await router.process('transfer latest screenshot to my phone', 'phone', {
+      phoneContext: { deviceId: 'phone001', deviceName: 'Galaxy S25' }
+    });
+
+    assert.equal(fileResult.intent, 'phone.sendFile');
+    assert.equal(fileResult.entities.path, 'report.pdf');
+    assert.equal(fileResult.entities.transferKind, 'file');
+    assert.equal(folderResult.intent, 'phone.sendFile');
+    assert.equal(folderResult.entities.path, 'downloads folder');
+    assert.equal(folderResult.entities.transferKind, 'folder');
+    assert.equal(imageResult.intent, 'phone.sendFile');
+    assert.equal(imageResult.entities.transferKind, 'image');
+    assert.deepEqual(executed.map(step => step.actionId), [
+      'phone.sendFile',
+      'phone.sendFile',
+      'phone.sendFile'
+    ]);
+    assert.equal(executed[0].context.phoneContext.deviceId, 'phone001');
+  });
+
   it('should answer personal and assistant-name questions locally without web search', async function() {
     const config = {
       permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }

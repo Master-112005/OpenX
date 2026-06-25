@@ -22,6 +22,7 @@ describe('Automation Engine', function() {
     assert.ok(actions.includes('file.list'));
     assert.ok(actions.includes('folder.create'));
     assert.ok(actions.includes('folder.move'));
+    assert.ok(actions.includes('phone.sendFile'));
     assert.ok(actions.includes('browser.open'));
     assert.ok(actions.includes('browser.search'));
     assert.ok(actions.includes('browser.closeTab'));
@@ -145,6 +146,71 @@ describe('Automation Engine', function() {
     assert.equal(result.verification.status, 'unknown');
   });
 
+  it('should send a resolved local file to the requesting phone device', async function() {
+    const tempDir = fs.mkdtempSync(path.join(path.join(os.homedir(), 'Documents'), 'openx-phone-send-'));
+    const source = path.join(tempDir, 'report.pdf');
+    fs.writeFileSync(source, 'hello', 'utf8');
+
+    const sent = [];
+    const engine = new AutomationEngine({
+      fileTransferManager: {
+        async sendFileToDevice(deviceId, sourcePath) {
+          sent.push({ deviceId, sourcePath });
+          return {
+            record: {
+              deviceId,
+              fileName: path.basename(sourcePath),
+              direction: 'desktop-to-phone'
+            }
+          };
+        }
+      }
+    });
+
+    const result = await engine.execute('phone.sendFile', {
+      path: source,
+      transferKind: 'file'
+    }, {
+      phoneContext: {
+        deviceId: 'phone001',
+        deviceName: 'Galaxy S25'
+      }
+    });
+
+    assert.equal(result.success, true);
+    assert.deepEqual(sent, [{ deviceId: 'phone001', sourcePath: source }]);
+    assert.equal(result.data.deviceId, 'phone001');
+    assert.equal(result.data.transferredName, 'report.pdf');
+
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('should resolve special folders for phone transfer requests', async function() {
+    const home = os.homedir();
+    const downloads = path.join(home, 'Downloads');
+    fs.mkdirSync(downloads, { recursive: true });
+
+    const sent = [];
+    const engine = new AutomationEngine({
+      fileTransferManager: {
+        async sendFileToDevice(deviceId, sourcePath) {
+          sent.push({ deviceId, sourcePath });
+          return { record: { deviceId, fileName: path.basename(sourcePath) } };
+        }
+      }
+    });
+
+    const result = await engine.execute('phone.sendFile', {
+      path: 'downloads folder',
+      transferKind: 'folder'
+    }, {
+      phoneContext: { deviceId: 'phone001' }
+    });
+
+    assert.equal(result.success, true);
+    assert.equal(sent[0].sourcePath, downloads);
+  });
+
   it('should return error for unknown action', async function() {
     const engine = new AutomationEngine({});
     const result = await engine.execute('nonexistent.action', {});
@@ -265,6 +331,16 @@ describe('Automation Engine', function() {
     assert.ok(actions.includes('system.time'));
     assert.ok(actions.includes('system.date'));
     assert.ok(actions.includes('system.calculate'));
+  });
+
+  it('should return a clean offline message for internet-required actions', async function() {
+    const engine = new AutomationEngine({});
+    engine.browser.checkInternetConnection = async () => false;
+
+    const result = await engine.execute('browser.search', { query: 'latest tech news' });
+
+    assert.equal(result.success, false);
+    assert.equal(result.error, 'Please check your connection.');
   });
 
   it('should execute local calculations', async function() {

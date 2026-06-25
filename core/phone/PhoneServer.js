@@ -2,6 +2,7 @@ const { URL } = require('url');
 const { WebSocket, WebSocketServer } = require('ws');
 const PhoneConnectionManager = require('./PhoneConnectionManager');
 const FileTransferProtocol = require('./FileTransferProtocol');
+const QRPairingService = require('./QRPairingService');
 const SecurityManager = require('./SecurityManager');
 
 const DEFAULT_HOST = '0.0.0.0';
@@ -27,6 +28,8 @@ class PhoneServer {
 
     this.host = options.host ?? DEFAULT_HOST;
     this.port = options.port ?? DEFAULT_PORT;
+    this.protocolVersion = options.protocolVersion ?? QRPairingService.PROTOCOL_VERSION;
+    this.resolveServerIp = options.resolveServerIp || QRPairingService.resolveDesktopIpv4;
     this.commandRouter = options.commandRouter;
     this.pairingService = options.pairingService;
     this.fileTransferManager = options.fileTransferManager || null;
@@ -114,6 +117,44 @@ class PhoneServer {
       return { host: this.host, port: this.port };
     }
     return { host: address.address, port: address.port };
+  }
+
+  getConnectionInfo() {
+    const address = this.address();
+    let serverIp = '127.0.0.1';
+    try {
+      serverIp = this.resolveServerIp();
+    } catch (error) {
+      this.logger.warn('[PHONE] Failed to resolve desktop IP', { error: error.message });
+    }
+    return {
+      host: address.host,
+      serverIp,
+      serverPort: address.port,
+      protocolVersion: this.protocolVersion,
+      currentVersion: this.protocolVersion
+    };
+  }
+
+  getStatus() {
+    const connection = this.getConnectionInfo();
+    return {
+      serverStatus: this.server ? 'listening' : 'stopped',
+      running: Boolean(this.server),
+      currentIp: connection.serverIp,
+      currentPort: connection.serverPort,
+      currentVersion: connection.currentVersion,
+      protocolVersion: connection.protocolVersion,
+      host: connection.host,
+      connectedDevices: [...this.clients.values()]
+        .filter(client => client.deviceId)
+        .map(client => ({
+          deviceId: client.deviceId,
+          deviceName: client.deviceName,
+          connectedAt: client.connectedAt,
+          lastSeen: client.lastSeen
+        }))
+    };
   }
 
   broadcast(payload) {
@@ -230,7 +271,11 @@ class PhoneServer {
     registry.updateLastSeen(deviceId);
 
     const result = await this.commandRouter.route(payload.message, {
-      permissionGuard: this._createPermissionGuard(deviceId)
+      permissionGuard: this._createPermissionGuard(deviceId),
+      phoneContext: {
+        deviceId,
+        deviceName: device?.deviceName || client?.deviceName || null
+      }
     });
     const message = result?.response || result?.message || 'Command completed';
     this.sendToClient(clientId, {
@@ -257,9 +302,12 @@ class PhoneServer {
     });
     this.sendToClient(clientId, {
       type: 'pair-success',
+      deviceId: result.device.deviceId,
       sessionToken: result.session.sessionToken,
       issuedAt: result.session.issuedAt,
-      expiresAt: result.session.expiresAt
+      expiresAt: result.session.expiresAt,
+      serverIp: this.getConnectionInfo().serverIp,
+      serverPort: this.getConnectionInfo().serverPort
     });
   }
 

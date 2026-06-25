@@ -184,6 +184,9 @@ class MediaController {
     const browserResult = this.browser.open(fallbackUrl);
 
     if (!browserResult.success) {
+      if (browserResult.error === BrowserController.INTERNET_ERROR_MESSAGE) {
+        return browserResult;
+      }
       return {
         success: false,
         error: `Failed to open ${definition.appName}: ${browserResult.error}`
@@ -779,6 +782,7 @@ Add-Type -TypeDefinition $signature -ErrorAction SilentlyContinue | Out-Null
 }
 
 module.exports = MediaController;
+module.exports.INTERNET_ERROR_MESSAGE = BrowserController.INTERNET_ERROR_MESSAGE;
 
 const phoneticModule = (() => {
 'use strict';

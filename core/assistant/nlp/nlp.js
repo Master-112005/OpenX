@@ -304,6 +304,13 @@ class NlpProcessor {
       ['maximize', 'minimize'].includes(actionVerb)) {
       return 'window';
     }
+    if (
+      /\b(?:send|share|transfer)\b/.test(combined) &&
+      /\b(?:phone|mobile|iphone|android|device)\b/.test(combined) &&
+      /\b(?:file|files|folder|folders|directory|directories|desktop|downloads|documents|pictures|pdf|pdfs|image|images|photo|photos|screenshot|screenshots)\b/.test(combined)
+    ) {
+      return 'phone-transfer';
+    }
     if (/\b(?:file|files|folder|folders|directory|directories|desktop|downloads|documents|pictures|pdf|pdfs|image|images|photo|photos)\b/.test(combined) || localScope) {
       return 'local-file';
     }
@@ -324,6 +331,13 @@ class NlpProcessor {
       return 'browser-tab';
     }
 
+    if (
+      /\b(?:send|share|transfer)\b/.test(combined) &&
+      /\b(?:phone|mobile|iphone|android|device)\b/.test(combined) &&
+      /\b(?:file|folder|directory|desktop|downloads|documents|pictures|music|videos|image|photo|picture|screenshot)\b/i.test(combined)
+    ) {
+      return 'phone-transfer';
+    }
     if (/\b(?:file|folder|directory|desktop|downloads|documents|pictures|music|videos)\b|[^\s]+\.[a-z0-9]{1,10}\b/i.test(combined)) {
       return 'local-file';
     }

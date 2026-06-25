@@ -21,6 +21,11 @@ const phonePairingStatusEl = document.getElementById('phone-pairing-status');
 const phonePairingExpiryEl = document.getElementById('phone-pairing-expiry');
 const phonePairingQrEl = document.getElementById('phone-pairing-qr');
 const phonePairingCountdownEl = document.getElementById('phone-pairing-countdown');
+const phoneServerStatusEl = document.getElementById('phone-server-status');
+const phoneServerAddressEl = document.getElementById('phone-server-address');
+const phoneServerPortEl = document.getElementById('phone-server-port');
+const phoneServerDevicesEl = document.getElementById('phone-server-devices');
+const phoneServerVersionEl = document.getElementById('phone-server-version');
 const phoneDeviceListEl = document.getElementById('phone-device-list');
 const chatViewBtn = document.getElementById('chat-view-btn');
 const activityViewBtn = document.getElementById('activity-view-btn');
@@ -1238,6 +1243,7 @@ function openSettingsPanel() {
   setActiveSettingsSection(activeSettingsSection || 'identity');
   settingsOverlay.classList.add('open');
   setSettingsStatus('Settings are stored locally on this machine.', 'info');
+  loadPhoneServerStatus();
   loadPhoneDevices();
 }
 
@@ -1338,11 +1344,21 @@ async function generatePairingQR() {
     phonePairingExpiryEl.textContent = `Expires at ${new Date(result.payload.expiresAt).toLocaleTimeString()}.`;
     phoneGenerateTokenBtn.textContent = 'Generate New QR';
     startPairingCountdown(result.payload.expiresAt);
+    await loadPhoneServerStatus();
   } catch (_) {
     phonePairingStatusEl.textContent = 'Unable to generate pairing QR.';
   } finally {
     phoneGenerateTokenBtn.disabled = false;
   }
+}
+
+function renderPhoneServerStatus(status) {
+  const safeStatus = status && typeof status === 'object' ? status : {};
+  phoneServerStatusEl.textContent = safeStatus.serverStatus === 'listening' ? 'Listening' : 'Stopped';
+  phoneServerAddressEl.textContent = safeStatus.currentIp || '--';
+  phoneServerPortEl.textContent = Number.isInteger(safeStatus.currentPort) ? String(safeStatus.currentPort) : '--';
+  phoneServerDevicesEl.textContent = String(Array.isArray(safeStatus.connectedDevices) ? safeStatus.connectedDevices.length : 0);
+  phoneServerVersionEl.textContent = String(safeStatus.currentVersion ?? 1);
 }
 
 function formatDeviceDate(timestamp) {
@@ -1449,6 +1465,16 @@ async function loadPhoneDevices() {
   }
 }
 
+async function loadPhoneServerStatus() {
+  if (!window.jarvis?.getPhoneServerStatus) return;
+  try {
+    renderPhoneServerStatus(await window.jarvis.getPhoneServerStatus());
+  } catch (_) {
+    renderPhoneServerStatus({ serverStatus: 'stopped', currentVersion: 1, connectedDevices: [] });
+    setSettingsStatus('Unable to load phone server status.', 'error');
+  }
+}
+
 inputBox.addEventListener('keydown', (event) => {
   if (event.key === 'Enter') {
     handleSend();
@@ -1502,7 +1528,10 @@ settingsNavButtons.forEach(button => {
   button.addEventListener('click', () => {
     const sectionName = button.dataset.sectionTarget;
     setActiveSettingsSection(sectionName);
-    if (sectionName === 'phone') loadPhoneDevices();
+    if (sectionName === 'phone') {
+      loadPhoneServerStatus();
+      loadPhoneDevices();
+    }
   });
 });
 document.getElementById('settings-save-btn').addEventListener('click', saveSettings);
