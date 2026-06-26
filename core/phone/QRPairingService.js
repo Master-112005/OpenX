@@ -11,14 +11,58 @@ function isPrivateIpv4(address) {
   return Boolean(match && Number(match[1]) >= 16 && Number(match[1]) <= 31);
 }
 
-function resolveDesktopIpv4() {
-  const candidates = Object.values(os.networkInterfaces())
-    .flat()
-    .filter(Boolean)
-    .filter(entry => (entry.family === 'IPv4' || entry.family === 4) && !entry.internal)
-    .map(entry => entry.address)
-    .filter(address => net.isIPv4(address));
-  return candidates.find(isPrivateIpv4) || candidates[0] || '127.0.0.1';
+function isLinkLocalIpv4(address) {
+  return /^169\.254\./.test(address);
+}
+
+function scoreNetworkInterface(name, address) {
+  const normalizedName = String(name || '').toLowerCase();
+  let score = 0;
+
+  if (isPrivateIpv4(address)) score += 100;
+  if (/\b(wi-?fi|wlan|ethernet|lan)\b/.test(normalizedName)) score += 60;
+  if (/^(10\.|192\.168\.)/.test(address)) score += 20;
+  if (/^172\./.test(address)) score -= 10;
+  if (isLinkLocalIpv4(address)) score -= 100;
+  if (
+    /(virtual|vethernet|hyper-v|wsl|vmware|virtualbox|docker|container|loopback|tunnel|vpn|warp|cloudflare|tailscale|zerotier|bluetooth)/i
+      .test(normalizedName)
+  ) {
+    score -= 120;
+  }
+
+  return score;
+}
+
+function resolveDesktopIpv4(networkInterfaces = os.networkInterfaces()) {
+  const candidates = resolveDesktopIpv4Candidates(networkInterfaces);
+  return candidates[0] || '127.0.0.1';
+}
+
+function resolveDesktopIpv4Candidates(networkInterfaces = os.networkInterfaces()) {
+  const candidates = Object.entries(networkInterfaces)
+    .flatMap(([name, entries]) => (entries || []).map(entry => ({ name, entry })))
+    .filter(({ entry }) => entry && (entry.family === 'IPv4' || entry.family === 4) && !entry.internal)
+    .map(({ name, entry }, index) => ({
+      address: entry.address,
+      index,
+      score: scoreNetworkInterface(name, entry.address)
+    }))
+    .filter(candidate => net.isIPv4(candidate.address));
+
+  candidates.sort((left, right) => right.score - left.score || left.index - right.index);
+
+  const usableCandidates = candidates.filter(candidate => !isLinkLocalIpv4(candidate.address));
+  const ordered = usableCandidates.length > 0 ? usableCandidates : candidates;
+  return [...new Set(ordered.map(candidate => candidate.address))];
+}
+
+function buildServerIpCandidates(serverIp) {
+  return [
+    serverIp,
+    ...QRPairingService.resolveDesktopIpv4Candidates()
+      .filter(address => address !== '127.0.0.1')
+  ].filter((address, index, addresses) => address && addresses.indexOf(address) === index);
 }
 
 class QRPairingService {
@@ -43,8 +87,10 @@ class QRPairingService {
     if (tokenResult?.success !== true) return tokenResult;
 
     this._discardCurrentPairing();
+    const serverIp = this.resolveServerIp();
     const payload = {
-      serverIp: this.resolveServerIp(),
+      serverIp,
+      serverIpCandidates: buildServerIpCandidates(serverIp),
       serverPort: this.serverPort,
       pairingToken: tokenResult.token,
       expiresAt: tokenResult.expiresAt,
@@ -79,8 +125,10 @@ class QRPairingService {
   }
 
   getPairingConnectionInfo() {
+    const serverIp = this.resolveServerIp();
     return {
-      serverIp: this.resolveServerIp(),
+      serverIp,
+      serverIpCandidates: buildServerIpCandidates(serverIp),
       serverPort: this.serverPort,
       protocolVersion: PROTOCOL_VERSION
     };
@@ -92,11 +140,21 @@ class QRPairingService {
 
   _validatePayload(payload) {
     const keys = Object.keys(payload).sort();
-    const requiredKeys = ['expiresAt', 'pairingToken', 'protocolVersion', 'serverIp', 'serverPort'];
+    const requiredKeys = ['expiresAt', 'pairingToken', 'protocolVersion', 'serverIp', 'serverIpCandidates', 'serverPort'];
     if (keys.length !== requiredKeys.length || keys.some((key, index) => key !== requiredKeys[index])) {
       throw new TypeError('Invalid QR pairing payload fields');
     }
     if (net.isIP(payload.serverIp) !== 4) throw new TypeError('Invalid desktop IP address');
+    if (
+      !Array.isArray(payload.serverIpCandidates) ||
+      payload.serverIpCandidates.length === 0 ||
+      payload.serverIpCandidates.some(address => net.isIP(address) !== 4)
+    ) {
+      throw new TypeError('Invalid desktop IP address candidates');
+    }
+    if (!payload.serverIpCandidates.includes(payload.serverIp)) {
+      throw new TypeError('Desktop IP address is missing from candidates');
+    }
     if (!Number.isInteger(payload.serverPort) || payload.serverPort < 1 || payload.serverPort > 65535) {
       throw new TypeError('Invalid desktop server port');
     }
@@ -143,5 +201,6 @@ class QRPairingService {
 QRPairingService.DEFAULT_SERVER_PORT = DEFAULT_SERVER_PORT;
 QRPairingService.PROTOCOL_VERSION = PROTOCOL_VERSION;
 QRPairingService.resolveDesktopIpv4 = resolveDesktopIpv4;
+QRPairingService.resolveDesktopIpv4Candidates = resolveDesktopIpv4Candidates;
 
 module.exports = QRPairingService;

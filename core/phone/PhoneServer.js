@@ -64,6 +64,11 @@ class PhoneServer {
         this.server = null;
         this.startPromise = null;
         this.logger.error('[PHONE] Server Error', { error: error.message });
+        try {
+          server.close();
+        } catch (_) {
+          // The server may not have completed binding.
+        }
         reject(error);
       };
       const onListening = () => {

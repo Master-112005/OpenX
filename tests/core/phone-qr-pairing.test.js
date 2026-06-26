@@ -22,6 +22,30 @@ function createPairingService(tokens) {
 }
 
 describe('Phone QR pairing', function() {
+  it('prefers a reachable Wi-Fi or Ethernet address over virtual adapters', function() {
+    const networkInterfaces = {
+      'CloudflareWARP': [
+        { family: 'IPv4', internal: false, address: '172.16.0.2' }
+      ],
+      'vEthernet (WSL (Hyper-V firewall))': [
+        { family: 'IPv4', internal: false, address: '172.23.0.1' }
+      ],
+      'Wi-Fi': [
+        { family: 'IPv4', internal: false, address: '10.209.9.148' }
+      ],
+      'Loopback Pseudo-Interface 1': [
+        { family: 'IPv4', internal: true, address: '127.0.0.1' }
+      ]
+    };
+
+    assert.equal(QRPairingService.resolveDesktopIpv4(networkInterfaces), '10.209.9.148');
+    assert.deepEqual(QRPairingService.resolveDesktopIpv4Candidates(networkInterfaces), [
+      '10.209.9.148',
+      '172.16.0.2',
+      '172.23.0.1'
+    ]);
+  });
+
   it('generates a PNG data URL for the required pairing payload', async function() {
     const pairingService = createPairingService([{ token: 'ABC123XY', expiresAt: 301000 }]);
     const service = new QRPairingService({
@@ -37,13 +61,17 @@ describe('Phone QR pairing', function() {
       assert.match(result.qrDataUrl, /^data:image\/png;base64,/);
       assert.deepEqual(result.payload, {
         serverIp: '192.168.1.20',
+        serverIpCandidates: [
+          '192.168.1.20',
+          ...QRPairingService.resolveDesktopIpv4Candidates().filter(address => address !== '127.0.0.1')
+        ].filter((address, index, addresses) => addresses.indexOf(address) === index),
         serverPort: 8080,
         pairingToken: 'ABC123XY',
         expiresAt: 301000,
         protocolVersion: 1
       });
       assert.deepEqual(Object.keys(result.payload).sort(), [
-        'expiresAt', 'pairingToken', 'protocolVersion', 'serverIp', 'serverPort'
+        'expiresAt', 'pairingToken', 'protocolVersion', 'serverIp', 'serverIpCandidates', 'serverPort'
       ]);
       assert.deepEqual(service.getPairingPayload(), result.payload);
     } finally {

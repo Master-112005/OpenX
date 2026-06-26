@@ -69,6 +69,7 @@ try {
 
 const gotLock = app.requestSingleInstanceLock();
 if (!gotLock) {
+  console.log('OpenX is already running. Focusing the existing instance.');
   app.quit();
   process.exit(0);
 }
@@ -78,6 +79,8 @@ app.on('second-instance', () => {
     if (chatWindow.isMinimized()) chatWindow.restore();
     chatWindow.show();
     chatWindow.focus();
+  } else {
+    createChatWindow();
   }
 });
 
@@ -767,23 +770,48 @@ async function initializePhoneServer() {
   if (assistant?.automation) {
     assistant.automation.fileTransferManager = fileTransferManager;
   }
+  const configuredPort = runtimeConfig?.phone?.port;
+  const maxPortAttempts = 20;
+  let phoneServerAddress = null;
+  let phoneServerError = null;
+
+  for (let attempt = 0; attempt < maxPortAttempts; attempt += 1) {
+    const port = Number.isInteger(configuredPort) ? configuredPort + attempt : configuredPort;
+    phoneServer = new PhoneServer({
+      host: runtimeConfig?.phone?.host,
+      port,
+      protocolVersion: QRPairingService.PROTOCOL_VERSION,
+      resolveServerIp: resolvePhoneServerIp,
+      commandRouter,
+      pairingService,
+      fileTransferManager,
+      logger: mainLogger
+    });
+
+    try {
+      phoneServerAddress = await phoneServer.start();
+      if (attempt > 0) {
+        mainLogger.warn('[PHONE] Configured port unavailable; using fallback port', {
+          configuredPort,
+          port: phoneServerAddress.port
+        });
+      }
+      break;
+    } catch (error) {
+      phoneServerError = error;
+      phoneServer = null;
+      if (error?.code !== 'EADDRINUSE' || !Number.isInteger(configuredPort)) break;
+    }
+  }
+
+  if (!phoneServerAddress) throw phoneServerError || new Error('Unable to start phone server');
+
   qrPairingService = new QRPairingService({
     pairingService,
-    serverPort: runtimeConfig?.phone?.port,
+    serverPort: phoneServerAddress.port,
     resolveServerIp: resolvePhoneServerIp,
     logger: mainLogger
   });
-  phoneServer = new PhoneServer({
-    host: runtimeConfig?.phone?.host,
-    port: runtimeConfig?.phone?.port,
-    protocolVersion: QRPairingService.PROTOCOL_VERSION,
-    resolveServerIp: resolvePhoneServerIp,
-    commandRouter,
-    pairingService,
-    fileTransferManager,
-    logger: mainLogger
-  });
-  await phoneServer.start();
 }
 
 async function reloadRuntimeServices() {
