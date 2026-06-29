@@ -2,8 +2,7 @@ const { Normalizer } = require('./Data');
 const EntityExtractor = require('./entities');
 const { FILLER_WORDS } = require('./nlp/preprocessor');
 const { parseLearningDirective } = require('./active-learning/LearningLanguage');
-const { analyzeDiscourse } = require('./ContextLanguage');
-const { buildWordRelations } = require('./language-relations');
+const { analyzeDiscourse, buildWordRelations } = require('./language');
 
 const CONNECTOR_PATTERN = /\s*(?:;|,|\b(?:and then|then|after that|afterwards|and|also|plus|additionally|furthermore)\b)\s*/i;
 

@@ -14,7 +14,7 @@ const {
 } = require('./scorer');
 const { normalizeWebTarget } = require('./web-targets');
 const { parseLearningDirective } = require('../active-learning/LearningLanguage');
-const { analyzeDiscourse } = require('../ContextLanguage');
+const { analyzeDiscourse } = require('../language');
 
 const PREPARE_CACHE_LIMIT = 256;
 const PATTERN_CACHE_LIMIT = 512;

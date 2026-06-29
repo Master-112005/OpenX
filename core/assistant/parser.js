@@ -2,8 +2,7 @@ const Normalizer = require('./Data').Normalizer;
 const Logger = require('./Data').Logger;
 const { stripLeadIns } = require('./nlp/preprocessor');
 const { parseLearningDirective } = require('./active-learning/LearningLanguage');
-const { analyzeDiscourse } = require('./ContextLanguage');
-const { buildWordRelations } = require('./language-relations');
+const { analyzeDiscourse, buildWordRelations } = require('./language');
 
 class InputParser {
   constructor(config) {
@@ -102,7 +101,7 @@ module.exports = InputParser;
 const CommandFrameParser = (() => {
 const { Normalizer } = require('./Data');
 const { parseLearningDirective } = require('./active-learning/LearningLanguage');
-const { buildWordRelations } = require('./language-relations');
+const { buildWordRelations } = require('./language');
 
 const ACTION_ALIASES = new Map([
   ['close', 'close'],
