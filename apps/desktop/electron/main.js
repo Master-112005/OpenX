@@ -51,6 +51,7 @@ try {
   app.commandLine.appendSwitch('disable-sync');
   app.commandLine.appendSwitch('metrics-recording-only');
   app.commandLine.appendSwitch('no-pings');
+  app.commandLine.appendSwitch('autoplay-policy', 'no-user-gesture-required');
   app.commandLine.appendSwitch(
     'disable-features',
     [
@@ -165,6 +166,9 @@ const IPC_CHANNELS = [
   'schedule:alertAction',
   'timerWidget:getState',
   'timerWidget:close',
+  'timerWidget:stopStopwatch',
+  'timerWidget:resumeStopwatch',
+  'timerWidget:resetStopwatch',
   'app:quit'
 ];
 
@@ -397,8 +401,12 @@ function presentScheduleAlert(schedule) {
   });
 }
 
-function getTimerWidgetState(preferredId = null) {
+function getTimerWidgetState(preferredId = null, options = {}) {
+  const includeStopwatch = options.includeStopwatch === true ||
+    Boolean(preferredId) ||
+    Boolean(timerWidgetWindow && !timerWidgetWindow.isDestroyed());
   const state = assistant?.automation?.scheduler?.getTimerWidgetState?.(preferredId);
+  if (!includeStopwatch && state?.mode === 'stopwatch') return { visible: false };
   return state || { visible: false };
 }
 
@@ -426,8 +434,8 @@ function hideTimerWidget() {
   }
 }
 
-function showTimerWidget(preferredId = null) {
-  const state = getTimerWidgetState(preferredId);
+function showTimerWidget(preferredId = null, options = {}) {
+  const state = getTimerWidgetState(preferredId, options);
   if (!state.visible) {
     hideTimerWidget();
     return;
@@ -458,7 +466,7 @@ function showTimerWidget(preferredId = null) {
   secureWindow(timerWidgetWindow, {
     windowType: 'timer-widget',
     expectedFile: widgetFile,
-    createWindow: () => showTimerWidget(preferredId)
+    createWindow: () => showTimerWidget(preferredId, options)
   });
   timerWidgetWindow.loadFile(widgetFile).then(() => {
     if (timerWidgetWindow && !timerWidgetWindow.isDestroyed()) {
@@ -484,7 +492,7 @@ function handleTimerWidgetCommand(payload) {
   }
   const preferredId = payload.data?.id || payload.data?.taskName || null;
   if (intent === 'timer.set' || intent === 'timer.reset' || intent === 'stopwatch.start' || intent === 'stopwatch.reset') {
-    showTimerWidget(preferredId);
+    showTimerWidget(preferredId, { includeStopwatch: intent.startsWith('stopwatch.') });
     return;
   }
   if (timerWidgetWindow && !timerWidgetWindow.isDestroyed()) {
@@ -646,6 +654,10 @@ function setupIPC() {
     const result = action === 'snooze'
       ? scheduler?.snooze(id, minutes)
       : scheduler?.complete(id);
+    if (result?.success && String(result.data?.kind || '').toLowerCase() === 'timer') {
+      if (action === 'snooze') showTimerWidget(result.data.id || result.data.taskName || id);
+      if (action === 'stop') hideTimerWidget();
+    }
     if (alertWindow && !alertWindow.isDestroyed()) alertWindow.close();
     return result || { success: false, error: 'Scheduler unavailable' };
   });
@@ -657,6 +669,28 @@ function setupIPC() {
   registerIpcHandler('timerWidget:close', async () => {
     hideTimerWidget();
     return { success: true };
+  });
+
+  registerIpcHandler('timerWidget:stopStopwatch', async () => {
+    const result = assistant?.automation?.scheduler?.pauseStopwatch?.();
+    if (result?.success) sendTimerWidgetState(getTimerWidgetState(result.data?.id || result.data?.taskName));
+    return result || { success: false, error: 'Scheduler unavailable' };
+  });
+
+  registerIpcHandler('timerWidget:resumeStopwatch', async () => {
+    const result = assistant?.automation?.scheduler?.resumeStopwatch?.();
+    if (result?.success) {
+      showTimerWidget(result.data?.id || result.data?.taskName, { includeStopwatch: true });
+    }
+    return result || { success: false, error: 'Scheduler unavailable' };
+  });
+
+  registerIpcHandler('timerWidget:resetStopwatch', async () => {
+    const result = assistant?.automation?.scheduler?.resetStopwatch?.();
+    if (result?.success) {
+      showTimerWidget(result.data?.id || result.data?.taskName, { includeStopwatch: true });
+    }
+    return result || { success: false, error: 'Scheduler unavailable' };
   });
 
   registerIpcHandler('app:quit', async () => {
@@ -793,9 +827,36 @@ function unregisterChatShortcut() {
   registeredChatShortcuts = [];
 }
 
+function getChatShortcuts() {
+  const primary = runtimeConfig?.chat?.activationShortcut || BASE_CONFIG.chat.activationShortcut || 'Alt+Space';
+  const fallbacks = runtimeConfig?.chat?.activationFallbackShortcuts
+    || BASE_CONFIG.chat.activationFallbackShortcuts
+    || ['Control+Alt+Space', 'Control+Space'];
+
+  return [...new Set([primary, ...fallbacks].filter(Boolean))];
+}
+
 function registerChatShortcut() {
   unregisterChatShortcut();
-  // Chat is opened from the app UI/tray; global chat shortcuts are disabled.
+
+  for (const shortcut of getChatShortcuts()) {
+    try {
+      const registered = globalShortcut.register(shortcut, () => {
+        mainLogger.info('Chat shortcut pressed', { shortcut });
+        createChatWindow();
+      });
+
+      if (!registered) {
+        mainLogger.error('Failed to register chat shortcut', { shortcut });
+        continue;
+      }
+
+      registeredChatShortcuts.push(shortcut);
+      mainLogger.info('Registered chat shortcut', { shortcut });
+    } catch (error) {
+      mainLogger.error('Invalid chat shortcut', { shortcut, error: error.message });
+    }
+  }
 }
 
 async function initializeAssistant() {

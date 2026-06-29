@@ -61,6 +61,15 @@ contextBridge.exposeInMainWorld('jarvis', {
   closeTimerWidget: () =>
     ipcRenderer.invoke('timerWidget:close'),
 
+  stopStopwatchFromWidget: () =>
+    ipcRenderer.invoke('timerWidget:stopStopwatch'),
+
+  resumeStopwatchFromWidget: () =>
+    ipcRenderer.invoke('timerWidget:resumeStopwatch'),
+
+  resetStopwatchFromWidget: () =>
+    ipcRenderer.invoke('timerWidget:resetStopwatch'),
+
   quit: () =>
     ipcRenderer.invoke('app:quit'),
 

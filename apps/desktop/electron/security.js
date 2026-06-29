@@ -164,6 +164,9 @@ const IPC_VALIDATORS = Object.freeze({
   'schedule:alertAction': validateScheduleAction,
   'timerWidget:getState': validateEmpty,
   'timerWidget:close': validateTimerWidgetClose,
+  'timerWidget:stopStopwatch': validateEmpty,
+  'timerWidget:resumeStopwatch': validateEmpty,
+  'timerWidget:resetStopwatch': validateEmpty,
   'app:quit': validateEmpty
 });
 

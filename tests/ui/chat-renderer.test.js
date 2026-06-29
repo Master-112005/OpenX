@@ -42,6 +42,8 @@ describe('Chat Renderer UI', function() {
     assert.match(script, /NOTIFICATION_STORAGE_KEY/);
     assert.match(html, /id="alarm-symbol"/);
     assert.match(script, /handleScheduleAlert/);
+    assert.match(script, /function playScheduleSound\(kind\)/);
+    assert.match(script, /function stopScheduleSound\(\)/);
     assert.match(glassCss, /Dedicated timer and reminder alert/);
   });
 

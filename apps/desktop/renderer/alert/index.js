@@ -7,6 +7,71 @@ const snoozeBtn = document.getElementById('snooze-btn');
 const stopBtn = document.getElementById('stop-btn');
 
 let currentSchedule = null;
+let audioContext = null;
+let soundInterval = null;
+let activeTones = [];
+
+function getAudioContext() {
+  if (!audioContext) {
+    const Context = window.AudioContext || window.webkitAudioContext;
+    if (!Context) return null;
+    audioContext = new Context();
+  }
+  if (audioContext.state === 'suspended') {
+    audioContext.resume().catch(() => {});
+  }
+  return audioContext;
+}
+
+function stopAlertSound() {
+  if (soundInterval) {
+    clearInterval(soundInterval);
+    soundInterval = null;
+  }
+  activeTones.forEach(tone => {
+    try {
+      tone.stop();
+    } catch (_) {}
+  });
+  activeTones = [];
+}
+
+function playTone(frequency, delay, duration, gainValue = 0.08) {
+  const context = getAudioContext();
+  if (!context) return;
+  const oscillator = context.createOscillator();
+  const gain = context.createGain();
+  const startAt = context.currentTime + delay;
+  const stopAt = startAt + duration;
+
+  oscillator.type = 'sine';
+  oscillator.frequency.setValueAtTime(frequency, startAt);
+  gain.gain.setValueAtTime(0.0001, startAt);
+  gain.gain.exponentialRampToValueAtTime(gainValue, startAt + 0.02);
+  gain.gain.exponentialRampToValueAtTime(0.0001, stopAt);
+  oscillator.connect(gain);
+  gain.connect(context.destination);
+  oscillator.start(startAt);
+  oscillator.stop(stopAt + 0.03);
+  activeTones.push(oscillator);
+  oscillator.onended = () => {
+    activeTones = activeTones.filter(tone => tone !== oscillator);
+  };
+}
+
+function playScheduleSound(kind) {
+  const normalized = String(kind || '').toLowerCase();
+  const pattern = normalized === 'alarm'
+    ? [[880, 0, 0.16], [660, 0.22, 0.16], [880, 0.44, 0.22]]
+    : normalized === 'timer'
+      ? [[640, 0, 0.14], [820, 0.18, 0.18]]
+      : null;
+  if (!pattern) return;
+  stopAlertSound();
+  const playPattern = () => pattern.forEach(([frequency, delay, duration]) => playTone(frequency, delay, duration));
+  playPattern();
+  soundInterval = setInterval(playPattern, normalized === 'alarm' ? 1200 : 2200);
+}
 
 function inferReminderCategory(message, category = '') {
   const preferred = String(category || '').toLowerCase();
@@ -49,11 +114,13 @@ function renderSchedule(schedule) {
   timeEl.textContent = Number.isNaN(dueAt.getTime())
     ? ''
     : dueAt.toLocaleString([], { weekday: 'short', hour: 'numeric', minute: '2-digit' });
+  playScheduleSound(kind);
   document.title = `${kind} · OpenX`;
 }
 
 async function act(action) {
   if (!currentSchedule) return;
+  stopAlertSound();
   const id = currentSchedule.id || currentSchedule.taskName;
   if (window.jarvis?.handleScheduleAlert) {
     await window.jarvis.handleScheduleAlert(id, action, 5);
@@ -64,4 +131,5 @@ async function act(action) {
 
 snoozeBtn.addEventListener('click', () => act('snooze'));
 stopBtn.addEventListener('click', () => act('stop'));
+window.addEventListener('beforeunload', stopAlertSound);
 window.jarvis?.onScheduleDue?.(renderSchedule);

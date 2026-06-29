@@ -110,6 +110,10 @@ describe('Scheduler Alert Delivery', function() {
     assert.equal(stopwatchState.mode, 'stopwatch');
     assert.equal(stopwatchState.status, 'running');
     assert.ok(stopwatchState.elapsedMs >= 0);
+    assert.equal(scheduler.pauseStopwatch().success, true);
+    assert.equal(scheduler.resetStopwatch().data.status, 'paused');
+    assert.equal(scheduler.getTimerWidgetState(stopwatch.data.taskName).elapsedMs, 0);
+    assert.equal(scheduler.resumeStopwatch().data.status, 'running');
     assert.equal(scheduler.stopStopwatch().success, true);
     assert.equal(scheduler.getTimerWidgetState().visible, false);
 

@@ -1675,7 +1675,8 @@ describe('Action Router', function() {
       ['show all reminders', 'reminder.list'], ['delete this reminder', 'reminder.cancel'],
       ['delete all reminders', 'reminder.clear'], ['snooze this reminder for 10 minutes', 'reminder.snooze'], ['snooze the alarm', 'alarm.snooze'],
       ['show my alarms', 'alarm.list'], ['delete all alarms', 'alarm.clear'],
-      ['start stopwatch', 'stopwatch.start'], ['pause the stopwatch', 'stopwatch.pause'],
+      ['start stopwatch', 'stopwatch.start'], ['open stopwatch', 'stopwatch.start'],
+      ['pause the stopwatch', 'stopwatch.pause'],
       ['resume the stopwatch', 'stopwatch.resume'], ['reset the stopwatch', 'stopwatch.reset'],
       ['stop the stopwatch', 'stopwatch.cancel'], ['show stopwatch', 'stopwatch.elapsed']
     ]);

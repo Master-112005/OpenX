@@ -76,7 +76,7 @@ body {
 
 .ambient {
   border-radius: 50%;
-  filter: blur(24px);
+  filter: blur(12px);
   opacity: 0.65;
   position: fixed;
 }
@@ -86,11 +86,12 @@ body {
 
 .card {
   background: rgba(255, 255, 255, 0.08);
-  backdrop-filter: blur(50px) saturate(180%);
-  -webkit-backdrop-filter: blur(50px) saturate(180%);
+  backdrop-filter: blur(14px) saturate(115%);
+  -webkit-backdrop-filter: blur(14px) saturate(115%);
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 32px;
-  box-shadow: 0 25px 60px rgba(0, 0, 0, 0.24), inset 0 1px 1px rgba(255, 255, 255, 0.15);
+  box-shadow: 0 16px 42px rgba(0, 0, 0, 0.22), inset 0 1px 1px rgba(255, 255, 255, 0.15);
+  contain: layout paint;
   margin: 0;
   max-width: 520px;
   padding: 34px;
@@ -116,8 +117,8 @@ h1 { font-size: 30px; letter-spacing: -0.04em; margin-bottom: 7px; }
 p { margin-bottom: 28px; }
 .btn-row { gap: 12px; }
 button {
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 18px;
   padding: 12px 20px;
@@ -125,3 +126,9 @@ button {
 }
 button:hover { transform: translateY(-2px); }
 button.secondary { background: rgba(255,255,255,.1); border-color: rgba(255,255,255,.14); }
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    transition-duration: 0.01ms !important;
+  }
+}

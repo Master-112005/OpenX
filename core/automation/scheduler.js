@@ -107,9 +107,15 @@ class SchedulerController {
   resetStopwatch() {
     const item = this._latestSchedule('Stopwatch', ['running', 'paused']);
     if (!item) return this.startStopwatch();
+    const wasRunning = item.status === 'running';
     item.elapsedMs = 0;
-    item.startedAt = new Date().toISOString();
-    item.status = 'running';
+    if (wasRunning) {
+      item.startedAt = new Date().toISOString();
+      item.status = 'running';
+    } else {
+      item.status = 'paused';
+      delete item.startedAt;
+    }
     this._saveScheduledItems();
     return { success: true, data: this._stopwatchData(item) };
   }

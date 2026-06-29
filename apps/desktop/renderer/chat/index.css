@@ -3563,21 +3563,28 @@ html[data-glass-contrast] #send-btn {
   backdrop-filter: blur(18px) saturate(115%);
   -webkit-backdrop-filter: blur(18px) saturate(115%);
   contain: layout paint;
+  box-shadow: 0 18px 54px rgba(0,0,0,.28), inset 0 1px 1px rgba(255,255,255,.12);
 }
 #settings-panel {
   backdrop-filter: blur(22px) saturate(120%);
   -webkit-backdrop-filter: blur(22px) saturate(120%);
   contain: layout paint;
+  box-shadow: 0 18px 46px rgba(0,0,0,.26), inset 0 1px 1px rgba(255,255,255,.12);
 }
-#settings-overlay { backdrop-filter: none; -webkit-backdrop-filter: none; }
+#settings-overlay,
+#alarm-overlay {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
 #header,.message-bubble,.composer-field,.header-btn,.window-btn,.chip-btn,
 .activity-date,.schedule-card,.notice-item,.empty-state,.toast,.alarm-card,
 .panel-header,.settings-hero,.settings-section,.theme-card,.contact-stage,.mode-row,
 .mode-app-row,.contact-item,.field,.field-textarea,.field-select,.primary-btn,
 .secondary-btn,.danger-btn,.icon-btn,.contact-add-btn,.permission-option,.mode-tab,
-.mode-app-tab,.glass-tint-control {
+.mode-app-tab,.glass-tint-control,.alert-symbol {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
 }
-#workspace,#messages,.settings-content { contain: layout paint style; }
+#workspace,#messages,.settings-content,#schedule-list,#notification-list { contain: layout paint style; }
 .message { contain: layout paint; content-visibility: auto; contain-intrinsic-size: 64px; }
+.toast,.schedule-card,.notice-item,.alarm-card { contain: layout paint; }

@@ -96,7 +96,9 @@ describe('Electron Security Boundary', function() {
       'phone:pairingQR:create', 'phone:server:status', 'phone:devices:list',
       'phone:device:permissions:update', 'phone:device:remove', 'phone:device:disconnect',
       'settings:save', 'settings:reset',
-      'schedule:alertAction', 'timerWidget:getState', 'timerWidget:close', 'app:quit'
+      'schedule:alertAction', 'timerWidget:getState', 'timerWidget:close',
+      'timerWidget:stopStopwatch', 'timerWidget:resumeStopwatch',
+      'timerWidget:resetStopwatch', 'app:quit'
     ];
 
     assert.deepEqual(Object.keys(IPC_VALIDATORS).sort(), expectedChannels.sort());

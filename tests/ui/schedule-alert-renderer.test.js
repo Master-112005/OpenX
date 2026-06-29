@@ -19,6 +19,9 @@ describe('Dedicated Schedule Alert UI', function() {
     assert.match(script, /water: \{ symbol: '💧'/);
     assert.match(script, /exercise: \{ symbol: '🏃'/);
     assert.match(script, /handleScheduleAlert/);
+    assert.match(script, /AudioContext/);
+    assert.match(script, /playScheduleSound\(kind\)/);
+    assert.match(script, /stopAlertSound\(\)/);
     assert.match(css, /border-radius:\s*36px/);
   });
 });

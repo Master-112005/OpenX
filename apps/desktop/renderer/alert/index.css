@@ -81,8 +81,13 @@ time { color: rgba(255,255,255,.68); font-size: 11px; font-weight: 650; margin-t
 
 /* Keep the transparent alert responsive on integrated GPUs. */
 .alert-shell {
-  backdrop-filter: blur(22px) saturate(120%);
-  -webkit-backdrop-filter: blur(22px) saturate(120%);
+  backdrop-filter: blur(10px) saturate(110%);
+  -webkit-backdrop-filter: blur(10px) saturate(110%);
+  box-shadow: 0 18px 48px rgba(0,0,0,.3), inset 0 1px 1px rgba(255,255,255,.14);
   contain: layout paint;
 }
-.glass-button { backdrop-filter: none; -webkit-backdrop-filter: none; }
+.alert-symbol,
+.glass-button {
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}

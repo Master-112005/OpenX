@@ -68,6 +68,9 @@ let activeWorkspaceView = 'chat';
 let scheduleItems = loadStoredList(SCHEDULE_STORAGE_KEY);
 let notificationHistory = loadStoredList(NOTIFICATION_STORAGE_KEY);
 let activeAlarmId = null;
+let alertAudioContext = null;
+let alertSoundInterval = null;
+let activeAlertTones = [];
 let isAssistantMuted = localStorage.getItem(ASSISTANT_MUTED_STORAGE_KEY) === 'true';
 let glassTintAnimationFrame = null;
 let pendingGlassTintValue = 42;
@@ -410,6 +413,67 @@ function armSchedule(item) {
   scheduleTimers.set(item.id, timer);
 }
 
+function getAlertAudioContext() {
+  if (!alertAudioContext) {
+    const Context = window.AudioContext || window.webkitAudioContext;
+    if (!Context) return null;
+    alertAudioContext = new Context();
+  }
+  if (alertAudioContext.state === 'suspended') {
+    alertAudioContext.resume().catch(() => {});
+  }
+  return alertAudioContext;
+}
+
+function stopScheduleSound() {
+  if (alertSoundInterval) {
+    clearInterval(alertSoundInterval);
+    alertSoundInterval = null;
+  }
+  activeAlertTones.forEach(tone => {
+    try {
+      tone.stop();
+    } catch (_) {}
+  });
+  activeAlertTones = [];
+}
+
+function playAlertTone(frequency, delay, duration) {
+  const context = getAlertAudioContext();
+  if (!context) return;
+  const oscillator = context.createOscillator();
+  const gain = context.createGain();
+  const startAt = context.currentTime + delay;
+  const stopAt = startAt + duration;
+  oscillator.type = 'sine';
+  oscillator.frequency.setValueAtTime(frequency, startAt);
+  gain.gain.setValueAtTime(0.0001, startAt);
+  gain.gain.exponentialRampToValueAtTime(0.08, startAt + 0.02);
+  gain.gain.exponentialRampToValueAtTime(0.0001, stopAt);
+  oscillator.connect(gain);
+  gain.connect(context.destination);
+  oscillator.start(startAt);
+  oscillator.stop(stopAt + 0.03);
+  activeAlertTones.push(oscillator);
+  oscillator.onended = () => {
+    activeAlertTones = activeAlertTones.filter(tone => tone !== oscillator);
+  };
+}
+
+function playScheduleSound(kind) {
+  const normalized = String(kind || '').toLowerCase();
+  const pattern = normalized === 'alarm'
+    ? [[880, 0, 0.16], [660, 0.22, 0.16], [880, 0.44, 0.22]]
+    : normalized === 'timer'
+      ? [[640, 0, 0.14], [820, 0.18, 0.18]]
+      : null;
+  if (!pattern) return;
+  stopScheduleSound();
+  const playPattern = () => pattern.forEach(([frequency, delay, duration]) => playAlertTone(frequency, delay, duration));
+  playPattern();
+  alertSoundInterval = setInterval(playPattern, normalized === 'alarm' ? 1200 : 2200);
+}
+
 function triggerSchedule(id) {
   const item = scheduleItems.find(entry => entry.id === id);
   if (!item || !['scheduled', 'due'].includes(item.status)) return;
@@ -424,6 +488,7 @@ function triggerSchedule(id) {
   alarmMessageEl.textContent = item.message;
   alarmTimeEl.textContent = formatDueDate(item.dueAt);
   alarmOverlay.hidden = false;
+  playScheduleSound(item.kind);
   showToast(`${item.kind} due`, item.message, scheduleTone(item.kind, item.category, item.message).tone, { duration: 0 });
   renderActivity();
 }
@@ -440,6 +505,7 @@ function updateSchedule(id, changes) {
 function snoozeSchedule(id, minutes = 5) {
   const item = scheduleItems.find(entry => entry.id === id);
   if (!item) return;
+  stopScheduleSound();
   updateSchedule(id, {
     status: 'scheduled',
     dueAt: new Date(Date.now() + (minutes * 60 * 1000)).toISOString()
@@ -1518,6 +1584,7 @@ document.getElementById('clear-notifications-btn').addEventListener('click', () 
   renderNotifications();
 });
 document.getElementById('alarm-dismiss-btn').addEventListener('click', () => {
+  stopScheduleSound();
   if (activeAlarmId) updateSchedule(activeAlarmId, { status: 'completed' });
   activeAlarmId = null;
   alarmOverlay.hidden = true;
@@ -1529,6 +1596,7 @@ document.getElementById('alarm-snooze-btn').addEventListener('click', () => {
   activeAlarmId = null;
   alarmOverlay.hidden = true;
 });
+window.addEventListener('beforeunload', stopScheduleSound);
 quickBtns.forEach(button => {
   button.addEventListener('click', () => {
     const command = button.dataset.cmd;
