@@ -52,8 +52,82 @@ class SchedulerController {
       dueAt,
       category: 'timer',
       symbol: '\u23F1\uFE0F',
-      metadata: { durationMinutes }
+      metadata: {
+        durationMinutes,
+        durationMs: durationMinutes * 60 * 1000
+      }
     });
+  }
+
+  startStopwatch() {
+    const existing = this._latestSchedule('Stopwatch', ['running', 'paused']);
+    if (existing) {
+      return { success: true, data: this._stopwatchData(existing) };
+    }
+
+    const taskName = `JARVIS_Stopwatch_${IdGenerator.short()}`;
+    const now = new Date().toISOString();
+    const item = {
+      id: taskName,
+      taskName,
+      kind: 'Stopwatch',
+      title: 'JARVIS Stopwatch',
+      message: 'Stopwatch is running.',
+      category: 'stopwatch',
+      symbol: '\u23F1\uFE0F',
+      status: 'running',
+      startedAt: now,
+      elapsedMs: 0,
+      createdAt: now
+    };
+    this.scheduledItems.push(item);
+    this._saveScheduledItems();
+    return { success: true, data: this._stopwatchData(item) };
+  }
+
+  pauseStopwatch() {
+    const item = this._latestSchedule('Stopwatch', ['running']);
+    if (!item) return { success: false, error: 'No running stopwatch found' };
+    item.elapsedMs = this._stopwatchElapsedMs(item);
+    item.status = 'paused';
+    delete item.startedAt;
+    this._saveScheduledItems();
+    return { success: true, data: this._stopwatchData(item) };
+  }
+
+  resumeStopwatch() {
+    const item = this._latestSchedule('Stopwatch', ['paused']);
+    if (!item) return { success: false, error: 'No paused stopwatch found' };
+    item.startedAt = new Date().toISOString();
+    item.status = 'running';
+    this._saveScheduledItems();
+    return { success: true, data: this._stopwatchData(item) };
+  }
+
+  resetStopwatch() {
+    const item = this._latestSchedule('Stopwatch', ['running', 'paused']);
+    if (!item) return this.startStopwatch();
+    item.elapsedMs = 0;
+    item.startedAt = new Date().toISOString();
+    item.status = 'running';
+    this._saveScheduledItems();
+    return { success: true, data: this._stopwatchData(item) };
+  }
+
+  stopStopwatch() {
+    const item = this._latestSchedule('Stopwatch', ['running', 'paused']);
+    if (!item) return { success: false, error: 'No active stopwatch found' };
+    item.elapsedMs = this._stopwatchElapsedMs(item);
+    item.status = 'completed';
+    delete item.startedAt;
+    this._saveScheduledItems();
+    return { success: true, data: this._stopwatchData(item) };
+  }
+
+  getStopwatchElapsed() {
+    const item = this._latestSchedule('Stopwatch', ['running', 'paused']);
+    if (!item) return { success: false, error: 'No active stopwatch found' };
+    return { success: true, data: this._stopwatchData(item) };
   }
 
   setAlarm(timeExpression, alarmLabel = '') {
@@ -370,7 +444,10 @@ class SchedulerController {
           title: item.title,
           message: item.message,
           category: item.category,
-          symbol: item.symbol
+          symbol: item.symbol,
+          id: item.id,
+          durationMinutes: item.durationMinutes,
+          durationMs: item.durationMs
         }
       };
     } catch (err) {
@@ -506,6 +583,47 @@ class SchedulerController {
     return { success: true, data: { ...item, remainingMs, remainingMinutes: Math.max(0, Math.ceil(remainingMs / 60000)) } };
   }
 
+  getTimerWidgetState(preferredId = null) {
+    const timer = this._activeTimerForWidget(preferredId);
+    const stopwatch = this._activeStopwatchForWidget(preferredId);
+    const active = [timer, stopwatch]
+      .filter(Boolean)
+      .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())[0] || null;
+    if (!active) {
+      return { visible: false };
+    }
+
+    if (String(active.kind || '').toLowerCase() === 'stopwatch') {
+      return {
+        visible: true,
+        mode: 'stopwatch',
+        id: active.id,
+        taskName: active.taskName,
+        status: active.status,
+        elapsedMs: this._stopwatchElapsedMs(active),
+        title: active.title || 'Stopwatch',
+        createdAt: active.createdAt
+      };
+    }
+
+    const durationMs = Math.max(1000, Number(active.durationMs) || Number(active.durationMinutes) * 60000 || 1000);
+    const remainingMs = active.status === 'paused'
+      ? Math.max(0, Number(active.remainingMs) || 0)
+      : Math.max(0, new Date(active.dueAt).getTime() - Date.now());
+    return {
+      visible: true,
+      mode: 'timer',
+      id: active.id,
+      taskName: active.taskName,
+      status: active.status,
+      dueAt: active.dueAt,
+      durationMs,
+      remainingMs,
+      title: active.title || 'Timer',
+      createdAt: active.createdAt
+    };
+  }
+
   listSchedules(kind = null, scope = 'active') {
     const normalizedKind = String(kind || '').trim().toLowerCase();
     const now = new Date();
@@ -557,6 +675,41 @@ class SchedulerController {
       .slice()
       .reverse()
       .find(item => String(item.kind || '').toLowerCase() === normalizedKind && statuses.includes(item.status)) || null;
+  }
+
+  _activeTimerForWidget(preferredId = null) {
+    const active = this.scheduledItems.filter(item =>
+      String(item.kind || '').toLowerCase() === 'timer' && ['scheduled', 'paused'].includes(item.status));
+    if (preferredId) {
+      const preferred = active.find(item => item.id === preferredId || item.taskName === preferredId);
+      if (preferred) return preferred;
+    }
+    return active.slice().reverse()[0] || null;
+  }
+
+  _activeStopwatchForWidget(preferredId = null) {
+    const active = this.scheduledItems.filter(item =>
+      String(item.kind || '').toLowerCase() === 'stopwatch' && ['running', 'paused'].includes(item.status));
+    if (preferredId) {
+      const preferred = active.find(item => item.id === preferredId || item.taskName === preferredId);
+      if (preferred) return preferred;
+    }
+    return active.slice().reverse()[0] || null;
+  }
+
+  _stopwatchElapsedMs(item) {
+    const base = Math.max(0, Number(item?.elapsedMs) || 0);
+    if (!item || item.status !== 'running') return base;
+    const startedAt = new Date(item.startedAt).getTime();
+    if (!Number.isFinite(startedAt)) return base;
+    return base + Math.max(0, Date.now() - startedAt);
+  }
+
+  _stopwatchData(item) {
+    return {
+      ...item,
+      elapsedMs: this._stopwatchElapsedMs(item)
+    };
   }
 
   _nextRecurringDate(recurrence, fromDate = new Date()) {

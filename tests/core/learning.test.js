@@ -73,17 +73,28 @@ describe('Active Learning Store', function() {
     assert.equal(correction.correction, 'open new chrome tab');
   });
 
-  it('should apply browser and media preferences to routed entities', function() {
+  it('should apply browser media and reminder preferences to routed entities', function() {
     const { store } = createStore();
 
     store.rememberPreference('searchOpenMode', 'browser');
     store.rememberPreference('mediaPlatform', 'spotify');
+    store.rememberPreference('defaultReminderCategory', 'work');
 
     const search = store.adaptEntities('browser.search', { query: 'chatgpt', openInBrowser: false });
     const media = store.adaptEntities('media.play', { mediaQuery: 'liked songs' });
+    const reminder = store.adaptEntities('reminder.set', {
+      reminderText: 'sign the sheet',
+      reminderCategory: 'general'
+    });
+    const specificReminder = store.adaptEntities('reminder.set', {
+      reminderText: 'drink water',
+      reminderCategory: 'water'
+    });
 
     assert.equal(search.openInBrowser, true);
     assert.equal(media.mediaPlatform, 'spotify');
+    assert.equal(reminder.reminderCategory, 'work');
+    assert.equal(specificReminder.reminderCategory, 'water');
   });
 
   it('should remember personal photo library preferences', function() {

@@ -515,6 +515,30 @@ const INTENT_DEFINITIONS = [
     action: 'timer.clear', entities: [], description: 'Cancel all active timers'
   },
   {
+    id: 'stopwatch.start', patterns: ['start stopwatch', 'start a stopwatch'], permissionLevel: 'low',
+    action: 'stopwatch.start', entities: [], description: 'Start a stopwatch'
+  },
+  {
+    id: 'stopwatch.pause', patterns: ['pause stopwatch', 'pause the stopwatch'], permissionLevel: 'low',
+    action: 'stopwatch.pause', entities: [], description: 'Pause the active stopwatch'
+  },
+  {
+    id: 'stopwatch.resume', patterns: ['resume stopwatch', 'resume the stopwatch'], permissionLevel: 'low',
+    action: 'stopwatch.resume', entities: [], description: 'Resume the paused stopwatch'
+  },
+  {
+    id: 'stopwatch.reset', patterns: ['reset stopwatch', 'restart stopwatch'], permissionLevel: 'low',
+    action: 'stopwatch.reset', entities: [], description: 'Reset the active stopwatch'
+  },
+  {
+    id: 'stopwatch.cancel', patterns: ['stop stopwatch', 'cancel stopwatch'], permissionLevel: 'low',
+    action: 'stopwatch.cancel', entities: [], description: 'Stop the active stopwatch'
+  },
+  {
+    id: 'stopwatch.elapsed', patterns: ['stopwatch time', 'show stopwatch'], permissionLevel: 'low',
+    action: 'stopwatch.elapsed', entities: [], description: 'Show elapsed stopwatch time'
+  },
+  {
     id: 'reminder.list', patterns: ['show reminders', 'list reminders'], permissionLevel: 'low',
     action: 'reminder.list', entities: [{ name: 'scope', type: 'string', required: false }], description: 'Show reminders'
   },

@@ -50,7 +50,7 @@
             <button class="chip-btn" data-cmd="System Status">System status</button>
             <button class="chip-btn" data-cmd="Help">What can you do?</button>
           </div>
-          <div id="composer-hint"><span>Enter to send</span><span>Alt+Space to show</span></div>
+          <div id="composer-hint"><span>Enter to send</span></div>
         </div>
       </section>
 
@@ -148,21 +148,13 @@
           </section>
 
           <div class="settings-nav">
-            <button class="settings-nav-chip" data-section-target="identity" type="button">
-              <span class="nav-label">Identity</span>
-              <span class="nav-hint">Assistant name, title, honorific, and chat shortcut.</span>
+            <button class="settings-nav-chip" data-section-target="system" type="button">
+              <span class="nav-label">System</span>
+              <span class="nav-hint">Identity, theme, and access controls.</span>
             </button>
             <button class="settings-nav-chip" data-section-target="profile" type="button">
               <span class="nav-label">Profile</span>
               <span class="nav-hint">Personal details for future form-filling workflows.</span>
-            </button>
-            <button class="settings-nav-chip" data-section-target="theme" type="button">
-              <span class="nav-label">Theme</span>
-              <span class="nav-hint">Reveal chat themes only when needed.</span>
-            </button>
-            <button class="settings-nav-chip" data-section-target="access" type="button">
-              <span class="nav-label">Access</span>
-              <span class="nav-hint">Choose when automation commands require confirmation.</span>
             </button>
             <button class="settings-nav-chip" data-section-target="phone" type="button">
               <span class="nav-label">Phone</span>
@@ -176,19 +168,28 @@
           </div>
 
           <div class="settings-content">
-          <section class="settings-section" data-settings-section="identity" id="settings-section-identity">
+          <div class="system-options" id="system-options" role="tablist" aria-label="System settings" hidden>
+            <button class="system-option active" data-system-block-target="identity" type="button" role="tab" aria-selected="true">
+              <span class="nav-label">Identity</span>
+              <span class="nav-hint">Name, honorific, and voice.</span>
+            </button>
+            <button class="system-option" data-system-block-target="theme" type="button" role="tab" aria-selected="false">
+              <span class="nav-label">Theme</span>
+              <span class="nav-hint">Glass tint and colors.</span>
+            </button>
+            <button class="system-option" data-system-block-target="access" type="button" role="tab" aria-selected="false">
+              <span class="nav-label">Access</span>
+              <span class="nav-hint">Automation permission level.</span>
+            </button>
+          </div>
+
+          <section class="settings-section" data-settings-section="system" data-system-block="identity" id="settings-section-identity">
             <div class="section-heading">Assistant Identity</div>
             <div class="field-grid">
               <label class="field-wrap">
                 <span class="field-label">Assistant Name</span>
                 <input class="field" id="assistant-display-name" type="text" placeholder="JARVIS">
               </label>
-              <label class="field-wrap">
-                <span class="field-label">Assistant Title</span>
-                <input class="field" id="assistant-title" type="text" placeholder="Desktop Assistant">
-              </label>
-            </div>
-            <div class="field-grid">
               <label class="field-wrap">
                 <span class="field-label">Honorific</span>
                 <select class="field-select" id="assistant-honorific">
@@ -198,12 +199,7 @@
                   <option value="commander">commander</option>
                 </select>
               </label>
-              <label class="field-wrap">
-                <span class="field-label">Chat Shortcut</span>
-                <input class="field" id="assistant-activation-shortcut" type="text" placeholder="Alt+Space">
-              </label>
             </div>
-            <div class="section-note">Use an Electron-style shortcut such as <code>Alt+Space</code> or <code>Control+Shift+J</code>. The chat window opens when that shortcut is pressed.</div>
             <div class="field-grid">
               <label class="field-wrap">
                 <span class="field-label">Assistant Volume</span>
@@ -283,7 +279,7 @@
             </div>
           </section>
 
-          <section class="settings-section" data-settings-section="theme" id="settings-section-theme">
+          <section class="settings-section" data-settings-section="system" data-system-block="theme" id="settings-section-theme">
             <div class="section-heading">Theme</div>
             <label class="glass-tint-control" for="glass-tint">
               <span class="glass-tint-heading"><span>Glass tint</span><strong id="glass-tint-value">42%</strong></span>
@@ -293,7 +289,7 @@
             <div class="theme-grid" id="theme-grid"></div>
           </section>
 
-          <section class="settings-section" data-settings-section="access" id="settings-section-access">
+          <section class="settings-section" data-settings-section="system" data-system-block="access" id="settings-section-access">
             <div class="section-heading">Permission Scale</div>
             <div class="section-note">Lower levels block more risky actions. Critical is full access and skips confirmation for allowed actions.</div>
             <div class="permission-scale" role="radiogroup" aria-label="Automation permission">

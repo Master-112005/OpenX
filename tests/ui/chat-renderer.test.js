@@ -87,6 +87,30 @@ describe('Chat Renderer UI', function() {
     assert.match(script, /Pairing code expired\./);
   });
 
+  it('should group identity, theme, and access under System while keeping Phone separate', function() {
+    assert.match(html, /data-section-target="system"/);
+    assert.match(html, /id="system-options"/);
+    assert.match(html, /data-system-block-target="identity"/);
+    assert.match(html, /data-system-block-target="theme"/);
+    assert.match(html, /data-system-block-target="access"/);
+    assert.doesNotMatch(html, /data-section-target="identity"/);
+    assert.doesNotMatch(html, /data-section-target="theme"/);
+    assert.doesNotMatch(html, /data-section-target="access"/);
+    assert.match(html, /id="settings-section-identity"[^>]*data-settings-section="system"|data-settings-section="system"[^>]*id="settings-section-identity"/);
+    assert.match(html, /id="settings-section-theme"[^>]*data-settings-section="system"|data-settings-section="system"[^>]*id="settings-section-theme"/);
+    assert.match(html, /id="settings-section-access"[^>]*data-settings-section="system"|data-settings-section="system"[^>]*id="settings-section-access"/);
+    assert.match(html, /data-system-block="identity"/);
+    assert.match(html, /data-system-block="theme"/);
+    assert.match(html, /data-system-block="access"/);
+    assert.match(html, /id="settings-section-phone"[^>]*data-settings-section="phone"|data-settings-section="phone"[^>]*id="settings-section-phone"/);
+    assert.doesNotMatch(html, /id="assistant-title"|Assistant Title/);
+    assert.doesNotMatch(html, /id="assistant-activation-shortcut"|Chat Shortcut|Alt\+Space to show/);
+    assert.match(script, /setActiveSettingsSection\(activeSettingsSection \|\| 'system'\)/);
+    assert.match(script, /function setActiveSystemBlock/);
+    assert.match(script, /activeSettingsSection !== 'system' \|\| section\.dataset\.systemBlock === activeSystemBlock/);
+    assert.doesNotMatch(script, /getActivationShortcut|assistantActivationShortcut/);
+  });
+
   it('should manage trusted device permissions and device actions', function() {
     assert.match(html, /id="phone-device-list"/);
     assert.match(script, /Remote Commands/);

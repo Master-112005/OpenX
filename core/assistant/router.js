@@ -148,7 +148,10 @@ class ActionRouter {
     );
 
     const commandLooksLikeLearningRepair = preparedInput.learningDirective?.kind === 'repair-learning';
-    if (options.allowMulti !== false && !commandLooksLikeCapability && !commandLooksLikeLearningRepair) {
+    const capabilityAllowsMulti = this._capabilityCommandAllowsMulti(commandLooksLikeCapability, rawCommandText);
+    if (options.allowMulti !== false &&
+      (!commandLooksLikeCapability || capabilityAllowsMulti) &&
+      !commandLooksLikeLearningRepair) {
       const multiPlan = this._buildMultiCommandPlan(rawCommandText, source);
       if (multiPlan) {
         return this._executeMultiCommand(commandId, multiPlan, source, options);
@@ -291,10 +294,12 @@ class ActionRouter {
 
     return this._runResolverChain([
       ['_resolveLearningRepairIntent', () => this._resolveLearningRepairIntent(rawCommandText, preparedInput)],
+      ['_resolveStopwatchIntent', () => this._resolveStopwatchIntent(rawCommandText, preparedInput)],
       ['_resolveScheduleManagementIntent', () => this._resolveScheduleManagementIntent(rawCommandText, preparedInput)],
       ['_resolveExplicitReminderIntent', () => this._resolveExplicitReminderIntent(rawCommandText, preparedInput)],
       ['_resolveExplicitAlarmIntent', () => this._resolveExplicitAlarmIntent(rawCommandText, preparedInput)],
       ['_resolveExplicitTimerIntent', () => this._resolveExplicitTimerIntent(rawCommandText, preparedInput)],
+      ['_resolveSystemPowerIntent', () => this._resolveSystemPowerIntent(rawCommandText, preparedInput)],
       ['_resolveSystemSettingsIntent', () => this._resolveSystemSettingsIntent(rawCommandText, preparedInput)],
       ['_resolveSystemInsightIntent', () => this._resolveSystemInsightIntent(rawCommandText, preparedInput)],
       ['_resolveFolderOpenInAppIntent', () => this._resolveFolderOpenInAppIntent(rawCommandText, preparedInput)],
@@ -303,6 +308,7 @@ class ActionRouter {
       ['_resolveScreenshotIntent', () => this._resolveScreenshotIntent(rawCommandText, preparedInput)],
       ['_resolveFormFillIntent', () => this._resolveFormFillIntent(rawCommandText, preparedInput)],
       ['_resolveYouTubeMediaIntent', () => this._resolveYouTubeMediaIntent(rawCommandText, preparedInput)],
+      ['_resolveBrowserFollowupIntent', () => this._resolveBrowserFollowupIntent(rawCommandText, preparedInput)],
       ['_resolveAppLanguageIntent', () => this._resolveAppLanguageIntent(rawCommandText, preparedInput)],
       ['_resolveBrowserLanguageIntent', () => this._resolveBrowserLanguageIntent(rawCommandText, preparedInput)],
       ['_resolveBrowserTabIntent', () => this._resolveBrowserTabIntent(rawCommandText, preparedInput)],
@@ -319,7 +325,6 @@ class ActionRouter {
       ['_resolveExplicitAppIntent', () => this._resolveExplicitAppIntent(rawCommandText, preparedInput)],
       ['_resolveExplicitWindowIntent', () => this._resolveExplicitWindowIntent(rawCommandText, preparedInput)],
       ['_resolveExplicitCommunicationIntent', () => this._resolveExplicitCommunicationIntent(rawCommandText, preparedInput)],
-      ['_resolveBrowserFollowupIntent', () => this._resolveBrowserFollowupIntent(rawCommandText, preparedInput)],
       ['_resolveKnownWebOpenIntent', () => this._resolveKnownWebOpenIntent(rawCommandText, preparedInput)],
       ['_resolveSiteSearchIntent', () => this._resolveSiteSearchIntent(rawCommandText, preparedInput)],
       ['_resolvePersonalPhotoIntent', () => this._resolvePersonalPhotoIntent(rawCommandText, preparedInput)],
@@ -378,6 +383,11 @@ class ActionRouter {
     };
     const search = (query, confidence = 0.94) => route('browser.search', { query: String(query || raw || corrected).trim() }, confidence);
     const openApp = (appName, confidence = 0.95) => route('app.open', { appName }, confidence);
+
+    if (/\bumbrella\b/.test(input) &&
+      /\b(?:need|take|bring|carry|rain|raining|weather|forecast)\b/.test(input)) {
+      return search('weather forecast do I need an umbrella today', 0.97);
+    }
 
     if (/\b(?:screen|display|monitor|brightness|light)\b/.test(input) &&
       /\b(?:hurts?|hurting|pain|strain|eye\s*strain|eyes?|too\s+bright|very\s+bright|glare|harsh|dazzling|burning)\b/.test(input)) {
@@ -583,7 +593,9 @@ class ActionRouter {
       /\b(?:open|show|launch|start|find|locate|search|move|copy|rename|delete|create)\b/.test(text);
     const scheduleCommand = /\b(?:timer|countdown|pomodoro|alarm|reminder|remind)\b/.test(text) &&
       /\b(?:set|start|create|add|pause|resume|reset|stop|cancel|delete|show|list|snooze|wake|remind)\b/.test(text);
-    return fileCommand || scheduleCommand;
+    const networkCommand = /\b(?:wifi|wi\s*fi|bluetooth|blue\s*tooth)\b/.test(text) &&
+      /\b(?:open|show|check|connect|disconnect|forget|enable|disable|turn|switch|settings|status)\b/.test(text);
+    return fileCommand || scheduleCommand || networkCommand;
   }
 
   _resolveCapabilityCommandIntent(rawText, preparedInput = {}, options = {}) {
@@ -657,6 +669,8 @@ class ActionRouter {
       ['window', /\b(?:restore .*windows?|bring .*to front|focus on)\b/],
       ['system-power', /\b(?:sign out|hibernate|cancel shutdown|cancel restart|shutdown .*in \d+|restart .*in \d+)\b/],
       ['stopwatch', /\b(?:stopwatch|pause the stopwatch|resume the stopwatch|reset the stopwatch)\b/],
+      ['workflow-step', /\b(?:annotate|archive|attach|back\s+up|backup|bookmark|categorize|collect|compare|details?|download|drink|estimate|evaluate|export|favorites?|generate|group|impact|import|install|installed|label\s+it|notifications?|pin\s+it|record(?:\s+(?:video|tutorial|demo|meeting))?|recommend|report|return\s+everything|review|save|saved|scan|store|study\s+notes|suggest|update|verify)\b/],
+      ['workflow-step', /^(?:details?|optimization|summary report)$/],
       ['context-followup', /^(?:minimize it|maximize it|close it|cancel everything|cancel the search|start again|explain it simply|explain it simple|explain the first result|explain it like|make that easier|real-world example|summarize that|summarize it(?: .*)?|what is this website about)\b/],
       ['intent-shortcut', /\b(?:i want to code|coding environment ready|programming|continue working on my project|usual(?:ly)? need|previous workspace|left off|i want to write notes|write something|take notes|write down an idea|calculate some numbers|quick calculation|i need a browser|internet|speakers|hear anything|too loud|too dark|screen is too bright|volume is too low|developer mode|gaming mode|work mode|focus mode|stream mode|peace and quiet|reduce distractions|focus .*hour|done working|wrap up|save my work|shut things down safely|need a break|open a game|pending tasks|unfinished|plan .*day|what should i work on|help me get started|i am bored|suggest something)\b/],
       ['file-batch', /\b(?:create five text files|create subfolders)\b/],
@@ -693,14 +707,40 @@ class ActionRouter {
     return null;
   }
 
+  _capabilityCommandAllowsMulti(capability, rawText) {
+    if (!capability) {
+      return true;
+    }
+
+    const capabilityName = String(capability.capability || '');
+    if (!['workflow-step', 'document-tools', 'local-command', 'desktop-automation'].includes(capabilityName)) {
+      return false;
+    }
+
+    const text = String(rawText || '').trim();
+    if (!/[,;]|\b(?:and then|then|after that|afterwards|and|also|plus)\b/i.test(text)) {
+      return false;
+    }
+
+    const actionSegments = text
+      .split(/\s*(?:;|,|\b(?:and then|then|after that|afterwards|and|also|plus)\b)\s*/i)
+      .map(segment => segment.trim())
+      .filter(Boolean)
+      .filter(segment => /^(?:open|launch|start|run|search|google|look\s+up|find|save|saved|tell|ask|read|show|create|write|record|download|export|summarize|remind|set)\b/i.test(segment));
+
+    return actionSegments.length >= 2;
+  }
+
   _extractCapabilityOperation(text) {
-    const operationMatch = String(text || '').match(/\b(open|show|check|connect|disconnect|forget|reconnect|empty|restore|start|stop|pause|resume|enable|disable|turn|change|clear|copy|paste|save|take|record|switch|clean|free|draft|sync|upload|download|measure|convert|merge|split|scan|add|export|translate|read|summarize|track|compare|find|join|share|bring|focus|sign|hibernate|cancel|suggest|explain|login|clone|create|run|write|pin|archive|mute|rename|print|install)\b/i);
-    return operationMatch ? operationMatch[1].toLowerCase() : 'handle';
+    const operationMatch = String(text || '').match(/\b(open|show|check|connect|disconnect|forget|reconnect|empty|restore|start|stop|pause|resume|enable|disable|turn|change|clear|copy|paste|save|saved|take|record|switch|clean|free|draft|sync|upload|downloads?|measure|convert|merge|split|scan|add|export|translate|read|summarize|track|compare|find|search|join|share|bring|focus|sign|hibernate|cancel|suggest|explain|login|clone|create|run|write|pin|archive|analyze|organize|schedule|bookmark|categorize|evaluate|report|mute|rename|print|install)\b/i);
+    return operationMatch
+      ? operationMatch[1].toLowerCase().replace(/^saved$/, 'save').replace(/^downloads?$/, 'download')
+      : 'handle';
   }
 
   _extractCapabilityTarget(text) {
     return String(text || '')
-      .replace(/\b(?:open|show|check|connect|disconnect|forget|reconnect|empty|restore|start|stop|pause|resume|enable|disable|turn|change|clear|copy|paste|save|take|record|switch|clean|free|draft|sync|upload|download|measure|convert|merge|split|scan|add|export|translate|read|summarize|track|compare|find|join|share|bring|focus|sign|hibernate|cancel|suggest|explain|login|clone|create|run|write|pin|archive|mute|rename|print|install)\b/gi, ' ')
+      .replace(/\b(?:open|show|check|connect|disconnect|forget|reconnect|empty|restore|start|stop|pause|resume|enable|disable|turn|change|clear|copy|paste|save|saved|take|record|switch|clean|free|draft|sync|upload|downloads?|measure|convert|merge|split|scan|add|export|translate|read|summarize|track|compare|find|search|join|share|bring|focus|sign|hibernate|cancel|suggest|explain|login|clone|create|run|write|pin|archive|analyze|organize|schedule|bookmark|categorize|evaluate|report|mute|rename|print|install)\b/gi, ' ')
       .replace(/\s+/g, ' ')
       .trim();
   }
@@ -1190,7 +1230,8 @@ class ActionRouter {
       };
     }
 
-    const permissionCheck = this.permissionValidator.validate(intentResult.intent, entities, source);
+    const permissionIntent = this._buildPermissionIntent(intentResult.intent, entities);
+    const permissionCheck = this.permissionValidator.validate(permissionIntent, entities, source);
 
     if (!permissionCheck.allowed) {
       return {
@@ -1202,7 +1243,7 @@ class ActionRouter {
         confidence: intentResult.confidence,
         entities,
         requiresConfirmation: permissionCheck.requiresConfirmation,
-        permissionLevel: intentResult.intent.permissionLevel,
+        permissionLevel: permissionIntent.permissionLevel,
         languageUnderstanding
       };
     }
@@ -1219,12 +1260,37 @@ class ActionRouter {
         response: this._buildResponse('confirmation', 'confirmAction', {
           action: intentResult.intent.description,
           details: permissionCheck.confirmationMessage,
-          intent: intentResult.intent
+          intent: permissionIntent
         }),
         languageUnderstanding
       };
     }
     return this._execute(commandId, intentResult, entities, rawCommandText, source, languageUnderstanding, options);
+  }
+
+  _buildPermissionIntent(intent, entities = {}) {
+    if (!intent) return intent;
+
+    if (intent.id === 'system.bluetooth' && typeof entities.enabled === 'boolean' &&
+      this.config?.permissions?.levels?.medium) {
+      return {
+        ...intent,
+        permissionLevel: 'medium',
+        description: entities.enabled ? 'Turn Bluetooth on' : 'Turn Bluetooth off'
+      };
+    }
+
+    if (intent.id === 'assistant.capability' && entities.capability === 'network' &&
+      /\b(?:connect|connected|disconnect|forget|enable|disable|turn|switch)\b/i.test(`${entities.operation || ''} ${entities.rawCommand || ''}`) &&
+      this.config?.permissions?.levels?.medium) {
+      return {
+        ...intent,
+        permissionLevel: 'medium',
+        description: 'Change network settings'
+      };
+    }
+
+    return intent;
   }
 
   _buildMultiCommandPlan(rawText, source) {
@@ -1238,6 +1304,11 @@ class ActionRouter {
     }
 
     if (this._looksLikeSingleMediaPlatformRequest(text)) {
+      return null;
+    }
+
+    if (/\b(?:wifi|wi\s*fi)\b/i.test(text) &&
+      /\b(?:connect|connected|disconnect|forget|enable|disable|turn\s+on|turn\s+off|switch\s+on|switch\s+off)\b/i.test(text)) {
       return null;
     }
 
@@ -1350,17 +1421,23 @@ class ActionRouter {
     let carriedVerb = null;
 
     return clauses.map(clause => {
+      const originalClause = String(clause || '').trim();
+      if (/^(?:save|compare|download|archive|organize|analyze|schedule|bookmark|categorize|evaluate)\b/i.test(originalClause)) {
+        carriedVerb = null;
+        return originalClause;
+      }
+
       const prepared = this.nlp.prepare(clause);
       const corrected = String(prepared.correctedText || clause || '').trim();
       const normalized = corrected.toLowerCase();
-      const verbMatch = normalized.match(/^(open|launch|start|run|close|quit|exit|terminate|minimize|maximize|switch|focus|pause|resume|unpause|stop|set)\b/);
+      const verbMatch = normalized.match(/^(open|launch|start|run|close|quit|exit|terminate|minimize|maximize|switch|focus|pause|resume|unpause|stop|set|save|saved)\b/);
       const standaloneQuestionMatch = normalized.match(/^ask\s+(.+)$/);
       if (standaloneQuestionMatch?.[1] && /^(?:what|who|when|where|why|how|which)\b/i.test(standaloneQuestionMatch[1].trim())) {
         carriedVerb = null;
         return `search for ${standaloneQuestionMatch[1].trim()}`;
       }
 
-      if (/^(?:ask|tell|message|text|search|google|look\s+up|find|what|who|when|where|why|how|which|remind|set|turn)\b/.test(normalized)) {
+      if (/^(?:ask|tell|message|text|search|google|look\s+up|find|what|who|when|where|why|how|which|remind|set|turn|save|saved)\b/.test(normalized)) {
         carriedVerb = null;
         return corrected;
       }
@@ -1409,10 +1486,16 @@ class ActionRouter {
     const steps = [];
 
     for (const clause of clauses) {
-      const result = await this.process(clause, source, {
+      let result = await this.process(clause, source, {
         allowMulti: false,
         permissionGuard: options.permissionGuard
       });
+      if (!result.success && !result.requiresConfirmation) {
+        const fallbackResult = await this._executeBareWorkflowStep(clause, source, options);
+        if (fallbackResult) {
+          result = fallbackResult;
+        }
+      }
       steps.push({
         commandId: result.commandId || null,
         input: clause,
@@ -1428,6 +1511,7 @@ class ActionRouter {
 
       if (result.requiresConfirmation || !result.success) {
         const pendingIndex = steps.length - 1;
+        const needsClarification = Boolean(result.needsClarification);
         return {
           commandId,
           success: false,
@@ -1446,6 +1530,8 @@ class ActionRouter {
           response: result.requiresConfirmation
             ? result.response
             : this._buildMultiCommandResponse(steps),
+          needsClarification,
+          validation: needsClarification ? result.validation || null : null,
           requiresConfirmation: result.requiresConfirmation,
           confirmationMessage: result.confirmationMessage,
           permissionLevel: result.permissionLevel
@@ -1462,6 +1548,58 @@ class ActionRouter {
       steps,
       response: this._buildMultiCommandResponse(steps)
     };
+  }
+
+  async _executeBareWorkflowStep(clause, source, options = {}) {
+    const text = String(clause || '').trim();
+    if (!text) {
+      return null;
+    }
+
+    const operation = this._extractCapabilityOperation(text);
+    const safeWorkflowOperations = new Set([
+      'analyze',
+      'archive',
+      'bookmark',
+      'categorize',
+      'compare',
+      'download',
+      'evaluate',
+      'export',
+      'organize',
+      'read',
+      'report',
+      'rename',
+      'save',
+      'schedule',
+      'search',
+      'summarize'
+    ]);
+    if (!safeWorkflowOperations.has(operation)) {
+      return null;
+    }
+
+    const intent = this.intentRegistry.get('assistant.capability');
+    if (!intent) {
+      return null;
+    }
+
+    const entities = {
+      capability: 'workflow-step',
+      operation,
+      target: text,
+      rawCommand: text
+    };
+
+    return this._execute(
+      IdGenerator.generate(),
+      { intent, confidence: 0.8, entities },
+      entities,
+      text,
+      source,
+      null,
+      options
+    );
   }
 
   _buildMultiCommandResponse(steps) {
@@ -1551,7 +1689,8 @@ class ActionRouter {
       };
     }
 
-    const permissionCheck = this.permissionValidator.validate(intent, entities, options.source || 'confirmation');
+    const permissionIntent = this._buildPermissionIntent(intent, entities);
+    const permissionCheck = this.permissionValidator.validate(permissionIntent, entities, options.source || 'confirmation');
     if (!permissionCheck.allowed) {
       return {
         commandId,
@@ -1562,7 +1701,7 @@ class ActionRouter {
         confidence: 1,
         entities,
         requiresConfirmation: false,
-        permissionLevel: intent.permissionLevel
+        permissionLevel: permissionIntent.permissionLevel
       };
     }
 
@@ -3007,6 +3146,10 @@ class ActionRouter {
     if (!input) return null;
 
     const lower = input.toLowerCase();
+    if (/^(?:tell|ask)\s+me\s+(?:if|whether)\b/.test(lower)) {
+      return null;
+    }
+
     const emailIntent = this.intentRegistry.get('email.compose');
     if (emailIntent && /^(?:send\s+)?(?:email|mail)\b/i.test(lower)) {
       const entities = this._extractEmailComposeEntities(rawText);
@@ -3264,7 +3407,7 @@ class ActionRouter {
       return null;
     }
 
-    if (/^(?:open|close|launch|start|run|play|pause|resume|stop|send|message|call|create|delete|move|copy|rename|set|turn|switch|minimize|maximize)\b/.test(input)) {
+    if (/^(?:open|close|launch|start|run|play|pause|resume|stop|send|message|call|create|delete|move|copy|rename|set|turn|switch|minimize|maximize|save|saved)\b/.test(input)) {
       return null;
     }
 
@@ -3661,6 +3804,24 @@ const newTabMatch = input.match(
       return null;
     }
 
+    const wifiStateChange = /\b(?:wifi|wi\s*fi)\b/.test(input) &&
+      /\b(?:connect|connected|disconnect|forget|enable|disable|turn\s+on|turn\s+off|switch\s+on|switch\s+off)\b/.test(input);
+    if (wifiStateChange) {
+      const intent = this.intentRegistry.get('assistant.capability');
+      return intent
+        ? {
+            intent,
+            confidence: 1,
+            entities: {
+              capability: 'network',
+              operation: this._extractCapabilityOperation(input),
+              target: input,
+              rawCommand: rawText
+            }
+          }
+        : null;
+    }
+
     if (/\bbluetooth\b/.test(input)) {
       const intent = this.intentRegistry.get('system.bluetooth');
       if (!intent) {
@@ -3699,24 +3860,92 @@ const newTabMatch = input.match(
       : null;
   }
 
+  _resolveSystemPowerIntent(rawText, preparedInput) {
+    const input = this._normalizeSystemCommandText(preparedInput?.correctedText || rawText);
+    const raw = this._normalizeSystemCommandText(rawText);
+    const combined = `${input} ${raw}`.replace(/\s+/g, ' ').trim();
+    if (!combined) {
+      return null;
+    }
+
+    if (/\b(?:timer|song|track|server|service|app|application|remind|reminder)\b/.test(combined)) {
+      return null;
+    }
+
+    const restartIntent = this.intentRegistry.get('system.restart');
+    const shutdownIntent = this.intentRegistry.get('system.shutdown');
+    const sleepIntent = this.intentRegistry.get('system.sleep');
+    const lockIntent = this.intentRegistry.get('system.lock');
+
+    if (/\b(?:restart|reboot)\b/.test(combined)) {
+      return restartIntent ? { intent: restartIntent, confidence: 1, entities: {} } : null;
+    }
+
+    if (/\b(?:shut\s*down|shutdown|power\s+off|cancel\s+(?:scheduled\s+)?shutdown)\b/.test(combined)) {
+      return shutdownIntent ? { intent: shutdownIntent, confidence: 1, entities: {} } : null;
+    }
+
+    if (/\b(?:sleep|hibernate|put\s+(?:the\s+)?computer\s+to\s+sleep)\b/.test(combined)) {
+      return sleepIntent ? { intent: sleepIntent, confidence: 1, entities: {} } : null;
+    }
+
+    if (/\b(?:lock\s+(?:the\s+)?(?:computer|screen|pc|laptop)|lock\s+workstation)\b/.test(combined)) {
+      return lockIntent ? { intent: lockIntent, confidence: 1, entities: {} } : null;
+    }
+
+    return null;
+  }
+
   _resolveBrowserFollowupIntent(rawText, preparedInput) {
     const input = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
-    if (!/^(?:click|open|go\s+to)\s+(?:the\s+)?first\s+(?:link|result|search\s+result)\b/.test(input)) {
+    if (!/^(?:click|open|go\s+to)\s+(?:the\s+)?(?:first|top(?:\s+(?:\d+|one|two|three|four|five))?)\s+(?:links?|results?|search\s+results?)\b/.test(input)) {
       return null;
     }
 
     const intent = this.intentRegistry.get('browser.openFirstResult');
     const queryMatch = input.match(/\b(?:for|of)\s+(.+)$/i);
+    const countMatch = input.match(/\btop\s+(\d+|one|two|three|four|five)\b/i);
+    const countWords = {
+      one: 1,
+      two: 2,
+      three: 3,
+      four: 4,
+      five: 5
+    };
+    const resultCount = countMatch?.[1]
+      ? Number(countWords[countMatch[1]] || countMatch[1])
+      : 1;
     const query = queryMatch?.[1]
       ? queryMatch[1].replace(/\s+(?:in|on)\s+(?:chrome|browser|edge|firefox)\s*$/i, '').trim()
       : '';
-    return intent ? { intent, confidence: 1, entities: query ? { query } : {} } : null;
+    return intent
+      ? {
+          intent,
+          confidence: 1,
+          entities: {
+            ...(query ? { query } : {}),
+            ...(resultCount > 1 ? { resultCount } : {})
+          }
+        }
+      : null;
   }
 
   _resolveExplicitReminderIntent(rawText, preparedInput) {
     const input = String(preparedInput?.correctedText || rawText || '').trim();
+    const durationWords = '(?:\\d+|one|two|three|four|five|six|seven|eight|nine|ten|fifteen|twenty|thirty|forty(?:\\s*five)?|sixty)';
+    const durationUnits = '(?:seconds?|secs?|minutes?|mins?|hours?|hrs?)';
     const taskTimer = input.match(/^(?:set|create|add)\s+(?:a\s+)?timer\s+for\s+(.+?)\s+at\s+(\d{1,2}(?:(?::|\s+)\d{2})?\s*(?:am|pm)?)$/i);
-    if (!taskTimer && !/^(?:remind|set\s+(?:a\s+)?reminder|create\s+(?:a\s+)?reminder|add\s+(?:a\s+)?reminder|schedule\s+(?:a\s+)?reminder)\b/i.test(input)) {
+    const taskDurationTimer = input.match(new RegExp(
+      `^(?:set|start|create|add)\\s+(?:a\\s+)?timer\\s+(?:for|of)\\s+(${durationWords}\\s*${durationUnits})\\s+(?:to|for)\\s+(.+)$`,
+      'i'
+    )) || input.match(new RegExp(
+      `^(?:set|start|create|add)\\s+(?:a\\s+)?(${durationWords}\\s*${durationUnits})\\s+timer\\s+(?:to|for)\\s+(.+)$`,
+      'i'
+    )) || input.match(new RegExp(
+      `^(?:set|start|create|add)\\s+(?:a\\s+)?timer\\s+(?:to|for)\\s+(.+?)\\s+in\\s+(${durationWords}\\s*${durationUnits})$`,
+      'i'
+    ));
+    if (!taskTimer && !taskDurationTimer && !/^(?:remind|notify|alert|set\s+(?:a\s+)?reminder|create\s+(?:a\s+)?reminder|add\s+(?:a\s+)?reminder|schedule\s+(?:a\s+)?reminder)\b/i.test(input)) {
       return null;
     }
 
@@ -3731,6 +3960,18 @@ const newTabMatch = input.match(
       entities.timeExpression = taskTimer[2].replace(/^(\d{1,2})\s+(\d{2})/, '$1:$2').replace(/\s+/g, ' ').trim();
       entities.reminderCategory = this.entityExtractor._extractReminderCategory(taskTimer[1]);
     }
+    if (taskDurationTimer) {
+      const durationText = taskDurationTimer[1].match(new RegExp(`^${durationWords}\\s*${durationUnits}$`, 'i'))
+        ? taskDurationTimer[1]
+        : taskDurationTimer[2];
+      const reminderText = taskDurationTimer[2] && durationText === taskDurationTimer[1]
+        ? taskDurationTimer[2]
+        : taskDurationTimer[1];
+      entities.duration = this.entityExtractor._extractDuration(durationText);
+      entities.timeExpression = durationText;
+      entities.reminderText = this.entityExtractor._stripReminderScheduleSuffix(reminderText) || String(reminderText || '').trim();
+      entities.reminderCategory = this.entityExtractor._extractReminderCategory(entities.reminderText);
+    }
     const correctedEntities = this.entityExtractor.extract(intent, input);
     if (!entities.timeExpression && correctedEntities.timeExpression) {
       entities.timeExpression = correctedEntities.timeExpression;
@@ -3743,7 +3984,7 @@ const newTabMatch = input.match(
     }
     if (!entities.reminderText) {
       const fallbackText = input
-        .replace(/^(?:remind(?:\s+me)?|set\s+(?:a\s+)?reminder|create\s+(?:a\s+)?reminder|add\s+(?:a\s+)?reminder)\s+(?:to\s+)?/i, '')
+        .replace(/^(?:(?:remind|notify|alert)(?:\s+me)?|set\s+(?:a\s+)?reminder|create\s+(?:a\s+)?reminder|add\s+(?:a\s+)?reminder)\s+(?:to\s+)?/i, '')
         .replace(/^(?:at|for|in)\s+\d{1,2}(?:(?::|\s+)\d{2})?\s*(?:am|pm)?(?:\s+(?:today|tomorrow))?\s*/i, '')
         .trim();
       if (fallbackText && !/^(?:me|myself|today|tomorrow|am|pm)$/i.test(fallbackText)) {
@@ -3787,6 +4028,27 @@ const newTabMatch = input.match(
       return { intent, confidence: 1, entities };
     }
     return null;
+  }
+
+  _resolveStopwatchIntent(rawText, preparedInput) {
+    const input = String(preparedInput?.correctedText || rawText || '').trim().toLowerCase();
+    if (!/\bstop\s*watch\b|\bstopwatch\b/.test(input)) return null;
+    const routes = [
+      ['stopwatch.pause', /^(?:pause|hold)\s+(?:the\s+|my\s+)?stop\s*watch$/],
+      ['stopwatch.resume', /^(?:resume|continue)\s+(?:the\s+|my\s+)?stop\s*watch$/],
+      ['stopwatch.reset', /^(?:reset|restart)\s+(?:the\s+|my\s+)?stop\s*watch$/],
+      ['stopwatch.cancel', /^(?:stop|cancel|close)\s+(?:the\s+|my\s+)?stop\s*watch$/],
+      ['stopwatch.elapsed', /^(?:show|check|what(?:'s| is)|tell)\b.*\bstop\s*watch\b/],
+      ['stopwatch.start', /^(?:start|set|run|begin|open)\s+(?:a\s+|the\s+|my\s+)?stop\s*watch$/]
+    ];
+    for (const [intentId, pattern] of routes) {
+      if (!pattern.test(input)) continue;
+      const intent = this.intentRegistry.get(intentId);
+      if (!intent) return null;
+      return { intent, confidence: 1, entities: {} };
+    }
+    const intent = this.intentRegistry.get('stopwatch.start');
+    return intent ? { intent, confidence: 0.9, entities: {} } : null;
   }
 
   _resolveExplicitAlarmIntent(rawText, preparedInput) {

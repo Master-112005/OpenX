@@ -9,6 +9,9 @@ const settingsCloseBtn = document.getElementById('settings-close-btn');
 const settingsNavButtons = document.querySelectorAll('.settings-nav-chip');
 const settingsSections = document.querySelectorAll('[data-settings-section]');
 const settingsFooterSection = document.getElementById('settings-footer-section');
+const systemOptionsEl = document.getElementById('system-options');
+const systemOptionButtons = document.querySelectorAll('.system-option');
+const systemBlocks = document.querySelectorAll('[data-system-block]');
 const quickBtns = document.querySelectorAll('.chip-btn');
 const themeGrid = document.getElementById('theme-grid');
 const settingsStatusEl = document.getElementById('settings-status');
@@ -56,6 +59,7 @@ let pendingConfirmation = null;
 let settingsSnapshot = null;
 let selectedThemeId = 'graphite';
 let activeSettingsSection = null;
+let activeSystemBlock = 'identity';
 let hasRenderedWelcome = false;
 let modeDrafts = [];
 let selectedModeIndex = 0;
@@ -79,9 +83,7 @@ const scheduleTimers = new Map();
 
 const fieldIds = {
   assistantDisplayName: 'assistant-display-name',
-  assistantTitle: 'assistant-title',
   assistantHonorific: 'assistant-honorific',
-  assistantActivationShortcut: 'assistant-activation-shortcut',
   assistantTtsVolume: 'assistant-tts-volume',
   assistantTtsRate: 'assistant-tts-rate',
   profileFullName: 'profile-full-name',
@@ -105,10 +107,6 @@ function getAssistantDisplayName() {
 
 function getHonorific() {
   return settingsSnapshot?.settings?.assistant?.honorific || 'sir';
-}
-
-function getActivationShortcut() {
-  return settingsSnapshot?.settings?.chat?.activationShortcut || 'Alt+Space';
 }
 
 function assistantMeta(label = 'just now') {
@@ -850,9 +848,7 @@ function populateSettingsForm() {
   }
 
   setFieldValue(fieldIds.assistantDisplayName, settings.assistant.displayName);
-  setFieldValue(fieldIds.assistantTitle, settings.assistant.title);
   setFieldValue(fieldIds.assistantHonorific, settings.assistant.honorific);
-  setFieldValue(fieldIds.assistantActivationShortcut, settings.chat.activationShortcut);
   setFieldValue(fieldIds.assistantTtsVolume, String(settings.voice?.tts?.volume ?? 100));
   setFieldValue(fieldIds.assistantTtsRate, String(settings.voice?.tts?.rate ?? 2));
   updateTtsSliderLabels();
@@ -891,6 +887,22 @@ function updatePermissionScale() {
   });
 }
 
+function setActiveSystemBlock(blockName) {
+  const allowedBlocks = new Set(['identity', 'theme', 'access']);
+  activeSystemBlock = allowedBlocks.has(blockName) ? blockName : 'identity';
+
+  systemOptionButtons.forEach(button => {
+    const isActive = button.dataset.systemBlockTarget === activeSystemBlock;
+    button.classList.toggle('active', isActive);
+    button.setAttribute('aria-selected', String(isActive));
+  });
+
+  systemBlocks.forEach(block => {
+    const isOpen = activeSettingsSection === 'system' && block.dataset.systemBlock === activeSystemBlock;
+    block.classList.toggle('open', isOpen);
+  });
+}
+
 function setActiveSettingsSection(sectionName) {
   activeSettingsSection = sectionName || null;
 
@@ -899,9 +911,19 @@ function setActiveSettingsSection(sectionName) {
     button.classList.toggle('active', isActive);
   });
 
+  if (systemOptionsEl) {
+    const systemActive = activeSettingsSection === 'system';
+    systemOptionsEl.hidden = !systemActive;
+    systemOptionsEl.classList.toggle('open', systemActive);
+  }
+
   settingsSections.forEach(section => {
-    section.classList.toggle('open', section.dataset.settingsSection === activeSettingsSection);
+    const isOpen = section.dataset.settingsSection === activeSettingsSection
+      && (activeSettingsSection !== 'system' || section.dataset.systemBlock === activeSystemBlock);
+    section.classList.toggle('open', isOpen);
   });
+
+  setActiveSystemBlock(activeSystemBlock);
 
   settingsFooterSection.classList.toggle('open', Boolean(activeSettingsSection));
   const settingsContent = document.querySelector('.settings-content');
@@ -1153,7 +1175,6 @@ function collectSettingsPayload() {
   return {
     assistant: {
       displayName: document.getElementById(fieldIds.assistantDisplayName).value.trim(),
-      title: document.getElementById(fieldIds.assistantTitle).value.trim(),
       honorific: document.getElementById(fieldIds.assistantHonorific).value
     },
     voice: {
@@ -1165,8 +1186,7 @@ function collectSettingsPayload() {
     chat: {
       themeId: selectedThemeId,
       glassTint: Number(document.getElementById(fieldIds.glassTint).value || 42),
-      maxHistory: Number(document.getElementById(fieldIds.chatMaxHistory).value || 500),
-      activationShortcut: document.getElementById(fieldIds.assistantActivationShortcut).value.trim()
+      maxHistory: Number(document.getElementById(fieldIds.chatMaxHistory).value || 500)
     },
     userProfile: {
       fullName: document.getElementById(fieldIds.profileFullName).value.trim(),
@@ -1189,19 +1209,17 @@ function collectSettingsPayload() {
 
 function updateBranding() {
   const assistantName = getAssistantDisplayName();
-  const assistantTitle = settingsSnapshot?.settings?.assistant?.title || 'Desktop Assistant';
-  document.getElementById('header-title').textContent = `${assistantName} Chat`;
-  document.getElementById('header-subtitle').textContent = assistantTitle;
+  document.getElementById('header-title').textContent = assistantName;
+  document.getElementById('header-subtitle').textContent = 'Ready for local commands';
   document.title = `${assistantName} Chat`;
 }
 
 function updateSettingsSummary() {
   const assistantName = getAssistantDisplayName();
-  const assistantTitle = settingsSnapshot?.settings?.assistant?.title || 'Desktop Assistant';
   const theme = (settingsSnapshot?.availableThemes || []).find(entry => entry.id === selectedThemeId)
     || (settingsSnapshot?.availableThemes || [])[0];
   document.getElementById('settings-hero-name').textContent = assistantName;
-  document.getElementById('settings-hero-title').textContent = `${assistantTitle} configured for local automation, chat hotkey (${getActivationShortcut()}), profile storage, and direct communication actions.`;
+  document.getElementById('settings-hero-title').textContent = 'Configured for local automation, profile storage, voice, theme, and access controls.';
   document.getElementById('settings-hero-honorific').textContent = settingsSnapshot?.settings?.assistant?.honorific || 'sir';
   document.getElementById('settings-hero-theme').textContent = theme?.label || 'Theme';
   document.getElementById('settings-hero-learning').textContent = settingsSnapshot?.settings?.activeLearning?.enabled === false ? 'Disabled' : 'Enabled';
@@ -1214,7 +1232,7 @@ function ensureWelcomeMessage() {
   }
 
   addMessage(
-    `At your service, ${getHonorific()}. Press ${getActivationShortcut()} to open chat, or type a command here.`,
+    `At your service, ${getHonorific()}. Type a command here.`,
     'assistant',
     assistantMeta('ready')
   );
@@ -1240,7 +1258,7 @@ function applySnapshot(snapshot) {
 }
 
 function openSettingsPanel() {
-  setActiveSettingsSection(activeSettingsSection || 'identity');
+  setActiveSettingsSection(activeSettingsSection || 'system');
   settingsOverlay.classList.add('open');
   setSettingsStatus('Settings are stored locally on this machine.', 'info');
   loadPhoneServerStatus();
@@ -1532,6 +1550,13 @@ settingsNavButtons.forEach(button => {
       loadPhoneServerStatus();
       loadPhoneDevices();
     }
+  });
+});
+systemOptionButtons.forEach(button => {
+  button.addEventListener('click', () => {
+    setActiveSystemBlock(button.dataset.systemBlockTarget);
+    const settingsContent = document.querySelector('.settings-content');
+    if (settingsContent) settingsContent.scrollTop = 0;
   });
 });
 document.getElementById('settings-save-btn').addEventListener('click', saveSettings);

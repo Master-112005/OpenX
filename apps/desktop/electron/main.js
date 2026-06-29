@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, globalShortcut, session } = require('electron');
+const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, globalShortcut, session, screen } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -123,6 +123,7 @@ const crashRecoveryPolicy = new CrashRecoveryPolicy({
 
 let chatWindow = null;
 let alertWindow = null;
+let timerWidgetWindow = null;
 let tray = null;
 let assistant = null;
 let textToSpeech = null;
@@ -162,6 +163,8 @@ const IPC_CHANNELS = [
   'settings:save',
   'settings:reset',
   'schedule:alertAction',
+  'timerWidget:getState',
+  'timerWidget:close',
   'app:quit'
 ];
 
@@ -394,6 +397,101 @@ function presentScheduleAlert(schedule) {
   });
 }
 
+function getTimerWidgetState(preferredId = null) {
+  const state = assistant?.automation?.scheduler?.getTimerWidgetState?.(preferredId);
+  return state || { visible: false };
+}
+
+function positionTimerWidget() {
+  if (!timerWidgetWindow || timerWidgetWindow.isDestroyed()) return;
+  const display = screen.getDisplayNearestPoint(screen.getCursorScreenPoint());
+  const area = display?.workArea || screen.getPrimaryDisplay().workArea;
+  const [width, height] = timerWidgetWindow.getSize();
+  timerWidgetWindow.setBounds({
+    x: Math.round(area.x + area.width - width - 22),
+    y: Math.round(area.y + area.height - height - 24),
+    width,
+    height
+  });
+}
+
+function sendTimerWidgetState(state = null) {
+  if (!timerWidgetWindow || timerWidgetWindow.isDestroyed()) return;
+  timerWidgetWindow.webContents.send('timerWidget:state', state || getTimerWidgetState());
+}
+
+function hideTimerWidget() {
+  if (timerWidgetWindow && !timerWidgetWindow.isDestroyed()) {
+    timerWidgetWindow.close();
+  }
+}
+
+function showTimerWidget(preferredId = null) {
+  const state = getTimerWidgetState(preferredId);
+  if (!state.visible) {
+    hideTimerWidget();
+    return;
+  }
+
+  if (timerWidgetWindow && !timerWidgetWindow.isDestroyed()) {
+    positionTimerWidget();
+    timerWidgetWindow.showInactive();
+    sendTimerWidgetState(state);
+    return;
+  }
+
+  timerWidgetWindow = new BrowserWindow({
+    width: 154,
+    height: 154,
+    transparent: true,
+    frame: false,
+    resizable: false,
+    maximizable: false,
+    minimizable: false,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    hasShadow: true,
+    webPreferences: createSecureWebPreferences(PRELOAD_PATH)
+  });
+  timerWidgetWindow.setAlwaysOnTop(true, 'screen-saver');
+  const widgetFile = path.join(RENDERER_ROOT, 'timer-widget', 'index.html');
+  secureWindow(timerWidgetWindow, {
+    windowType: 'timer-widget',
+    expectedFile: widgetFile,
+    createWindow: () => showTimerWidget(preferredId)
+  });
+  timerWidgetWindow.loadFile(widgetFile).then(() => {
+    if (timerWidgetWindow && !timerWidgetWindow.isDestroyed()) {
+      positionTimerWidget();
+      timerWidgetWindow.showInactive();
+      sendTimerWidgetState(state);
+    }
+  }).catch(error => {
+    mainLogger.error('Failed to load timer widget renderer', { error: error.message });
+  });
+  timerWidgetWindow.on('closed', () => {
+    timerWidgetWindow = null;
+  });
+}
+
+function handleTimerWidgetCommand(payload) {
+  if (!payload?.success || !payload.intent) return;
+  const intent = String(payload.intent);
+  if (!/^(?:timer|stopwatch)\./.test(intent)) return;
+  if (intent === 'timer.cancel' || intent === 'timer.clear' || intent === 'stopwatch.cancel') {
+    hideTimerWidget();
+    return;
+  }
+  const preferredId = payload.data?.id || payload.data?.taskName || null;
+  if (intent === 'timer.set' || intent === 'timer.reset' || intent === 'stopwatch.start' || intent === 'stopwatch.reset') {
+    showTimerWidget(preferredId);
+    return;
+  }
+  if (timerWidgetWindow && !timerWidgetWindow.isDestroyed()) {
+    sendTimerWidgetState(getTimerWidgetState(preferredId));
+  }
+}
+
 function createTray() {
   const icon = nativeImage.createEmpty();
   tray = new Tray(icon);
@@ -552,6 +650,15 @@ function setupIPC() {
     return result || { success: false, error: 'Scheduler unavailable' };
   });
 
+  registerIpcHandler('timerWidget:getState', async () => {
+    return getTimerWidgetState();
+  });
+
+  registerIpcHandler('timerWidget:close', async () => {
+    hideTimerWidget();
+    return { success: true };
+  });
+
   registerIpcHandler('app:quit', async () => {
     app.quit();
   });
@@ -660,6 +767,7 @@ async function cleanupRuntime() {
     eventBus?.removeAllListeners?.();
     if (chatWindow && !chatWindow.isDestroyed()) chatWindow.destroy();
     if (alertWindow && !alertWindow.isDestroyed()) alertWindow.destroy();
+    if (timerWidgetWindow && !timerWidgetWindow.isDestroyed()) timerWidgetWindow.destroy();
     if (tray) {
       tray.destroy();
       tray = null;
@@ -685,36 +793,9 @@ function unregisterChatShortcut() {
   registeredChatShortcuts = [];
 }
 
-function getChatShortcuts() {
-  const primary = runtimeConfig?.chat?.activationShortcut || BASE_CONFIG.chat.activationShortcut || 'Alt+Space';
-  const fallbacks = runtimeConfig?.chat?.activationFallbackShortcuts
-    || BASE_CONFIG.chat.activationFallbackShortcuts
-    || ['Control+Alt+Space', 'Control+Space'];
-
-  return [...new Set([primary, ...fallbacks].filter(Boolean))];
-}
-
 function registerChatShortcut() {
   unregisterChatShortcut();
-
-  for (const shortcut of getChatShortcuts()) {
-    try {
-      const registered = globalShortcut.register(shortcut, () => {
-        mainLogger.info('Chat shortcut pressed', { shortcut });
-        createChatWindow();
-      });
-
-      if (!registered) {
-        mainLogger.error('Failed to register chat shortcut', { shortcut });
-        continue;
-      }
-
-      registeredChatShortcuts.push(shortcut);
-      mainLogger.info('Registered chat shortcut', { shortcut });
-    } catch (error) {
-      mainLogger.error('Invalid chat shortcut', { shortcut, error: error.message });
-    }
-  }
+  // Chat is opened from the app UI/tray; global chat shortcuts are disabled.
 }
 
 async function initializeAssistant() {
@@ -830,6 +911,7 @@ async function reloadRuntimeServices() {
     chatWindow.webContents.send('settings:changed', settingsService.getSnapshot());
   }
 
+  showTimerWidget();
 }
 
 function normalizeError(reason) {
@@ -918,11 +1000,16 @@ app.whenReady().then(async () => {
   settingsService = new SettingsService(BASE_CONFIG);
   runtimeConfig = settingsService.buildRuntimeConfig();
   eventBus = new AssistantEventBus();
-  eventBus.subscribe(EVENTS.SCHEDULE_DUE, envelope => presentScheduleAlert(envelope.payload));
+  eventBus.subscribe(EVENTS.SCHEDULE_DUE, envelope => {
+    if (String(envelope.payload?.kind || '').toLowerCase() === 'timer') showTimerWidget();
+    presentScheduleAlert(envelope.payload);
+  });
+  eventBus.subscribe(EVENTS.COMMAND_EXECUTED, envelope => handleTimerWidgetCommand(envelope.payload));
   setupIPC();
   createTray();
   await initializeAssistant();
   await initializePhoneServer();
+  showTimerWidget();
   if (!app.isPackaged) {
     createChatWindow();
   }
@@ -944,7 +1031,7 @@ app.whenReady().then(async () => {
 }).catch(error => handleFatalError(error, 'startup'));
 
 app.on('window-all-closed', () => {
-  // Keep running in tray so Alt+Space can reopen chat.
+  // Keep running in tray so the tray menu can reopen chat.
 });
 
 app.on('activate', () => {

@@ -40,7 +40,10 @@ const ACTION_ALIASES = new Map([
   ['previous', 'previous'],
   ['quit', 'close'],
   ['raise', 'increase'],
+  ['alert', 'remind'],
   ['resume', 'resume'],
+  ['remind', 'remind'],
+  ['notify', 'remind'],
   ['run', 'open'],
   ['search', 'search'],
   ['send', 'send'],
@@ -70,7 +73,7 @@ const DOMAIN_TERMS = {
   file: new Set(['directory', 'document', 'documents', 'file', 'files', 'folder', 'folders', 'pdf', 'photo', 'photos', 'picture', 'pictures']),
   phoneTransfer: new Set(['android', 'device', 'iphone', 'mobile', 'phone']),
   web: new Set(['browser', 'chrome', 'edge', 'firefox', 'google', 'internet', 'site', 'website', 'web', 'youtube']),
-  schedule: new Set(['alarm', 'alarms', 'clock', 'remind', 'reminder', 'reminders', 'timer', 'timers'])
+  schedule: new Set(['alarm', 'alarms', 'alert', 'clock', 'notify', 'remind', 'reminder', 'reminders', 'timer', 'timers'])
 };
 
 const PREPOSITIONS = new Set(['at', 'by', 'for', 'from', 'in', 'into', 'of', 'on', 'onto', 'to', 'with', 'using', 'via']);
@@ -340,8 +343,8 @@ class NaturalLanguageRouter {
       if (action === 'close') return 'window.close';
     }
 
-    if (domain === 'schedule' && ['set', 'open'].includes(action)) {
-      if (/\b(?:remind|reminder|reminders)\b/.test(text)) return 'reminder.set';
+    if (domain === 'schedule' && ['set', 'open', 'remind'].includes(action)) {
+      if (/\b(?:alert|notify|remind|reminder|reminders)\b/.test(text)) return 'reminder.set';
       if (/\b(?:alarm|alarms|wake\s+me)\b/.test(text)) return 'alarm.set';
       if (/\b(?:timer|timers)\b/.test(text) || /\btime\s+for\b/.test(text)) return 'timer.set';
     }

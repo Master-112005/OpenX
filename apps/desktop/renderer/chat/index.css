@@ -3230,6 +3230,40 @@ body.settings-only #settings-panel { height: calc(100vh - 36px); width: calc(100
 .settings-nav-chip .nav-hint { display: none; }
 .settings-nav-chip .nav-label { font-size: 10px; font-weight: 750; }
 
+.system-options {
+  display: none;
+  flex: 0 0 auto;
+  flex-direction: row;
+  gap: 5px;
+  overflow-x: auto;
+  padding: 1px 1px 4px;
+  scrollbar-width: none;
+}
+.system-options.open { display: flex; }
+.system-options::-webkit-scrollbar { display: none; }
+.system-option {
+  align-items: center;
+  background: rgba(255,255,255,.045);
+  border: 1px solid transparent;
+  border-radius: 12px;
+  color: var(--muted-color);
+  cursor: pointer;
+  display: flex;
+  flex: 1 0 auto;
+  font-family: inherit;
+  justify-content: center;
+  min-height: 36px;
+  padding: 0 11px;
+}
+.system-option:hover { background: rgba(255,255,255,.09); color: var(--text-color); }
+.system-option.active {
+  background: rgba(255,255,255,.18);
+  border-color: rgba(255,255,255,.24);
+  color: white;
+}
+.system-option .nav-hint { display: none; }
+.system-option .nav-label { font-size: 10px; font-weight: 750; letter-spacing: -.01em; text-transform: none; }
+
 .settings-content {
   flex: 1;
   min-height: 0;

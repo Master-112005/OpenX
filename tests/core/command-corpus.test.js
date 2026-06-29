@@ -130,18 +130,24 @@ function loadCommands() {
 function createSandboxRouter() {
   const config = {
     logging: { level: 'error' },
+    auth: { preAuthenticated: true },
     permissions: {
       userLevel: 'critical',
       levels: {
         low: { requiresConfirmation: false, requiresAuth: false },
-        medium: { requiresConfirmation: false, requiresAuth: false },
-        high: { requiresConfirmation: false, requiresAuth: false },
-        critical: { requiresConfirmation: false, requiresAuth: false }
+        medium: { requiresConfirmation: true, requiresAuth: false },
+        high: { requiresConfirmation: true, requiresAuth: false },
+        critical: { requiresConfirmation: true, requiresAuth: false }
       }
     }
   };
+  const executed = [];
   const sandboxEngine = {
     execute(actionId, entities) {
+      executed.push({ actionId, entities: { ...(entities || {}) } });
+      if (isSandboxedDangerousAction(actionId, entities)) {
+        throw new Error(`Dangerous action escaped sandbox confirmation: ${actionId}`);
+      }
       return {
         success: true,
         data: {
@@ -151,20 +157,53 @@ function createSandboxRouter() {
       };
     }
   };
-  return new ActionRouter(config, sandboxEngine);
+  const router = new ActionRouter(config, sandboxEngine);
+  router.getSandboxExecutions = () => executed.slice();
+  return router;
+}
+
+function isSandboxedDangerousAction(actionId, entities = {}) {
+  if (['system.shutdown', 'system.restart', 'system.sleep'].includes(actionId)) {
+    return true;
+  }
+  if (actionId === 'system.bluetooth' && typeof entities.enabled === 'boolean') {
+    return true;
+  }
+  return false;
+}
+
+function commandRequestsDangerousOperation(command) {
+  const text = String(command || '').toLowerCase();
+  if (/^\s*(?:remind|notify|alert)\b/.test(text)) {
+    return false;
+  }
+  if (/\b(?:restart|reboot|shut\s*down|shutdown|power\s+off)\b/.test(text) &&
+    !/\b(?:timer|song|track|server|service|app|application|remind|reminder)\b/.test(text)) {
+    return true;
+  }
+  if (/\b(?:turn|switch|put|enable|disable|activate|deactivate|connect|disconnect|forget)\b.*\b(?:wi\s*fi|wifi|bluetooth|blue\s*tooth)\b/.test(text)) {
+    return true;
+  }
+  if (/\b(?:wi\s*fi|wifi|bluetooth|blue\s*tooth)\b.*\b(?:on|off|enable|disable|connect|disconnect|forget)\b/.test(text)) {
+    return true;
+  }
+  return false;
 }
 
 describe('Assistant command corpus routing', function() {
   this.timeout(120000);
 
-  it('should understand every command in commands.md without executing real actions', async function() {
+  it('should handle every command in commands.md without executing real dangerous actions', async function() {
     const commands = loadCommands();
     const router = createSandboxRouter();
     const failures = [];
+    const dangerousWithoutGuard = [];
 
     for (const command of commands) {
       const result = await router.process(command, 'chat');
-      if (!result.intent) {
+      const handled = Boolean(result.intent) &&
+        (result.success || result.requiresConfirmation || result.needsClarification);
+      if (!handled) {
         failures.push({
           command,
           intent: result.intent || null,
@@ -172,8 +211,16 @@ describe('Assistant command corpus routing', function() {
           entities: result.entities || null
         });
       }
+      if (commandRequestsDangerousOperation(command) && !result.requiresConfirmation && !result.needsClarification) {
+        dangerousWithoutGuard.push({
+          command,
+          intent: result.intent || null,
+          success: Boolean(result.success)
+        });
+      }
     }
 
     assert.equal(failures.length, 0, JSON.stringify(failures, null, 2));
+    assert.equal(dangerousWithoutGuard.length, 0, JSON.stringify(dangerousWithoutGuard, null, 2));
   });
 });

@@ -1592,6 +1592,27 @@ describe('Action Router', function() {
     assert.equal(exercise.entities.reminderCategory, 'exercise');
   });
 
+  it('should preserve arbitrary reminder task text', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const router = new ActionRouter(config, {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...entities, dueAt: new Date().toISOString(), kind: 'Reminder' } };
+      }
+    });
+
+    const relative = await router.process('remind me to sign the sheet in 10 minutes', 'chat');
+    const notify = await router.process('notify me in 5 minutes to submit the lab form', 'chat');
+
+    assert.equal(relative.intent, 'reminder.set');
+    assert.equal(relative.entities.duration, 10);
+    assert.equal(relative.entities.reminderText, 'sign the sheet');
+    assert.equal(relative.entities.reminderCategory, 'general');
+    assert.equal(notify.intent, 'reminder.set');
+    assert.equal(notify.entities.reminderText, 'submit the lab form');
+  });
+
   it('should treat task-at-clock timer wording as a reminder', async function() {
     const config = { permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } } };
     const router = new ActionRouter(config, {
@@ -1606,6 +1627,22 @@ describe('Action Router', function() {
     assert.equal(result.entities.timeExpression, '4:30 pm');
     assert.equal(result.entities.reminderText, 'go to college');
     assert.equal(result.entities.reminderCategory, 'education');
+  });
+
+  it('should treat task-labeled duration timer wording as a reminder', async function() {
+    const config = { permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } } };
+    const router = new ActionRouter(config, {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...entities, dueAt: new Date().toISOString() } };
+      }
+    });
+
+    const result = await router.process('set timer for 10 minutes to sign the sheet', 'chat');
+
+    assert.equal(result.intent, 'reminder.set');
+    assert.equal(result.entities.duration, 10);
+    assert.equal(result.entities.reminderText, 'sign the sheet');
+    assert.equal(result.entities.reminderCategory, 'general');
   });
 
   it('should separate alarm time from its label', async function() {
@@ -1637,7 +1674,10 @@ describe('Action Router', function() {
       ['show active timers', 'timer.list'], ['cancel all active timers', 'timer.clear'],
       ['show all reminders', 'reminder.list'], ['delete this reminder', 'reminder.cancel'],
       ['delete all reminders', 'reminder.clear'], ['snooze this reminder for 10 minutes', 'reminder.snooze'], ['snooze the alarm', 'alarm.snooze'],
-      ['show my alarms', 'alarm.list'], ['delete all alarms', 'alarm.clear']
+      ['show my alarms', 'alarm.list'], ['delete all alarms', 'alarm.clear'],
+      ['start stopwatch', 'stopwatch.start'], ['pause the stopwatch', 'stopwatch.pause'],
+      ['resume the stopwatch', 'stopwatch.resume'], ['reset the stopwatch', 'stopwatch.reset'],
+      ['stop the stopwatch', 'stopwatch.cancel'], ['show stopwatch', 'stopwatch.elapsed']
     ]);
     for (const [command, expectedIntent] of commands) {
       const result = await router.process(command, 'chat');
@@ -2750,6 +2790,69 @@ describe('Action Router', function() {
     assert.equal(result.intent, 'multi.command');
     assert.deepEqual(executed.map(step => step.actionId), ['app.open', 'browser.search']);
     assert.equal(executed[1].entities.query, 'what is the weather');
+  });
+
+  it('should split long browser research workflows instead of opening them as files', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const executed = [];
+    const stubEngine = {
+      execute(actionId, entities) {
+        executed.push({ actionId, entities });
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const result = await router.process(
+      'Open Chrome, search for Java tutorials, open the top three results, and save their links in a note.',
+      'chat'
+    );
+
+    assert.equal(result.intent, 'multi.command');
+    assert.equal(result.success, true);
+    assert.deepEqual(executed.map(step => step.actionId), [
+      'app.open',
+      'browser.search',
+      'browser.openFirstResult',
+      'assistant.capability'
+    ]);
+    assert.equal(executed[1].entities.query, 'java tutorials');
+    assert.equal(executed[2].entities.resultCount, 3);
+    assert.equal(executed[3].entities.operation, 'save');
+    assert.equal(executed[3].entities.rawCommand, 'save their links in a note.');
+  });
+
+  it('should route umbrella advice follow-ups as weather searches, not messages', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const executed = [];
+    const stubEngine = {
+      execute(actionId, entities) {
+        executed.push({ actionId, entities });
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const workflow = await router.process(
+      'Open Chrome, search for the weather, and tell me if I need an umbrella.',
+      'chat'
+    );
+    const standalone = await router.process('tell me if i need an umbrella', 'chat');
+
+    assert.equal(workflow.intent, 'multi.command');
+    assert.equal(workflow.success, true);
+    assert.deepEqual(executed.slice(0, 3).map(step => step.actionId), [
+      'app.open',
+      'browser.search',
+      'browser.search'
+    ]);
+    assert.match(executed[2].entities.query, /umbrella/i);
+    assert.equal(standalone.intent, 'browser.search');
+    assert.match(standalone.entities.query, /umbrella/i);
   });
 
   it('should route hotspot and bluetooth phrases to Windows settings pages', async function() {

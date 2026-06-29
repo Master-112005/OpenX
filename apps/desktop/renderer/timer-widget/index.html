@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data:;">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Timer - OpenX</title>
+    <link rel="stylesheet" href="./index.css">
+  </head>
+  <body>
+    <main class="widget" id="widget" data-mode="timer" aria-live="polite">
+      <button class="close-btn" id="close-btn" type="button" aria-label="Close timer widget">X</button>
+      <section class="timer-face" id="timer-face" aria-label="Timer">
+        <svg class="timer-ring" viewBox="0 0 100 100" aria-hidden="true">
+          <circle class="timer-track" cx="50" cy="50" r="42"></circle>
+          <circle class="timer-progress" id="timer-progress" cx="50" cy="50" r="42"></circle>
+        </svg>
+        <span class="time-value" id="time-value">00:00</span>
+      </section>
+      <section class="stopwatch-face" id="stopwatch-face" aria-label="Stopwatch">
+        <span class="stopwatch-label">Stopwatch</span>
+        <span class="time-value" id="stopwatch-value">00:00</span>
+      </section>
+    </main>
+    <script src="./index.js"></script>
+  </body>
+</html>

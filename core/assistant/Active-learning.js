@@ -704,6 +704,13 @@ class ActiveLearningStore {
       }
     }
 
+    if (intentId === 'reminder.set' && (!next.reminderCategory || next.reminderCategory === 'general')) {
+      const preferredReminderCategory = this.data.preferences.defaultReminderCategory?.value;
+      if (preferredReminderCategory) {
+        next.reminderCategory = preferredReminderCategory;
+      }
+    }
+
     return next;
   }
 

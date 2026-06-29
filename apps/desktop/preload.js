@@ -55,6 +55,12 @@ contextBridge.exposeInMainWorld('jarvis', {
   handleScheduleAlert: (id, action, minutes = 5) =>
     ipcRenderer.invoke('schedule:alertAction', { id, action, minutes }),
 
+  getTimerWidgetState: () =>
+    ipcRenderer.invoke('timerWidget:getState'),
+
+  closeTimerWidget: () =>
+    ipcRenderer.invoke('timerWidget:close'),
+
   quit: () =>
     ipcRenderer.invoke('app:quit'),
 
@@ -83,5 +89,14 @@ contextBridge.exposeInMainWorld('jarvis', {
     const handler = (_event, schedule) => callback(schedule);
     ipcRenderer.on('schedule:due', handler);
     return () => ipcRenderer.removeListener('schedule:due', handler);
+  },
+
+  onTimerWidgetState: (callback) => {
+    if (typeof callback !== 'function') {
+      throw new TypeError('Timer widget listener must be a function');
+    }
+    const handler = (_event, state) => callback(state);
+    ipcRenderer.on('timerWidget:state', handler);
+    return () => ipcRenderer.removeListener('timerWidget:state', handler);
   }
 });

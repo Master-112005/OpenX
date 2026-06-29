@@ -106,4 +106,18 @@ describe('Natural Language Router', function() {
     assert.equal(result.entities.duration, 1);
     assert.equal(result.entities.routeSource, 'natural-language-router');
   });
+
+  it('should understand notify and alert reminder language', function() {
+    const router = createRouter();
+    const notify = router.resolveIntent('notify me in ten minits to sign the sheet');
+    const alert = router.resolveIntent('alert me to submit the form at 5 pm');
+
+    assert.equal(notify.intent.id, 'reminder.set');
+    assert.equal(notify.entities.duration, 10);
+    assert.equal(notify.entities.reminderText, 'sign the sheet');
+    assert.equal(notify.entities.routeSource, 'natural-language-router');
+    assert.equal(alert.intent.id, 'reminder.set');
+    assert.equal(alert.entities.timeExpression, '5 pm');
+    assert.equal(alert.entities.reminderText, 'submit the form');
+  });
 });

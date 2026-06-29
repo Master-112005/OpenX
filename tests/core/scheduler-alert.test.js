@@ -90,6 +90,33 @@ describe('Scheduler Alert Delivery', function() {
     fs.rmSync(dataDir, { recursive: true, force: true });
   });
 
+  it('should expose timer and stopwatch state for the mini widget', function() {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openx-timer-widget-'));
+    const scheduler = new SchedulerController({ app: { dataDir, cleanupLegacySchedules: false } });
+
+    const timer = scheduler.setTimer(5);
+    assert.equal(timer.success, true);
+    const timerState = scheduler.getTimerWidgetState(timer.data.taskName);
+    assert.equal(timerState.visible, true);
+    assert.equal(timerState.mode, 'timer');
+    assert.equal(timerState.durationMs, 300000);
+    assert.ok(timerState.remainingMs > 0);
+    scheduler.cancelLatest('Timer');
+
+    const stopwatch = scheduler.startStopwatch();
+    assert.equal(stopwatch.success, true);
+    const stopwatchState = scheduler.getTimerWidgetState(stopwatch.data.taskName);
+    assert.equal(stopwatchState.visible, true);
+    assert.equal(stopwatchState.mode, 'stopwatch');
+    assert.equal(stopwatchState.status, 'running');
+    assert.ok(stopwatchState.elapsedMs >= 0);
+    assert.equal(scheduler.stopStopwatch().success, true);
+    assert.equal(scheduler.getTimerWidgetState().visible, false);
+
+    scheduler.destroy();
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  });
+
   it('should persist and roll recurring reminders forward', function() {
     const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openx-recurring-reminder-'));
     const scheduler = new SchedulerController({ app: { dataDir, cleanupLegacySchedules: false } });

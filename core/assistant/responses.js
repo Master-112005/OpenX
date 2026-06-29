@@ -763,6 +763,18 @@ const RESPONSE_BUILDERS = {
       return count ? `You have ${count} active timer${count === 1 ? '' : 's'}.` : 'You have no active timers.';
     },
     'timer.clear': context => `Cancelled ${valueFromContext(context, 'count', 0)} active timer${valueFromContext(context, 'count', 0) === 1 ? '' : 's'}.`,
+    'stopwatch.start': () => 'Stopwatch started.',
+    'stopwatch.pause': () => 'Paused the stopwatch.',
+    'stopwatch.resume': () => 'Resumed the stopwatch.',
+    'stopwatch.reset': () => 'Reset and restarted the stopwatch.',
+    'stopwatch.cancel': () => 'Stopped the stopwatch.',
+    'stopwatch.elapsed': context => {
+      const elapsedMs = valueFromContext(context, 'elapsedMs', 0);
+      const totalSeconds = Math.floor(Number(elapsedMs) / 1000);
+      const minutes = Math.floor(totalSeconds / 60);
+      const seconds = totalSeconds % 60;
+      return `Stopwatch is at ${minutes} minute${minutes === 1 ? '' : 's'} and ${seconds} second${seconds === 1 ? '' : 's'}.`;
+    },
     'reminder.list': context => {
       const entries = valueFromContext(context, 'entries', []);
       if (!Array.isArray(entries) || entries.length === 0) return 'You have no matching reminders.';

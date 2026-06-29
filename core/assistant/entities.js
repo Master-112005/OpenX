@@ -147,6 +147,12 @@ const APP_ENTITY_BLOCKED_PREFIXES = new Set([
   'with'
 ]);
 
+const SCHEDULE_AMOUNT_PATTERN = String.raw`(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|fifteen|twenty|thirty|forty(?:\s*five)?|sixty)`;
+const SCHEDULE_DURATION_PATTERN = String.raw`${SCHEDULE_AMOUNT_PATTERN}\s*(?:seconds?|secs?|minutes?|mins?|hours?|hrs?)`;
+const SCHEDULE_CLOCK_PATTERN = String.raw`\d{1,2}(?:(?::|\s+)\d{2})?\s*(?:am|pm)?(?:\s+(?:today|tomorrow))?`;
+const SCHEDULE_DAY_PATTERN = String.raw`today|tomorrow(?:\s+(?:morning|afternoon|evening|night))?|tonight|next\s+week|(?:next\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)`;
+const SCHEDULE_NATURAL_TIME_PATTERN = String.raw`noon|midnight|(?:morning|afternoon|evening|night)(?:\s+at\s+${SCHEDULE_CLOCK_PATTERN})?|(?:half|quarter)\s+(?:past|to)\s+\w+`;
+
 class EntityExtractor {
   constructor(config) {
     this.logger = new Logger(config?.logging || { level: 'info' });
@@ -808,17 +814,24 @@ class EntityExtractor {
       return normalizeClock(dateOnlyReminderMatch[1].toLowerCase());
     }
 
-    const reminderMatch = source.match(/\bremind(?: me)?\s+(?:at|for|in)\s+(.+?)(?:\s+to\s+.+)?$/i);
+    const directReminderTrailingDurationMatch = source.match(
+      new RegExp(`^(?:remind|alert|notify)\\s+me\\s+to\\s+.+?\\s+in\\s+(${SCHEDULE_DURATION_PATTERN})$`, 'i')
+    );
+    if (directReminderTrailingDurationMatch?.[1]) {
+      return normalizeClock(directReminderTrailingDurationMatch[1]);
+    }
+
+    const reminderMatch = source.match(/\b(?:remind|alert|notify)(?: me)?\s+(?:at|for|in)\s+(.+?)(?:\s+to\s+.+)?$/i);
     if (reminderMatch && reminderMatch[1]) {
       return normalizeClock(reminderMatch[1]);
     }
 
-    const directReminderAfterTextMatch = source.match(/^remind\s+me\s+to\s+.+?\s+at\s+(.+)$/i);
+    const directReminderAfterTextMatch = source.match(/^(?:remind|alert|notify)\s+me\s+to\s+.+?\s+at\s+(.+)$/i);
     if (directReminderAfterTextMatch?.[1]) {
       return normalizeClock(directReminderAfterTextMatch[1]);
     }
 
-    const relativeReminderMatch = source.match(/\bremind(?: me)?\s+(.+?)\s+to\s+.+$/i);
+    const relativeReminderMatch = source.match(/\b(?:remind|alert|notify)(?: me)?\s+(.+?)\s+to\s+.+$/i);
     if (relativeReminderMatch && relativeReminderMatch[1]) {
       const candidate = relativeReminderMatch[1]
         .replace(/^on\s+/i, '')
@@ -830,6 +843,13 @@ class EntityExtractor {
         const nestedTime = nestedTimeMatch?.[1] ? nestedTimeMatch[1].replace(/\s+/g, '') : '';
         return nestedTime ? normalizeClock(`${candidate} ${nestedTime}`) : normalizeClock(candidate);
       }
+    }
+
+    const setReminderDurationMatch = source.match(
+      new RegExp(`\\bset\\s+(?:a\\s+)?reminder\\s+(?:for|in)\\s+(${SCHEDULE_DURATION_PATTERN})\\b`, 'i')
+    );
+    if (setReminderDurationMatch?.[1]) {
+      return normalizeClock(setReminderDurationMatch[1]);
     }
 
     const setReminderTimeMatch = source.match(/\bset\s+(?:a\s+)?reminder\s+(?:at|for|in)\s+(\d{1,2}(?:(?::|\s+)\d{2})?\s*(?:am|pm)?(?:\s+(?:today|tomorrow))?)\b/i);
@@ -889,21 +909,17 @@ class EntityExtractor {
       return null;
     }
 
-    const directRemindMatch = source.match(/^remind\s+me\s+(?:tomorrow\s+at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s+)?to\s+(.+)$/i);
+    const directRemindMatch = source.match(/^(?:remind|alert|notify)\s+me\s+(?:tomorrow\s+at\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s+)?to\s+(.+)$/i);
     if (directRemindMatch && directRemindMatch[1]) {
-      const cleaned = directRemindMatch[1]
-        .replace(/\s+\bat\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*$/i, '')
-        .trim();
+      const cleaned = this._stripReminderScheduleSuffix(directRemindMatch[1]);
       if (cleaned && !/^(?:me|myself|remind|reminder)$/i.test(cleaned)) {
         return cleaned;
       }
     }
 
-    const simpleRemindToMatch = source.match(/^remind\s+me\s+to\s+(.+)$/i);
+    const simpleRemindToMatch = source.match(/^(?:remind|alert|notify)\s+me\s+to\s+(.+)$/i);
     if (simpleRemindToMatch && simpleRemindToMatch[1]) {
-      const cleaned = simpleRemindToMatch[1]
-        .replace(/\s+\bat\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*$/i, '')
-        .trim();
+      const cleaned = this._stripReminderScheduleSuffix(simpleRemindToMatch[1]);
       if (cleaned && !/^(?:me|myself|remind|reminder)$/i.test(cleaned)) {
         return cleaned;
       }
@@ -911,19 +927,15 @@ class EntityExtractor {
 
     const afterToMatch = source.match(/\bto\s+(.+)$/i);
     if (afterToMatch && afterToMatch[1]) {
-      const cleaned = afterToMatch[1]
-        .replace(/\s+\bat\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*$/i, '')
-        .trim();
+      const cleaned = this._stripReminderScheduleSuffix(afterToMatch[1]);
       if (cleaned && !/^(?:me|myself|remind|reminder)$/i.test(cleaned) && cleaned.length > 0) {
         return cleaned;
       }
     }
 
-    const reminderMatch = source.match(/\bremind(?: me)?\s+(?:at|for|in)\s+.+?\s+to\s+(.+)$/i);
+    const reminderMatch = source.match(/\b(?:remind|alert|notify)(?: me)?\s+(?:at|for|in)\s+.+?\s+to\s+(.+)$/i);
     if (reminderMatch && reminderMatch[1]) {
-      const cleaned = reminderMatch[1]
-        .replace(/\s+\bat\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?\s*$/i, '')
-        .trim();
+      const cleaned = this._stripReminderScheduleSuffix(reminderMatch[1]);
       if (cleaned && !/^(?:me|myself)$/i.test(cleaned)) {
         return cleaned;
       }
@@ -941,6 +953,31 @@ class EntityExtractor {
     }
 
     return null;
+  }
+
+  _stripReminderScheduleSuffix(value) {
+    let cleaned = String(value || '').trim();
+    if (!cleaned) return null;
+
+    const suffixPatterns = [
+      new RegExp(`\\s+\\bin\\s+${SCHEDULE_DURATION_PATTERN}\\s*$`, 'i'),
+      new RegExp(`\\s+\\b(?:at|on)\\s+(?:${SCHEDULE_CLOCK_PATTERN}|${SCHEDULE_DAY_PATTERN}|${SCHEDULE_NATURAL_TIME_PATTERN})\\s*$`, 'i'),
+      new RegExp(`\\s+\\b(?:today|tomorrow|tonight|next\\s+week)\\s*$`, 'i')
+    ];
+
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const pattern of suffixPatterns) {
+        const next = cleaned.replace(pattern, '').trim();
+        if (next !== cleaned) {
+          cleaned = next;
+          changed = true;
+        }
+      }
+    }
+
+    return cleaned || null;
   }
 
   _extractPath(text, raw) {

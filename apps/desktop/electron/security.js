@@ -111,6 +111,11 @@ function validateScheduleAction(payload) {
   return { id, action, minutes };
 }
 
+function validateTimerWidgetClose(payload) {
+  if (payload !== undefined) requirePlainObject(payload);
+  return {};
+}
+
 function validatePhoneDevice(payload) {
   requirePlainObject(payload);
   const deviceId = requireString(payload.deviceId, 'deviceId', { maxLength: 128 });
@@ -157,6 +162,8 @@ const IPC_VALIDATORS = Object.freeze({
   'settings:save': validateSettings,
   'settings:reset': validateEmpty,
   'schedule:alertAction': validateScheduleAction,
+  'timerWidget:getState': validateEmpty,
+  'timerWidget:close': validateTimerWidgetClose,
   'app:quit': validateEmpty
 });
 
