@@ -184,6 +184,47 @@ describe('Response Generator', function() {
     assert.ok(result.includes('notes.txt'));
   });
 
+  it('should summarize local file search results with names and locations', function() {
+    const gen = new ResponseGenerator();
+    const result = gen.generate('success', 'file.search', {
+      entities: { query: 'resume' },
+      result: {
+        data: {
+          query: 'resume',
+          count: 2,
+          searchStats: { partial: true, partialReason: 'time-budget' },
+          entries: [
+            { name: 'Resume.docx', type: 'file', location: 'Documents', sizeMB: 0.02 },
+            { name: 'Resume Backup.pdf', type: 'file', path: 'C:\\Users\\rakes\\Downloads\\Resume Backup.pdf' }
+          ]
+        }
+      }
+    });
+
+    assert.ok(result.includes('Resume.docx'));
+    assert.ok(result.includes('Documents'));
+    assert.ok(result.includes('time-limited'));
+  });
+
+  it('should summarize local folder search results with locations', function() {
+    const gen = new ResponseGenerator();
+    const result = gen.generate('success', 'folder.search', {
+      entities: { query: 'project' },
+      result: {
+        data: {
+          query: 'project',
+          count: 1,
+          entries: [
+            { name: 'Project Archives', type: 'folder', location: 'Documents' }
+          ]
+        }
+      }
+    });
+
+    assert.ok(result.includes('Project Archives'));
+    assert.ok(result.includes('Documents'));
+  });
+
   it('should describe visible apps separately from raw process counts', function() {
     const gen = new ResponseGenerator();
     const result = gen.generate('success', 'system.processes', {

@@ -32,6 +32,16 @@ describe('Chat Renderer UI', function() {
     assert.match(css, /\.message-choice-copy\s*\{/);
   });
 
+  it('should render local file and folder results as dedicated cards', function() {
+    assert.match(script, /function normalizeResultEntries\(result\)/);
+    assert.match(script, /function addResultCards\(bubble, resultEntries\)/);
+    assert.match(script, /className = 'message-result-list'/);
+    assert.match(script, /resultEntries: normalizeResultEntries\(result\)/);
+    assert.match(css, /\.message-result\s*\{/);
+    assert.match(css, /\.message-result-icon\s*\{/);
+    assert.match(css, /\.message-result-path\s*\{/);
+  });
+
   it('should display category-specific reminder symbols', function() {
     assert.match(script, /education: \{ color: '[^']+', symbol: '🎓'/);
     assert.match(script, /water: \{ color: '[^']+', symbol: '💧'/);

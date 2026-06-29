@@ -334,6 +334,8 @@ describe('File Management Automation', function() {
 
     assert.equal(result.success, true);
     assert.equal(result.data.results[0], target);
+    assert.equal(result.data.entries[0].matchScore > 0, true);
+    assert.equal(result.data.entries[0].location, 'Documents');
   });
 
   it('should search folders by compact and misspelled names', function() {
@@ -345,6 +347,8 @@ describe('File Management Automation', function() {
     assert.equal(result.success, true);
     assert.equal(result.data.entries[0].type, 'folder');
     assert.equal(result.data.results[0], target);
+    assert.equal(result.data.entries[0].matchScore > 0, true);
+    assert.equal(result.data.entries[0].location, 'Documents');
   });
 
   it('should fuzzy match unique folder open requests without exact folder names', function() {

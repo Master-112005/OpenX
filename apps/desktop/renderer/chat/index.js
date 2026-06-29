@@ -132,6 +132,60 @@ function saveStoredList(key, value) {
   } catch (error) {}
 }
 
+function normalizeResultEntries(result) {
+  const intent = String(result?.intent || '');
+  if (!['file.search', 'folder.search', 'file.smartFind', 'file.list'].includes(intent)) {
+    return [];
+  }
+  const entries = Array.isArray(result?.data?.entries) ? result.data.entries : [];
+  return entries.slice(0, 6).map((entry, index) => ({
+    index: index + 1,
+    name: String(entry?.name || entry?.path?.split(/[\\/]/).filter(Boolean).pop() || `Result ${index + 1}`),
+    type: String(entry?.type || (intent === 'folder.search' ? 'folder' : 'file')),
+    path: String(entry?.path || ''),
+    location: String(entry?.location || ''),
+    sizeMB: Number(entry?.sizeMB || 0),
+    matchScore: Number(entry?.matchScore || 0)
+  }));
+}
+
+function addResultCards(bubble, resultEntries) {
+  if (!Array.isArray(resultEntries) || resultEntries.length === 0) return;
+  const list = document.createElement('ol');
+  list.className = 'message-result-list';
+  for (const entry of resultEntries) {
+    const item = document.createElement('li');
+    item.className = `message-result ${entry.type === 'folder' ? 'folder-result' : 'file-result'}`;
+    const icon = document.createElement('span');
+    icon.className = 'message-result-icon';
+    icon.textContent = entry.type === 'folder' ? 'Folder' : 'File';
+    const body = document.createElement('span');
+    body.className = 'message-result-body';
+    const name = document.createElement('strong');
+    name.textContent = entry.name;
+    body.appendChild(name);
+    const metaParts = [
+      entry.location,
+      entry.sizeMB > 0 ? `${entry.sizeMB} MB` : '',
+      entry.matchScore > 0 ? `${Math.round(entry.matchScore)}% match` : ''
+    ].filter(Boolean);
+    if (metaParts.length > 0 || entry.path) {
+      const meta = document.createElement('small');
+      meta.textContent = metaParts.length > 0 ? metaParts.join(' - ') : entry.path;
+      body.appendChild(meta);
+    }
+    if (entry.path && metaParts.length > 0) {
+      const pathEl = document.createElement('small');
+      pathEl.className = 'message-result-path';
+      pathEl.textContent = entry.path;
+      body.appendChild(pathEl);
+    }
+    item.append(icon, body);
+    list.appendChild(item);
+  }
+  bubble.appendChild(list);
+}
+
 function addMessage(text, type, meta, options = {}) {
   const msg = document.createElement('article');
   msg.className = `message ${type}`;
@@ -145,6 +199,10 @@ function addMessage(text, type, meta, options = {}) {
   const bubble = document.createElement('div');
   bubble.className = 'message-bubble';
   bubble.textContent = String(text || '');
+  const resultEntries = Array.isArray(options.resultEntries) ? options.resultEntries : [];
+  if (type === 'assistant' && resultEntries.length > 0) {
+    addResultCards(bubble, resultEntries);
+  }
   const choices = Array.isArray(options.choices) ? options.choices.slice(0, 8) : [];
   if (type === 'assistant' && choices.length > 0) {
     const choiceList = document.createElement('ol');
@@ -708,7 +766,10 @@ async function sendCommand(text) {
         addConfirmationPrompt(result);
       } else {
         const response = result.response || `Operation completed, ${getHonorific()}.`;
-        addMessage(response, 'assistant', assistantMeta(), { choices: result.data?.choices });
+        addMessage(response, 'assistant', assistantMeta(), {
+          choices: result.data?.choices,
+          resultEntries: normalizeResultEntries(result)
+        });
         speakAssistantResponse(response);
       }
     } catch (err) {
@@ -738,7 +799,10 @@ async function sendCommand(text) {
     }
 
     const response = result.response || `Operation completed, ${getHonorific()}.`;
-    addMessage(response, 'assistant', assistantMeta(), { choices: result.data?.choices });
+    addMessage(response, 'assistant', assistantMeta(), {
+      choices: result.data?.choices,
+      resultEntries: normalizeResultEntries(result)
+    });
     speakAssistantResponse(response);
   } catch (err) {
     hideTyping();

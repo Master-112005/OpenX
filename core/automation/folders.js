@@ -63,6 +63,17 @@ function hasSearchTimeRemaining(startedAt, maxElapsedMs) {
   return !Number.isFinite(maxElapsedMs) || maxElapsedMs <= 0 || Date.now() - startedAt < maxElapsedMs;
 }
 
+function pathLocationLabel(folderPath) {
+  const normalized = String(folderPath || '').toLowerCase();
+  if (normalized.includes(`${path.sep}desktop${path.sep}`) || normalized.endsWith(`${path.sep}desktop`)) return 'Desktop';
+  if (normalized.includes(`${path.sep}documents${path.sep}`) || normalized.endsWith(`${path.sep}documents`)) return 'Documents';
+  if (normalized.includes(`${path.sep}downloads${path.sep}`) || normalized.endsWith(`${path.sep}downloads`)) return 'Downloads';
+  if (normalized.includes(`${path.sep}pictures${path.sep}`) || normalized.endsWith(`${path.sep}pictures`)) return 'Pictures';
+  if (normalized.includes(`${path.sep}music${path.sep}`) || normalized.endsWith(`${path.sep}music`)) return 'Music';
+  if (normalized.includes(`${path.sep}videos${path.sep}`) || normalized.endsWith(`${path.sep}videos`)) return 'Videos';
+  return path.dirname(folderPath);
+}
+
 class FolderController {
   constructor(config) {
     this.logger = new Logger(config?.logging || { level: 'info' });
@@ -110,7 +121,13 @@ class FolderController {
       data: {
         query: cleanQuery,
         results: ranked.map(entry => entry.path),
-        entries: ranked.map(entry => ({ name: path.basename(entry.path), type: 'folder', path: entry.path })),
+        entries: ranked.map(entry => ({
+          name: path.basename(entry.path),
+          type: 'folder',
+          path: entry.path,
+          location: pathLocationLabel(entry.path),
+          matchScore: entry.score
+        })),
         count: ranked.length,
         searchStats: {
           kind: 'folder.search',

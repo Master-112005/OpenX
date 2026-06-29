@@ -108,6 +108,29 @@ function pathLabel(filePath) {
   return path.dirname(filePath);
 }
 
+function locationLabel(entry) {
+  return entry?.location || pathLabel(entry?.path) || '';
+}
+
+function formatSearchEntry(entry) {
+  const name = entry?.name || basenameOrValue(entry?.path);
+  const location = locationLabel(entry);
+  const size = entry?.type === 'file' && Number(entry?.sizeMB) > 0 ? `, ${entry.sizeMB} MB` : '';
+  const kind = entry?.type === 'folder' ? 'folder' : 'file';
+  return location ? `${name} (${kind}, ${location}${size})` : `${name} (${kind}${size})`;
+}
+
+function partialSearchNote(searchStats) {
+  if (!searchStats?.partial) return '';
+  if (searchStats.partialReason === 'time-budget') {
+    return ' Search was time-limited, so there may be more matches.';
+  }
+  if (searchStats.partialReason === 'directory-limit') {
+    return ' Search reached the directory limit, so there may be more matches.';
+  }
+  return ' Search was partial, so there may be more matches.';
+}
+
 function humanizeError(error) {
   const message = String(error || '').trim();
   if (!message) {
@@ -371,17 +394,21 @@ const RESPONSE_BUILDERS = {
     'file.search': context => {
       const count = valueFromContext(context, 'count', context.result?.data?.count || 0);
       const entries = valueFromContext(context, 'entries', context.result?.data?.entries || []);
+      const query = valueFromContext(context, 'query', context.entities?.query || '');
+      const searchStats = valueFromContext(context, 'searchStats', context.result?.data?.searchStats || null);
       if (count === 0) {
-        return `I couldn't find a matching file or folder.`;
+        return query
+          ? `I couldn't find a matching local file or folder for "${query}".`
+          : `I couldn't find a matching local file or folder.`;
       }
 
       const names = Array.isArray(entries)
-        ? entries.slice(0, 5).map(entry => `${entry.name}${entry.type === 'folder' ? ' folder' : ''}`).join(', ')
+        ? entries.slice(0, 5).map(formatSearchEntry).join('; ')
         : '';
       const label = count === 1 ? 'item' : 'items';
       return names
-        ? `I found ${count} matching ${label}: ${names}.`
-        : `I found ${count} matching ${label}.`;
+        ? `I found ${count} matching local ${label}: ${names}.${partialSearchNote(searchStats)}`
+        : `I found ${count} matching local ${label}.${partialSearchNote(searchStats)}`;
     },
     'file.smartFind': context => {
       const count = valueFromContext(context, 'count', context.result?.data?.count || 0);
@@ -489,11 +516,15 @@ const RESPONSE_BUILDERS = {
     'folder.search': context => {
       const count = valueFromContext(context, 'count', context.result?.data?.count || 0);
       const entries = valueFromContext(context, 'entries', context.result?.data?.entries || []);
+      const query = valueFromContext(context, 'query', context.entities?.query || '');
+      const searchStats = valueFromContext(context, 'searchStats', context.result?.data?.searchStats || null);
       if (!count || !Array.isArray(entries) || entries.length === 0) {
-        return 'I could not find a matching local folder.';
+        return query
+          ? `I could not find a matching local folder for "${query}".`
+          : 'I could not find a matching local folder.';
       }
-      const names = entries.slice(0, 5).map(entry => entry.name).join(', ');
-      return `I found ${count} matching ${count === 1 ? 'folder' : 'folders'}: ${names}.`;
+      const names = entries.slice(0, 5).map(formatSearchEntry).join('; ');
+      return `I found ${count} matching local ${count === 1 ? 'folder' : 'folders'}: ${names}.${partialSearchNote(searchStats)}`;
     },
     'browser.open': context => {
       const url = valueFromContext(context, 'url');

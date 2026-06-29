@@ -63,6 +63,26 @@ const SMART_FIND_LIMITS = Object.freeze({
   maxResults: 1200
 });
 
+function pathLocationLabel(filePath) {
+  const normalized = String(filePath || '').toLowerCase();
+  if (normalized.includes(`${path.sep}desktop${path.sep}`) || normalized.endsWith(`${path.sep}desktop`)) return 'Desktop';
+  if (normalized.includes(`${path.sep}documents${path.sep}`) || normalized.endsWith(`${path.sep}documents`)) return 'Documents';
+  if (normalized.includes(`${path.sep}downloads${path.sep}`) || normalized.endsWith(`${path.sep}downloads`)) return 'Downloads';
+  if (normalized.includes(`${path.sep}pictures${path.sep}`) || normalized.endsWith(`${path.sep}pictures`)) return 'Pictures';
+  if (normalized.includes(`${path.sep}music${path.sep}`) || normalized.endsWith(`${path.sep}music`)) return 'Music';
+  if (normalized.includes(`${path.sep}videos${path.sep}`) || normalized.endsWith(`${path.sep}videos`)) return 'Videos';
+  return path.dirname(filePath);
+}
+
+function fileSizeMB(filePath) {
+  try {
+    const stats = fs.statSync(filePath);
+    return stats.isFile() ? Number((stats.size / 1024 / 1024).toFixed(2)) : null;
+  } catch (error) {
+    return null;
+  }
+}
+
 function uniquePaths(paths) {
   const seen = new Set();
   const result = [];
@@ -390,11 +410,7 @@ class FileController {
       success: true,
       data: {
         results: uniqueResults,
-        entries: uniqueResults.map(resultPath => ({
-          name: path.basename(resultPath),
-          type: fs.existsSync(resultPath) && fs.statSync(resultPath).isDirectory() ? 'folder' : 'file',
-          path: resultPath
-        })),
+        entries: uniqueResults.map(resultPath => this._searchEntry(resultPath, lowerQuery)),
         count: uniqueResults.length,
         query: cleanQuery,
         searchStats: stats
@@ -889,6 +905,7 @@ class FileController {
       name: file.name,
       type: 'file',
       path: file.path,
+      location: pathLocationLabel(file.path),
       size: file.size,
       sizeMB: Number((Number(file.size || 0) / 1024 / 1024).toFixed(2)),
       modifiedAt: new Date(file.modifiedAt || 0).toISOString(),
@@ -921,6 +938,29 @@ class FileController {
 
   _entryNameMatchesQuery(entryName, lowerQuery) {
     return this._entryNameMatchScore(entryName, lowerQuery) > 0;
+  }
+
+  _searchEntry(resultPath, lowerQuery) {
+    let type = 'file';
+    try {
+      type = fs.statSync(resultPath).isDirectory() ? 'folder' : 'file';
+    } catch (error) {}
+
+    const score = this._entryNameMatchScore(path.basename(resultPath), lowerQuery);
+    const entry = {
+      name: path.basename(resultPath),
+      type,
+      path: resultPath,
+      location: pathLocationLabel(resultPath),
+      matchScore: score
+    };
+    if (type === 'file') {
+      const sizeMB = fileSizeMB(resultPath);
+      if (sizeMB !== null) {
+        entry.sizeMB = sizeMB;
+      }
+    }
+    return entry;
   }
 
   _entryNameMatchScore(entryName, lowerQuery) {
