@@ -315,6 +315,14 @@ describe('Action Router', function() {
     assert.equal(result.intent, 'media.stop');
     assert.equal(result.languageUnderstanding.commandFrame.action, 'stop');
     assert.equal(result.languageUnderstanding.commandFrame.domain, 'media');
+    assert.equal(
+      result.languageUnderstanding.commandFrame.relations.some(relation =>
+        relation.type === 'action-target' &&
+        relation.from === 'stop' &&
+        relation.to === 'video'
+      ),
+      true
+    );
   });
 
   it('should execute media stop and volume set in one natural multi-command', async function() {
@@ -339,6 +347,24 @@ describe('Action Router', function() {
     assert.equal(result.intent, 'multi.command');
     assert.deepEqual(executed.map(step => step.actionId), ['media.stop', 'volume.set']);
     assert.equal(executed[1].entities.value, 100);
+    assert.equal(result.steps[0].routedInput, 'stop the video');
+    assert.equal(result.steps[1].routedInput, 'set vol to 100');
+    assert.equal(
+      result.steps[0].languageUnderstanding.commandFrame.relations.some(relation =>
+        relation.type === 'action-target' &&
+        relation.from === 'stop' &&
+        relation.to === 'video'
+      ),
+      true
+    );
+    assert.equal(
+      result.steps[1].languageUnderstanding.semanticParse.frames[0].relations.some(relation =>
+        relation.type === 'value-of' &&
+        relation.from === '100' &&
+        relation.to === 'volume'
+      ),
+      true
+    );
   });
 
   it('should split window and volume commands without swallowing the second command', async function() {
@@ -1208,6 +1234,8 @@ describe('Action Router', function() {
     assert.equal(executed[1].entities.query, 'latest news');
     assert.equal(executed[1].entities.openInBrowser, true);
     assert.equal(executed[1].entities.browserName, 'chrome');
+    assert.equal(connected.steps[1].routedInput, 'search for latest news in chrome');
+    assert.equal(connected.steps[1].languageUnderstanding.intent, 'browser.search');
     assert.equal(executed[3].entities.query, 'latest news');
     assert.equal(executed[3].entities.openInBrowser, true);
     assert.equal(executed[3].entities.browserName, 'chrome');

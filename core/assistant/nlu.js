@@ -3,6 +3,7 @@ const EntityExtractor = require('./entities');
 const { FILLER_WORDS } = require('./nlp/preprocessor');
 const { parseLearningDirective } = require('./active-learning/LearningLanguage');
 const { analyzeDiscourse } = require('./ContextLanguage');
+const { buildWordRelations } = require('./language-relations');
 
 const CONNECTOR_PATTERN = /\s*(?:;|,|\b(?:and then|then|after that|afterwards|and|also|plus|additionally|furthermore)\b)\s*/i;
 
@@ -94,6 +95,7 @@ class NaturalLanguageRouter {
     const frames = clauses.map((clause, index) => this._parseClause(clause, index));
     const executableFrames = frames.filter(frame => frame.validation.status === 'passed' && frame.intentId);
     const discourse = preparedInput?.discourse || analyzeDiscourse(rawText);
+    const tokens = Normalizer.tokenize(corrected || raw);
 
     return {
       version: 'semantic-frame-v1',
@@ -101,6 +103,7 @@ class NaturalLanguageRouter {
       correctedText: corrected,
       multiIntent: frames.length > 1,
       clauses,
+      relations: buildWordRelations(tokens),
       frames,
       discourse,
       validation: {
@@ -204,6 +207,10 @@ class NaturalLanguageRouter {
       correctedText,
       tokens,
       tokenRoles: this._buildTokenRoles(tokens, action?.index ?? -1, domain, value),
+      relations: buildWordRelations(tokens, {
+        actionIndex: action?.index ?? -1,
+        targetTokens
+      }),
       action: action?.verb || null,
       actionToken: action?.token || null,
       targetText,

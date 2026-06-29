@@ -39,6 +39,31 @@ describe('Natural Language Router', function() {
     assert.equal(result.frames[1].entities.value, 100);
     assert.equal(result.frames[0].tokenRoles.some(role => role.token === 'stop' && role.role === 'action'), true);
     assert.equal(result.frames[1].tokenRoles.some(role => role.token === '100' && role.role === 'value'), true);
+    assert.equal(
+      result.relations.some(relation =>
+        relation.type === 'sequence' &&
+        relation.marker === 'and' &&
+        relation.from === 'video' &&
+        relation.to === 'set'
+      ),
+      true
+    );
+    assert.equal(
+      result.frames[0].relations.some(relation =>
+        relation.type === 'action-target' &&
+        relation.from === 'stop' &&
+        relation.to === 'video'
+      ),
+      true
+    );
+    assert.equal(
+      result.frames[1].relations.some(relation =>
+        relation.type === 'value-of' &&
+        relation.from === '100' &&
+        relation.to === 'volume'
+      ),
+      true
+    );
   });
 
   it('should distinguish media volume from system volume when a media platform is named', function() {

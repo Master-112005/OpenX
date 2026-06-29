@@ -1515,9 +1515,11 @@ class ActionRouter {
       steps.push({
         commandId: result.commandId || null,
         input: clause,
+        routedInput: routedClause,
         success: result.success,
         intent: result.intent,
         entities: result.entities,
+        languageUnderstanding: result.languageUnderstanding || null,
         response: result.response,
         error: result.error || null,
         requiresConfirmation: Boolean(result.requiresConfirmation),
@@ -1953,11 +1955,13 @@ class ActionRouter {
         domain: commandFrame.domain || 'unknown',
         appRouteAllowed: Boolean(commandFrame.appRouteAllowed),
         tokenRoles: commandFrame.tokenRoles || [],
+        relations: commandFrame.relations || [],
         validation: commandFrame.validation || null
       } : null,
       semanticParse: semanticParse ? {
         version: semanticParse.version || 'semantic-frame-v1',
         multiIntent: Boolean(semanticParse.multiIntent),
+        relations: semanticParse.relations || [],
         validation: semanticParse.validation || null,
         frames: (semanticParse.frames || []).map(frame => ({
           text: frame.text || '',
@@ -1969,6 +1973,7 @@ class ActionRouter {
           confidence: Number(frame.confidence || 0),
           entities: frame.entities || {},
           tokenRoles: frame.tokenRoles || [],
+          relations: frame.relations || [],
           validation: frame.validation || null
         })),
         selectedFrame: selectedSemanticFrame ? {

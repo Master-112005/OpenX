@@ -3,6 +3,7 @@ const Logger = require('./Data').Logger;
 const { stripLeadIns } = require('./nlp/preprocessor');
 const { parseLearningDirective } = require('./active-learning/LearningLanguage');
 const { analyzeDiscourse } = require('./ContextLanguage');
+const { buildWordRelations } = require('./language-relations');
 
 class InputParser {
   constructor(config) {
@@ -29,6 +30,8 @@ class InputParser {
     const hasCommand = rawCommandText.length > 0;
     const learningDirective = parseLearningDirective(rawCommandText);
     const discourse = analyzeDiscourse(rawCommandText);
+    const commandTokens = Normalizer.tokenize(commandText);
+    const commandClauses = this._buildCommandClauses(commandText);
 
     return {
       raw,
@@ -38,8 +41,29 @@ class InputParser {
       rawCommandText,
       hasCommand,
       learningDirective,
-      discourse
+      discourse,
+      commandTokens,
+      wordRelations: buildWordRelations(commandTokens),
+      commandClauses
     };
+  }
+
+  _buildCommandClauses(commandText) {
+    const clauses = String(commandText || '')
+      .split(/\s*(?:;|,|\b(?:and then|then|after that|afterwards|and|also|plus)\b)\s*/i)
+      .map(clause => clause.trim())
+      .filter(Boolean);
+
+    return (clauses.length ? clauses : [String(commandText || '').trim()].filter(Boolean))
+      .map((clause, index) => {
+        const tokens = Normalizer.tokenize(clause);
+        return {
+          index,
+          text: clause,
+          tokens,
+          relations: buildWordRelations(tokens)
+        };
+      });
   }
 
   _stripLeadInRaw(text) {
@@ -78,6 +102,7 @@ module.exports = InputParser;
 const CommandFrameParser = (() => {
 const { Normalizer } = require('./Data');
 const { parseLearningDirective } = require('./active-learning/LearningLanguage');
+const { buildWordRelations } = require('./language-relations');
 
 const ACTION_ALIASES = new Map([
   ['close', 'close'],
@@ -226,6 +251,7 @@ class CommandFrameParser {
       correctedText: corrected,
       tokens,
       tokenRoles,
+      relations: buildWordRelations(tokens, { actionIndex, targetTokens }),
       action,
       actionToken,
       actionIndex,

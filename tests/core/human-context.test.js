@@ -50,8 +50,24 @@ describe('Human-style context and profile memory', function() {
 
     assert.equal(parsed.discourse.isFollowUp, true);
     assert.deepEqual(parsed.discourse.references, ['that', 'one']);
+    assert.equal(
+      parsed.wordRelations.some(relation =>
+        relation.type === 'context-reference' &&
+        relation.from === 'that' &&
+        relation.to === 'previous-context'
+      ),
+      true
+    );
     assert.equal(prepared.discourse.requiresContext, true);
     assert.equal(semantic.discourse.isFollowUp, true);
+    assert.equal(
+      semantic.relations.some(relation =>
+        relation.type === 'context-reference' &&
+        relation.from === 'one' &&
+        relation.to === 'previous-context'
+      ),
+      true
+    );
   });
 
   it('passes context metadata through NLE without changing action behavior', async function() {
