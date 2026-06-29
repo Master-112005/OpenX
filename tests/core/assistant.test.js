@@ -1395,6 +1395,30 @@ describe('Assistant Confirmation Flow', function() {
     assert.match(calendar.response, /Calendar reading is not connected/i);
   });
 
+  it('should add referenced chat context to the local assistant calendar', async function() {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openx-assistant-planner-'));
+    const assistant = new Assistant({
+      app: { dataDir, cleanupLegacySchedules: false },
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } },
+      activeLearning: { enabled: false }
+    }, {
+      eventBus: { publish() {} }
+    });
+
+    assistant.context.record('submit the lab form', {}, {
+      commandId: 'context-1',
+      success: false,
+      intent: null,
+      response: ''
+    });
+    const result = await assistant.processCommand('update this in calendar tomorrow at 5 pm');
+
+    assert.equal(result.success, true);
+    assert.equal(result.intent, 'calendar.add');
+    assert.equal(result.data.entry.title, 'submit the lab form');
+    assert.equal(result.data.entry.startTime, '17:00');
+  });
+
   it('should answer session search history and carry topic into year follow-ups', async function() {
     const routedInputs = [];
     const router = {

@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; style-src-attr 'none'; img-src 'self' data:; connect-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'">
+  <title>Assistant Planner</title>
+  <link rel="stylesheet" href="./index.css">
+</head>
+<body>
+  <main class="planner-shell" data-view="calendar">
+    <header class="titlebar">
+      <nav class="view-switch" aria-label="Planner views">
+        <button class="view-button active" id="calendar-tab" type="button" data-view="calendar" aria-pressed="true">Calendar</button>
+        <button class="view-button" id="timetable-tab" type="button" data-view="timetable" aria-pressed="false">Timetable</button>
+      </nav>
+      <div class="window-title">
+        <span>Assistant Planner</span>
+        <strong id="current-period">Today</strong>
+      </div>
+      <div class="window-controls">
+        <button class="floating-add-button" id="quick-add-toggle" type="button" aria-expanded="false" aria-controls="side-panel" aria-label="Quick add entry">+</button>
+        <button class="window-close" id="close-window" type="button" aria-label="Close planner">X</button>
+      </div>
+    </header>
+
+    <section class="content-grid">
+      <section class="workspace calendar-view" aria-label="Calendar view">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Calendar</p>
+            <h1 id="month-title">Month</h1>
+          </div>
+          <div class="month-controls" aria-label="Month navigation">
+            <button class="icon-button" id="prev-month" type="button" aria-label="Previous month">&lt;</button>
+            <button class="icon-button" id="today-button" type="button">Today</button>
+            <button class="icon-button" id="next-month" type="button" aria-label="Next month">&gt;</button>
+          </div>
+        </div>
+        <div class="weekday-row" aria-hidden="true">
+          <span>Sun</span><span>Mon</span><span>Tue</span><span>Wed</span><span>Thu</span><span>Fri</span><span>Sat</span>
+        </div>
+        <div class="month-grid" id="month-grid" aria-label="Month days"></div>
+      </section>
+
+      <section class="workspace timetable-view" aria-label="Daily timetable">
+        <div class="section-head">
+          <div>
+            <p class="eyebrow">Timetable</p>
+            <h1>Daily Plan</h1>
+          </div>
+          <input id="timetable-date" class="date-input" type="date" aria-label="Timetable date">
+        </div>
+        <div class="time-grid" id="time-grid"></div>
+      </section>
+
+      <aside class="side-panel" id="side-panel" aria-label="Planner details" hidden>
+        <div class="side-panel-head">
+          <div>
+            <p class="eyebrow">Quick Add</p>
+            <strong>New Entry</strong>
+          </div>
+          <button class="panel-close-button" id="quick-add-close" type="button" aria-label="Close quick add">X</button>
+        </div>
+        <form class="quick-add" id="quick-add">
+          <label class="form-field title-field">
+            <span>Title</span>
+            <input id="entry-title" name="title" maxlength="160" autocomplete="off" placeholder="Class, call, workout">
+          </label>
+          <div class="form-row">
+            <label class="form-field">
+              <span>Date</span>
+              <input id="entry-date" name="date" type="date">
+            </label>
+            <label class="form-field">
+              <span>Time</span>
+              <input id="entry-time" name="time" type="time">
+            </label>
+          </div>
+          <label class="form-field">
+            <span>Notes</span>
+            <textarea id="entry-notes" name="notes" maxlength="500" rows="3" placeholder="Optional details"></textarea>
+          </label>
+          <button class="primary-button" id="quick-add-submit" type="submit">Add Entry</button>
+        </form>
+
+        <section class="agenda">
+          <div class="agenda-head">
+            <p class="eyebrow">Agenda</p>
+            <strong id="agenda-count">0 items</strong>
+          </div>
+          <div class="agenda-list" id="agenda-list"></div>
+        </section>
+      </aside>
+    </section>
+  </main>
+
+  <script src="./index.js"></script>
+</body>
+</html>

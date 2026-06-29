@@ -294,6 +294,7 @@ class ActionRouter {
 
     return this._runResolverChain([
       ['_resolveLearningRepairIntent', () => this._resolveLearningRepairIntent(rawCommandText, preparedInput)],
+      ['_resolvePlannerIntent', () => this._resolvePlannerIntent(rawCommandText, preparedInput)],
       ['_resolveStopwatchIntent', () => this._resolveStopwatchIntent(rawCommandText, preparedInput)],
       ['_resolveScheduleManagementIntent', () => this._resolveScheduleManagementIntent(rawCommandText, preparedInput)],
       ['_resolveExplicitReminderIntent', () => this._resolveExplicitReminderIntent(rawCommandText, preparedInput)],
@@ -1295,7 +1296,12 @@ class ActionRouter {
 
   _buildMultiCommandPlan(rawText, source) {
     const text = String(rawText || '').trim();
-    if (!text || !/\b(?:and|then|after that|afterwards)\b|[;]/i.test(text)) {
+    if (!text) {
+      return null;
+    }
+    const hasExplicitConnector = /\b(?:and|then|after that|afterwards)\b|[;]/i.test(text);
+    const hasImplicitMultiCommand = !hasExplicitConnector && this._hasImplicitMultiCommand(text);
+    if (!hasExplicitConnector && !hasImplicitMultiCommand) {
       return null;
     }
 
@@ -1386,6 +1392,14 @@ class ActionRouter {
   }
 
   _splitImplicitMultiCommand(text) {
+    const implicitBrowserSearch = String(text || '').trim().match(
+      /^(open|launch|start)\s+(chrome|chrom|chromem|cheome|edge|firefox|browser)\s+((?:search|google|look\s+up|find\s+on\s+web)\b.+)$/i
+    );
+    if (implicitBrowserSearch?.[3]) {
+      const browserName = this._normalizeBrowserContextName(implicitBrowserSearch[2]) || implicitBrowserSearch[2];
+      return [`${implicitBrowserSearch[1]} ${browserName}`, implicitBrowserSearch[3].trim()];
+    }
+
     const connectors = /\s+(?:and|then|also|plus|add|additionally|furthermore)\s+/gi;
     const parts = text.split(connectors).map(p => p.trim()).filter(Boolean);
     if (parts.length >= 2) {
@@ -1484,9 +1498,11 @@ class ActionRouter {
 
   async _executeMultiCommand(commandId, clauses, source, options = {}) {
     const steps = [];
+    let browserContext = null;
 
     for (const clause of clauses) {
-      let result = await this.process(clause, source, {
+      const routedClause = this._applyBrowserContextToSearchClause(clause, browserContext, source);
+      let result = await this.process(routedClause, source, {
         allowMulti: false,
         permissionGuard: options.permissionGuard
       });
@@ -1508,6 +1524,7 @@ class ActionRouter {
         confirmationMessage: result.confirmationMessage || null,
         permissionLevel: result.permissionLevel || null
       });
+      browserContext = this._deriveBrowserContextFromResult(result, browserContext);
 
       if (result.requiresConfirmation || !result.success) {
         const pendingIndex = steps.length - 1;
@@ -1548,6 +1565,56 @@ class ActionRouter {
       steps,
       response: this._buildMultiCommandResponse(steps)
     };
+  }
+
+  _applyBrowserContextToSearchClause(clause, browserContext, source) {
+    const text = String(clause || '').trim();
+    if (!text || !browserContext?.browserName) {
+      return clause;
+    }
+    if (this._extractBrowserNameHint(text)) {
+      return clause;
+    }
+
+    const prepared = this.nlp.prepare(text);
+    const intentResult = this._resolveIntent(text, prepared, source);
+    if (intentResult?.intent?.id !== 'browser.search' || intentResult.entities?.openInBrowser) {
+      return clause;
+    }
+
+    return `${text} in ${browserContext.browserName}`;
+  }
+
+  _deriveBrowserContextFromResult(result, previousContext = null) {
+    if (!result?.success) {
+      return previousContext;
+    }
+
+    const intent = String(result.intent || '');
+    const entities = result.entities || {};
+    const candidate = entities.browserName || entities.appName || entities.targetApp || '';
+    const browserName = this._normalizeBrowserContextName(candidate);
+
+    if (browserName) {
+      return { browserName };
+    }
+
+    if (intent === 'app.open' || intent === 'app.switch' || intent === 'browser.open') {
+      return null;
+    }
+
+    return previousContext;
+  }
+
+  _normalizeBrowserContextName(value) {
+    const normalized = String(value || '').trim().toLowerCase();
+    if (!normalized) return '';
+    if (/\bchrome\b|google\s+chrome/.test(normalized)) return 'chrome';
+    if (/\b(?:chrom|chromem|cheome)\b/.test(normalized)) return 'chrome';
+    if (/\b(?:edge|msedge|microsoft\s+edge)\b/.test(normalized)) return 'edge';
+    if (/\bfirefox\b|mozilla\s+firefox/.test(normalized)) return 'firefox';
+    if (normalized === 'browser') return 'browser';
+    return '';
   }
 
   async _executeBareWorkflowStep(clause, source, options = {}) {
@@ -1728,6 +1795,7 @@ class ActionRouter {
         source,
         languageUnderstanding,
         contextualRewrite: languageUnderstanding?.contextualRewrite || null,
+        conversation: executionOptions.conversation || null,
         phoneContext: executionOptions.phoneContext || null
       });
       const confirmation = this.actionConfirmation.confirm(result);
@@ -3357,7 +3425,8 @@ class ActionRouter {
 
     return {
       query,
-      openInBrowser: true
+      openInBrowser: true,
+      browserName: match[2].toLowerCase()
     };
   }
 
@@ -3807,18 +3876,9 @@ const newTabMatch = input.match(
     const wifiStateChange = /\b(?:wifi|wi\s*fi)\b/.test(input) &&
       /\b(?:connect|connected|disconnect|forget|enable|disable|turn\s+on|turn\s+off|switch\s+on|switch\s+off)\b/.test(input);
     if (wifiStateChange) {
-      const intent = this.intentRegistry.get('assistant.capability');
+      const intent = this.intentRegistry.get('app.open');
       return intent
-        ? {
-            intent,
-            confidence: 1,
-            entities: {
-              capability: 'network',
-              operation: this._extractCapabilityOperation(input),
-              target: input,
-              rawCommand: rawText
-            }
-          }
+        ? { intent, confidence: 1, entities: { appName: 'ms-settings:network-wifi' } }
         : null;
     }
 
@@ -3928,6 +3988,82 @@ const newTabMatch = input.match(
           }
         }
       : null;
+  }
+
+  _resolvePlannerIntent(rawText, preparedInput) {
+    const corrected = String(preparedInput?.correctedText || rawText || '').trim();
+    const raw = String(rawText || corrected || '').trim();
+    const input = corrected.toLowerCase().replace(/\s+/g, ' ').trim();
+    if (!/\b(?:calendar|calender|timetable|time\s+table|daily\s+schedule)\b/.test(input)) {
+      return null;
+    }
+
+    const target = /\b(?:timetable|time\s+table|daily\s+schedule)\b/.test(input) ? 'timetable' : 'calendar';
+    if (/^(?:open|show|display|launch)\b/.test(input) && !/\b(?:add|update|put|schedule|create|save)\b/.test(input)) {
+      const intent = this.intentRegistry.get(`${target}.open`);
+      return intent ? { intent, confidence: 1, entities: {} } : null;
+    }
+
+    if (!/\b(?:add|update|put|schedule|create|save)\b/.test(input)) {
+      return null;
+    }
+
+    const intent = this.intentRegistry.get(`${target}.add`);
+    if (!intent) {
+      return null;
+    }
+
+    const plannerText = this._extractPlannerText(raw, target);
+    const entities = {
+      plannerText,
+      dateExpression: this._extractPlannerDateExpression(raw),
+      timeExpression: this._extractPlannerTimeExpression(raw)
+    };
+    if (/\b(?:this|that)\b/i.test(raw) && !plannerText) {
+      entities.reference = 'previous';
+    }
+    return { intent, confidence: 1, entities };
+  }
+
+  _extractPlannerText(rawText, target) {
+    const targetPattern = target === 'timetable'
+      ? '(?:timetable|time\\s+table|daily\\s+schedule)'
+      : '(?:calendar|calender)';
+    const patterns = [
+      new RegExp(`^(?:add|put|save|schedule|create)\\s+(.+?)\\s+(?:to|in|on)\\s+(?:my\\s+)?${targetPattern}\\b`, 'i'),
+      new RegExp(`^(?:add|put|save|schedule|create)\\s+(?:this|that)\\s+(?:to|in|on)\\s+(?:my\\s+)?${targetPattern}\\s*(.*)$`, 'i'),
+      new RegExp(`^(?:update)\\s+(.+?)\\s+(?:to|in|on)\\s+(?:my\\s+)?${targetPattern}\\b`, 'i'),
+      new RegExp(`^(?:update|add|put|save|schedule|create)\\s+(?:this|that)\\s+(?:to|in|on)?\\s*(?:my\\s+)?${targetPattern}\\s*(.*)$`, 'i')
+    ];
+    for (const pattern of patterns) {
+      const match = String(rawText || '').match(pattern);
+      if (!match?.[1]) continue;
+      const cleaned = this._cleanPlannerText(match[1]);
+      if (cleaned && !/^(?:this|that|it)$/i.test(cleaned)) return cleaned;
+    }
+    return '';
+  }
+
+  _cleanPlannerText(value) {
+    return String(value || '')
+      .replace(/\b(?:today|tomorrow|next\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|monday|tuesday|wednesday|thursday|friday|saturday|sunday|20\d{2}-\d{1,2}-\d{1,2})\b/gi, ' ')
+      .replace(/\b(?:at|from|by)\s+\d{1,2}(?:(?::|\s+)\d{2})?\s*(?:am|pm)?\b/gi, ' ')
+      .replace(/\s+/g, ' ')
+      .replace(/[.,;:!?]+$/g, '')
+      .trim();
+  }
+
+  _extractPlannerDateExpression(value) {
+    const match = String(value || '').match(/\b(today|tomorrow|next\s+(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)|monday|tuesday|wednesday|thursday|friday|saturday|sunday|20\d{2}-\d{1,2}-\d{1,2})\b/i);
+    return match?.[1] ? match[1].replace(/\s+/g, ' ').trim() : '';
+  }
+
+  _extractPlannerTimeExpression(value) {
+    const text = String(value || '');
+    const match = text.match(/\b(?:at|from|by)\s+(\d{1,2}(?:(?::|\s+)\d{2})?\s*(?:am|pm)?)\b/i) ||
+      text.match(/\b(\d{1,2}:\d{2}\s*(?:am|pm)?)\b/i) ||
+      text.match(/\b(\d{1,2}\s*(?:am|pm))\b/i);
+    return match?.[1] ? match[1].replace(/^(\d{1,2})\s+(\d{2})/, '$1:$2').replace(/\s+/g, ' ').trim() : '';
   }
 
   _resolveExplicitReminderIntent(rawText, preparedInput) {
@@ -4596,6 +4732,7 @@ _resolveExplicitTimerIntent(rawText, preparedInput) {
         raw ||
         corrected);
     const browserHintSource = `${raw} ${corrected}`.trim();
+    const browserName = this._extractBrowserNameHint(browserHintSource);
     const openInBrowser = /\b(?:open|show|search|look\s+up|google).*\b(?:in|on)\s+(?:chrome|browser|edge|firefox)\b/i.test(browserHintSource)
       || /\bnew\s+tab\b/i.test(browserHintSource)
       || /\b(?:open|show)\s+(?:it|results?)\s+(?:in|on)\s+(?:chrome|browser|edge|firefox)\b/i.test(browserHintSource);
@@ -4608,8 +4745,20 @@ _resolveExplicitTimerIntent(rawText, preparedInput) {
 
     return {
       query,
-      openInBrowser
+      openInBrowser,
+      ...(browserName ? { browserName } : {})
     };
+  }
+
+  _extractBrowserNameHint(value) {
+    const text = String(value || '').trim().toLowerCase();
+    if (!text) return '';
+    const browserMatch = text.match(/\b(?:in|on|with|using)\s+(?:the\s+)?(chrome|browser|edge|firefox)\b/);
+    if (browserMatch?.[1]) return browserMatch[1];
+    if (/\bnew\s+tab\s+(?:in|on)\s+(?:the\s+)?chrome\b/.test(text)) return 'chrome';
+    if (/\bnew\s+tab\s+(?:in|on)\s+(?:the\s+)?edge\b/.test(text)) return 'edge';
+    if (/\bnew\s+tab\s+(?:in|on)\s+(?:the\s+)?firefox\b/.test(text)) return 'firefox';
+    return '';
   }
 
   _extractRawSearchQuery(rawText) {

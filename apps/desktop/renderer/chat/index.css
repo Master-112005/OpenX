@@ -2494,6 +2494,45 @@ body {
   margin-bottom: 24px;
 }
 
+.activity-tools {
+  align-items: center;
+  display: flex;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.activity-calendar-btn {
+  -webkit-app-region: no-drag;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.075);
+  border: 1px solid rgba(255, 255, 255, 0.11);
+  border-radius: 12px;
+  color: var(--adaptive-text, var(--text-color));
+  cursor: pointer;
+  display: grid;
+  height: 36px;
+  justify-content: center;
+  transition: background 0.25s ease, border-color 0.25s ease, color 0.25s ease, transform 0.25s ease;
+  width: 36px;
+}
+
+.activity-calendar-btn:hover {
+  background: rgba(255, 255, 255, 0.14);
+  border-color: rgba(255, 255, 255, 0.18);
+  transform: translateY(-1px);
+}
+
+.activity-calendar-btn.opening {
+  background: var(--adaptive-control-strong, rgba(255, 255, 255, 0.16));
+  border-color: color-mix(in srgb, var(--accent-color) 58%, rgba(255, 255, 255, 0.2));
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-color) 18%, transparent);
+  transform: translateY(0) scale(0.96);
+}
+
+.activity-calendar-btn:active {
+  transform: translateY(1px);
+}
+
 .eyebrow,
 .section-kicker,
 .alarm-kind {

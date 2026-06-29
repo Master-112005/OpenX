@@ -13,6 +13,7 @@ const CommunicationsController = require('./communications');
 const SystemController = require('./system');
 const WindowsController = require('./windows');
 const SchedulerController = require('./scheduler');
+const PlannerController = require('./planner');
 const ScreenshotController = require('./screenshot-recording');
 const FormAutomation = require('../../plugins/forms');
 const ActionVerifier = require('./common/action-verification');
@@ -38,6 +39,7 @@ class AutomationEngine {
     this.system = new SystemController(config);
     this.windows = new WindowsController(config);
     this.scheduler = new SchedulerController(config);
+    this.planner = new PlannerController(config);
     this.screenshot = new ScreenshotController(config);
     this.forms = new FormAutomation(config, {
       learning: config?.learningStore || null,
@@ -186,6 +188,10 @@ class AutomationEngine {
       'alarm.cancel': () => this.scheduler.cancelLatest('Alarm'),
       'alarm.list': () => this.scheduler.listSchedules('Alarm'),
       'alarm.clear': () => this.scheduler.clearSchedules('Alarm'),
+      'calendar.open': () => this.planner.open('calendar'),
+      'timetable.open': () => this.planner.open('timetable'),
+      'calendar.add': (entities, context) => this.planner.addCalendarEntry(entities, context),
+      'timetable.add': (entities, context) => this.planner.addTimetableEntry(entities, context),
       'system.shutdown': () => this.windows.shutdown(),
       'system.restart': () => this.windows.restart(),
       'system.sleep': () => this.windows.sleep(),

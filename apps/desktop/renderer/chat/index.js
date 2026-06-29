@@ -32,6 +32,7 @@ const phoneServerVersionEl = document.getElementById('phone-server-version');
 const phoneDeviceListEl = document.getElementById('phone-device-list');
 const chatViewBtn = document.getElementById('chat-view-btn');
 const activityViewBtn = document.getElementById('activity-view-btn');
+const activityCalendarBtn = document.getElementById('activity-calendar-btn');
 const conversationView = document.getElementById('conversation-view');
 const activityView = document.getElementById('activity-view');
 const activityBadge = document.getElementById('activity-badge');
@@ -806,14 +807,21 @@ function applyGlassTint(value) {
   const borderTone = useDarkText ? '0, 0, 0' : '255, 255, 255';
   const primaryTone = useDarkText ? '18, 18, 20' : '255, 255, 255';
   const primaryText = useDarkText ? '#ffffff' : '#151517';
-  root.style.setProperty('--adaptive-shell', `rgba(${red}, ${green}, ${blue}, ${(0.025 + (strength * 0.68)).toFixed(3)})`);
-  root.style.setProperty('--adaptive-surface', `rgba(${red}, ${green}, ${blue}, ${(0.025 + (strength * 0.2)).toFixed(3)})`);
-  root.style.setProperty('--adaptive-surface-strong', `rgba(${red}, ${green}, ${blue}, ${(0.05 + (strength * 0.3)).toFixed(3)})`);
-  root.style.setProperty('--adaptive-border', `rgba(${borderTone}, ${(0.09 + (strength * 0.18)).toFixed(3)})`);
+  const formatAlpha = value => Math.min(0.96, value).toFixed(3);
+  const shellAlpha = useDarkText ? 0.78 + (strength * 0.14) : 0.72 + (strength * 0.2);
+  const surfaceAlpha = useDarkText ? 0.2 + (strength * 0.16) : 0.12 + (strength * 0.16);
+  const surfaceStrongAlpha = useDarkText ? 0.28 + (strength * 0.18) : 0.18 + (strength * 0.2);
+  const borderAlpha = 0.18 + (strength * 0.14);
+  const controlAlpha = 0.12 + (strength * 0.1);
+  const controlStrongAlpha = 0.18 + (strength * 0.12);
+  root.style.setProperty('--adaptive-shell', `rgba(${red}, ${green}, ${blue}, ${formatAlpha(shellAlpha)})`);
+  root.style.setProperty('--adaptive-surface', `rgba(${red}, ${green}, ${blue}, ${formatAlpha(surfaceAlpha)})`);
+  root.style.setProperty('--adaptive-surface-strong', `rgba(${red}, ${green}, ${blue}, ${formatAlpha(surfaceStrongAlpha)})`);
+  root.style.setProperty('--adaptive-border', `rgba(${borderTone}, ${formatAlpha(borderAlpha)})`);
   root.style.setProperty('--adaptive-text', textColor);
   root.style.setProperty('--adaptive-muted', mutedColor);
-  root.style.setProperty('--adaptive-control', `rgba(${controlTone}, ${(0.055 + (strength * 0.11)).toFixed(3)})`);
-  root.style.setProperty('--adaptive-control-strong', `rgba(${controlTone}, ${(0.1 + (strength * 0.16)).toFixed(3)})`);
+  root.style.setProperty('--adaptive-control', `rgba(${controlTone}, ${formatAlpha(controlAlpha)})`);
+  root.style.setProperty('--adaptive-control-strong', `rgba(${controlTone}, ${formatAlpha(controlStrongAlpha)})`);
   root.style.setProperty('--adaptive-primary', `rgba(${primaryTone}, 0.9)`);
   root.style.setProperty('--adaptive-primary-text', primaryText);
   root.style.setProperty('--adaptive-text-shadow', useDarkText ? '0 1px 2px rgba(255, 255, 255, 0.38)' : '0 1px 3px rgba(0, 0, 0, 0.72)');
@@ -1578,6 +1586,18 @@ document.querySelectorAll('.permission-option').forEach(button => {
 sendBtn.addEventListener('click', handleSend);
 chatViewBtn.addEventListener('click', () => setWorkspaceView('chat'));
 activityViewBtn.addEventListener('click', () => setWorkspaceView('activity'));
+activityCalendarBtn.addEventListener('click', async () => {
+  activityCalendarBtn.classList.add('opening');
+  activityCalendarBtn.setAttribute('aria-busy', 'true');
+  try {
+    await window.jarvis?.openPlanner?.('calendar');
+  } finally {
+    window.setTimeout(() => {
+      activityCalendarBtn.classList.remove('opening');
+      activityCalendarBtn.removeAttribute('aria-busy');
+    }, 180);
+  }
+});
 document.getElementById('clear-notifications-btn').addEventListener('click', () => {
   notificationHistory = [];
   saveStoredList(NOTIFICATION_STORAGE_KEY, notificationHistory);

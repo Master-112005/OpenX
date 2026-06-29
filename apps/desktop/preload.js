@@ -22,6 +22,12 @@ contextBridge.exposeInMainWorld('jarvis', {
   openSettings: () =>
     ipcRenderer.invoke('window:openSettings'),
 
+  openPlanner: (view = 'calendar') =>
+    ipcRenderer.invoke('window:openPlanner', { view }),
+
+  closePlanner: () =>
+    ipcRenderer.invoke('window:closePlanner'),
+
   getConfig: () =>
     ipcRenderer.invoke('config:get'),
 
@@ -70,6 +76,15 @@ contextBridge.exposeInMainWorld('jarvis', {
   resetStopwatchFromWidget: () =>
     ipcRenderer.invoke('timerWidget:resetStopwatch'),
 
+  getPlannerEntries: () =>
+    ipcRenderer.invoke('planner:getEntries'),
+
+  addPlannerEntry: (entry) =>
+    ipcRenderer.invoke('planner:addEntry', entry),
+
+  deletePlannerEntry: (id) =>
+    ipcRenderer.invoke('planner:deleteEntry', { id }),
+
   quit: () =>
     ipcRenderer.invoke('app:quit'),
 
@@ -107,5 +122,23 @@ contextBridge.exposeInMainWorld('jarvis', {
     const handler = (_event, state) => callback(state);
     ipcRenderer.on('timerWidget:state', handler);
     return () => ipcRenderer.removeListener('timerWidget:state', handler);
+  },
+
+  onPlannerView: (callback) => {
+    if (typeof callback !== 'function') {
+      throw new TypeError('Planner view listener must be a function');
+    }
+    const handler = (_event, view) => callback(view);
+    ipcRenderer.on('planner:view', handler);
+    return () => ipcRenderer.removeListener('planner:view', handler);
+  },
+
+  onPlannerEntriesChanged: (callback) => {
+    if (typeof callback !== 'function') {
+      throw new TypeError('Planner entries listener must be a function');
+    }
+    const handler = (_event, payload) => callback(payload);
+    ipcRenderer.on('planner:entriesChanged', handler);
+    return () => ipcRenderer.removeListener('planner:entriesChanged', handler);
   }
 });

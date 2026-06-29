@@ -1178,6 +1178,39 @@ describe('Action Router', function() {
     assert.equal(result.intent, 'browser.search');
     assert.equal(result.entities.query, 'apple wwdc');
     assert.equal(result.entities.openInBrowser, true);
+    assert.equal(result.entities.browserName, 'chrome');
+  });
+
+  it('should carry opened browser context into following search clauses', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const executed = [];
+    const stubEngine = {
+      execute(actionId, entities) {
+        executed.push({ actionId, entities });
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const connected = await router.process('open chrome and search for latest news', 'chat');
+    const compact = await router.process('open cheome search for latest news', 'chat');
+
+    assert.equal(connected.intent, 'multi.command');
+    assert.equal(compact.intent, 'multi.command');
+    assert.deepEqual(executed.map(step => step.actionId), [
+      'app.open',
+      'browser.search',
+      'app.open',
+      'browser.search'
+    ]);
+    assert.equal(executed[1].entities.query, 'latest news');
+    assert.equal(executed[1].entities.openInBrowser, true);
+    assert.equal(executed[1].entities.browserName, 'chrome');
+    assert.equal(executed[3].entities.query, 'latest news');
+    assert.equal(executed[3].entities.openInBrowser, true);
+    assert.equal(executed[3].entities.browserName, 'chrome');
   });
 
   it('should preserve technical terms in explicit search queries', async function() {
@@ -1684,6 +1717,30 @@ describe('Action Router', function() {
       const result = await router.process(command, 'chat');
       assert.equal(result.intent, expectedIntent, command);
     }
+  });
+
+  it('should route assistant calendar and timetable commands', async function() {
+    const config = { permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } } };
+    const router = new ActionRouter(config, {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, entry: { title: entities.plannerText || 'context item' } } };
+      }
+    });
+
+    const openCalendar = await router.process('open calendar', 'chat');
+    const openTimetable = await router.process('open daily timetable', 'chat');
+    const addCalendar = await router.process('add team review to calendar tomorrow at 4 pm', 'chat');
+    const updateThis = await router.process('update this in timetable tomorrow at 7 am', 'chat');
+
+    assert.equal(openCalendar.intent, 'calendar.open');
+    assert.equal(openTimetable.intent, 'timetable.open');
+    assert.equal(addCalendar.intent, 'calendar.add');
+    assert.equal(addCalendar.entities.plannerText, 'team review');
+    assert.equal(addCalendar.entities.dateExpression, 'tomorrow');
+    assert.equal(addCalendar.entities.timeExpression, '4 pm');
+    assert.equal(updateThis.intent, 'timetable.add');
+    assert.equal(updateThis.entities.reference, 'previous');
+    assert.equal(updateThis.entities.timeExpression, '7 am');
   });
 
   it('should generalize countdown pomodoro session and recurring reminder language', async function() {

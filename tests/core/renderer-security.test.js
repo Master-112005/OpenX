@@ -5,7 +5,7 @@ const path = require('path');
 describe('Renderer Content Security', function() {
   const rendererRoot = path.resolve(__dirname, '..', '..', 'apps', 'desktop', 'renderer');
 
-  for (const view of ['chat', 'settings']) {
+  for (const view of ['chat', 'settings', 'planner']) {
     it(`should keep the ${view} view on local scripts and styles`, function() {
       const viewRoot = path.join(rendererRoot, view);
       const html = fs.readFileSync(path.join(viewRoot, 'index.html'), 'utf8');

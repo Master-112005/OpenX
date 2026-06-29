@@ -10,8 +10,13 @@ describe('Chat Renderer UI', function() {
   const script = fs.readFileSync(path.join(rendererRoot, 'index.js'), 'utf8');
 
   it('should provide dedicated chat, activity, notification, and alarm surfaces', function() {
-    ['conversation-view', 'activity-view', 'toast-region', 'alarm-overlay', 'schedule-list', 'notification-list']
+    ['conversation-view', 'activity-view', 'toast-region', 'alarm-overlay', 'schedule-list', 'notification-list', 'activity-calendar-btn']
       .forEach(id => assert.match(html, new RegExp(`id="${id}"`)));
+    assert.match(script, /openPlanner\?\.\('calendar'\)/);
+    assert.match(script, /classList\.add\('opening'\)/);
+    assert.match(script, /aria-busy/);
+    assert.match(css, /\.activity-calendar-btn/);
+    assert.match(css, /\.activity-calendar-btn\.opening/);
   });
 
   it('should keep assistant messages inside their bubbles at narrow widths', function() {
@@ -72,6 +77,8 @@ describe('Chat Renderer UI', function() {
     assert.match(script, /mode-app-tabs/);
     assert.match(glassCss, /Adaptive glass themes and controls/);
     assert.match(script, /glassContrast/);
+    assert.match(script, /const shellAlpha = useDarkText \? 0\.78 \+ \(strength \* 0\.14\) : 0\.72 \+ \(strength \* 0\.2\)/);
+    assert.match(script, /formatAlpha\(shellAlpha\)/);
     assert.match(glassCss, /Tint-aware foreground contrast/);
   });
 

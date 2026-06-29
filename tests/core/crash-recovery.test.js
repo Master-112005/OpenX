@@ -51,4 +51,23 @@ describe('Crash Recovery Policy', function() {
     assert.equal(policy.requestRestart(1000), true);
     assert.deepEqual(JSON.parse(fs.readFileSync(statePath, 'utf8')).crashTimestamps, [1000]);
   });
+
+  it('should ignore future timestamps when reading restart history', function() {
+    fs.writeFileSync(statePath, JSON.stringify({ crashTimestamps: [1000, 5000] }), 'utf8');
+    const policy = new CrashRecoveryPolicy({ statePath, maxRestarts: 2, windowMs: 1000 });
+
+    assert.equal(policy.requestRestart(1100), true);
+    assert.deepEqual(JSON.parse(fs.readFileSync(statePath, 'utf8')).crashTimestamps, [1000, 1100]);
+  });
+
+  it('should expose bounded recovery state for diagnostics', function() {
+    const policy = new CrashRecoveryPolicy({ statePath, maxRestarts: 2, windowMs: 1000 });
+
+    assert.equal(policy.requestRestart(1000), true);
+    assert.deepEqual(policy.getState(1100), {
+      blocked: false,
+      crashTimestamps: [1000],
+      remainingRestarts: 1
+    });
+  });
 });

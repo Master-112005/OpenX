@@ -34,9 +34,18 @@ const PRELOAD_PATH = path.join(__dirname, '..', 'preload.js');
 const MAX_RENDERER_RESTARTS = 3;
 const RENDERER_RESTART_WINDOW_MS = 60 * 1000;
 const RENDERER_RESTART_DELAY_MS = 1000;
+const MAX_RENDERER_RECOVERY_DELAY_MS = 5000;
 const UNRESPONSIVE_RELOAD_DELAY_MS = 15 * 1000;
 const FATAL_CLEANUP_TIMEOUT_MS = 3000;
 const STABLE_RUNTIME_MS = 2 * 60 * 1000;
+const RENDERER_RECOVERABLE_REASONS = new Set([
+  'abnormal-exit',
+  'crashed',
+  'killed',
+  'oom',
+  'launch-failed',
+  'integrity-failure'
+]);
 
 if (!app.isPackaged) {
   app.setPath('userData', path.join(app.getPath('appData'), 'OpenX-Development'));
@@ -125,6 +134,7 @@ const crashRecoveryPolicy = new CrashRecoveryPolicy({
 let chatWindow = null;
 let alertWindow = null;
 let timerWidgetWindow = null;
+let plannerWindow = null;
 let tray = null;
 let assistant = null;
 let textToSpeech = null;
@@ -139,6 +149,7 @@ let cleanupPromise = null;
 let fatalErrorHandling = false;
 let signalHandling = false;
 let stableRuntimeHandle = null;
+let chatLoweredForPlanner = false;
 let phoneServer = null;
 let qrPairingService = null;
 let phoneDeviceRegistry = null;
@@ -153,6 +164,8 @@ const IPC_CHANNELS = [
   'tts:stop',
   'window:openChat',
   'window:openSettings',
+  'window:openPlanner',
+  'window:closePlanner',
   'config:get',
   'settings:get',
   'phone:pairingQR:create',
@@ -169,6 +182,9 @@ const IPC_CHANNELS = [
   'timerWidget:stopStopwatch',
   'timerWidget:resumeStopwatch',
   'timerWidget:resetStopwatch',
+  'planner:getEntries',
+  'planner:addEntry',
+  'planner:deleteEntry',
   'app:quit'
 ];
 
@@ -190,10 +206,15 @@ function disableSpellChecker() {
   }
 }
 
-function clearTrackedTimeout(timeout) {
+function clearUnresponsiveTimeout(browserWindow) {
+  const timeout = unresponsiveTimeouts.get(browserWindow);
   if (!timeout) return;
   clearTimeout(timeout);
-  recoveryTimeouts.delete(timeout);
+  unresponsiveTimeouts.delete(browserWindow);
+}
+
+function isRendererExitRecoverable(reason) {
+  return RENDERER_RECOVERABLE_REASONS.has(String(reason || ''));
 }
 
 function consumeRendererRestartBudget(windowType) {
@@ -202,23 +223,33 @@ function consumeRendererRestartBudget(windowType) {
     .filter(timestamp => now - timestamp < RENDERER_RESTART_WINDOW_MS);
   if (recent.length >= MAX_RENDERER_RESTARTS) {
     rendererCrashHistory.set(windowType, recent);
-    return false;
+    return { allowed: false, crashCount: recent.length };
   }
   recent.push(now);
   rendererCrashHistory.set(windowType, recent);
-  return true;
+  return { allowed: true, crashCount: recent.length };
 }
 
 function scheduleRendererRecovery(windowType, createWindow) {
-  if (cleanupFinished || cleanupPromise || !consumeRendererRestartBudget(windowType)) {
+  if (cleanupFinished || cleanupPromise) {
+    mainLogger.info('Skipped renderer recovery during shutdown', { windowType });
+    return;
+  }
+
+  const budget = consumeRendererRestartBudget(windowType);
+  if (!budget.allowed) {
     mainLogger.error('Renderer recovery budget exhausted', { windowType });
     return;
   }
 
+  const delayMs = Math.min(
+    MAX_RENDERER_RECOVERY_DELAY_MS,
+    RENDERER_RESTART_DELAY_MS * Math.max(1, budget.crashCount)
+  );
   const timeout = setTimeout(() => {
     recoveryTimeouts.delete(timeout);
     if (!cleanupFinished && !cleanupPromise) createWindow();
-  }, RENDERER_RESTART_DELAY_MS);
+  }, delayMs);
   recoveryTimeouts.add(timeout);
 }
 
@@ -272,10 +303,14 @@ function secureWindow(browserWindow, options) {
   });
 
   browserWindow.webContents.on('render-process-gone', (_event, details) => {
+    if (cleanupFinished || cleanupPromise || !isRendererExitRecoverable(details.reason)) {
+      mainLogger.info('Renderer process exited without recovery', { windowType, details });
+      return;
+    }
+
     const error = new Error(`${windowType} renderer exited: ${details.reason}`);
     Logger.writeCrashSync(error, { type: 'renderer', windowType, details }, BASE_CONFIG.logging);
     mainLogger.error('Renderer process exited unexpectedly', { windowType, details });
-    if (details.reason === 'clean-exit' || cleanupFinished || cleanupPromise) return;
     if (!browserWindow.isDestroyed()) browserWindow.destroy();
     scheduleRendererRecovery(windowType, createWindow);
   });
@@ -285,29 +320,33 @@ function secureWindow(browserWindow, options) {
     if (unresponsiveTimeouts.has(browserWindow)) return;
     const timeout = setTimeout(() => {
       unresponsiveTimeouts.delete(browserWindow);
-      if (!browserWindow.isDestroyed() && browserWindow.webContents.isLoading() === false) {
+      if (
+        !browserWindow.isDestroyed()
+        && !browserWindow.webContents.isDestroyed()
+        && browserWindow.webContents.isLoading() === false
+      ) {
+        const error = new Error(`${windowType} renderer remained unresponsive`);
+        Logger.writeCrashSync(error, { type: 'renderer-unresponsive', windowType }, BASE_CONFIG.logging);
         mainLogger.warn('Reloading unresponsive renderer', { windowType });
-        browserWindow.webContents.reload();
+        browserWindow.webContents.reloadIgnoringCache();
       }
     }, UNRESPONSIVE_RELOAD_DELAY_MS);
     unresponsiveTimeouts.set(browserWindow, timeout);
   });
 
   browserWindow.on('responsive', () => {
-    const timeout = unresponsiveTimeouts.get(browserWindow);
-    clearTrackedTimeout(timeout);
-    unresponsiveTimeouts.delete(browserWindow);
+    clearUnresponsiveTimeout(browserWindow);
   });
 
   browserWindow.on('closed', () => {
-    const timeout = unresponsiveTimeouts.get(browserWindow);
-    clearTrackedTimeout(timeout);
-    unresponsiveTimeouts.delete(browserWindow);
+    clearUnresponsiveTimeout(browserWindow);
   });
 }
 
 function createChatWindow() {
   if (chatWindow && !chatWindow.isDestroyed()) {
+    chatWindow.setAlwaysOnTop(true);
+    chatLoweredForPlanner = false;
     chatWindow.show();
     chatWindow.focus();
     return;
@@ -359,6 +398,86 @@ function createSettingsWindow() {
   } else {
     chatWindow.webContents.once('did-finish-load', openSettings);
   }
+}
+
+function sendPlannerEntries(view = 'calendar') {
+  if (!plannerWindow || plannerWindow.isDestroyed()) return;
+  const planner = assistant?.automation?.planner;
+  const entries = planner?.listEntries?.()?.data?.entries || [];
+  plannerWindow.webContents.send('planner:entriesChanged', { entries, view });
+}
+
+function lowerChatWindowForPlanner() {
+  if (!chatWindow || chatWindow.isDestroyed() || !chatWindow.isVisible()) return;
+  chatWindow.setAlwaysOnTop(false);
+  chatWindow.blur();
+  chatLoweredForPlanner = true;
+}
+
+function restoreChatWindowPriority() {
+  if (!chatLoweredForPlanner) return;
+  chatLoweredForPlanner = false;
+  if (!chatWindow || chatWindow.isDestroyed()) return;
+  chatWindow.setAlwaysOnTop(true);
+}
+
+function createPlannerWindow(initialView = 'calendar', options = {}) {
+  const view = initialView === 'timetable' ? 'timetable' : 'calendar';
+  if (plannerWindow && !plannerWindow.isDestroyed()) {
+    plannerWindow.show();
+    plannerWindow.focus();
+    plannerWindow.webContents.send('planner:view', view);
+    sendPlannerEntries(view);
+    if (options.lowerChat) lowerChatWindowForPlanner();
+    return;
+  }
+
+  plannerWindow = new BrowserWindow({
+    width: 1040,
+    height: 720,
+    minWidth: 860,
+    minHeight: 600,
+    transparent: true,
+    frame: false,
+    resizable: true,
+    skipTaskbar: false,
+    alwaysOnTop: false,
+    hasShadow: true,
+    show: false,
+    paintWhenInitiallyHidden: true,
+    backgroundColor: '#00000000',
+    webPreferences: createSecureWebPreferences(PRELOAD_PATH)
+  });
+
+  const plannerFile = path.join(RENDERER_ROOT, 'planner', 'index.html');
+  secureWindow(plannerWindow, {
+    windowType: 'planner',
+    expectedFile: plannerFile,
+    createWindow: () => createPlannerWindow(view, options)
+  });
+  let didRevealPlanner = false;
+  const revealPlanner = () => {
+    if (didRevealPlanner || !plannerWindow || plannerWindow.isDestroyed()) return;
+    didRevealPlanner = true;
+    plannerWindow.center();
+    plannerWindow.show();
+    plannerWindow.focus();
+    if (options.lowerChat) lowerChatWindowForPlanner();
+  };
+  plannerWindow.once('ready-to-show', revealPlanner);
+  plannerWindow.loadFile(plannerFile).then(() => {
+    if (plannerWindow && !plannerWindow.isDestroyed()) {
+      plannerWindow.webContents.send('planner:view', view);
+      sendPlannerEntries(view);
+      revealPlanner();
+    }
+  }).catch(error => {
+    mainLogger.error('Failed to load planner renderer', { error: error.message });
+  });
+  plannerWindow.on('closed', () => {
+    plannerWindow = null;
+    restoreChatWindowPriority();
+  });
 }
 
 function presentScheduleAlert(schedule) {
@@ -500,6 +619,14 @@ function handleTimerWidgetCommand(payload) {
   }
 }
 
+function handlePlannerCommand(payload) {
+  if (!payload?.success || !payload.intent) return;
+  const intent = String(payload.intent);
+  if (!/^(?:calendar|timetable)\./.test(intent)) return;
+  const view = intent.startsWith('timetable.') ? 'timetable' : 'calendar';
+  createPlannerWindow(view);
+}
+
 function createTray() {
   const icon = nativeImage.createEmpty();
   tray = new Tray(icon);
@@ -508,6 +635,7 @@ function createTray() {
 
   const contextMenu = Menu.buildFromTemplate([
     { label: 'Open Chat', click: () => createChatWindow() },
+    { label: 'Calendar / Timetable', click: () => createPlannerWindow('calendar') },
     { label: 'Settings', click: () => createSettingsWindow() },
     { type: 'separator' },
     { label: 'Quit', click: () => app.quit() }
@@ -587,6 +715,16 @@ function setupIPC() {
 
   registerIpcHandler('window:openSettings', async () => {
     createSettingsWindow();
+  });
+
+  registerIpcHandler('window:openPlanner', async (_event, { view }) => {
+    createPlannerWindow(view, { lowerChat: true });
+    return { success: true, view };
+  });
+
+  registerIpcHandler('window:closePlanner', async () => {
+    if (plannerWindow && !plannerWindow.isDestroyed()) plannerWindow.close();
+    return { success: true };
   });
 
   registerIpcHandler('config:get', async () => {
@@ -691,6 +829,22 @@ function setupIPC() {
       showTimerWidget(result.data?.id || result.data?.taskName, { includeStopwatch: true });
     }
     return result || { success: false, error: 'Scheduler unavailable' };
+  });
+
+  registerIpcHandler('planner:getEntries', async () => {
+    return assistant?.automation?.planner?.listEntries?.() || { success: false, error: 'Planner unavailable' };
+  });
+
+  registerIpcHandler('planner:addEntry', async (_event, payload) => {
+    const result = assistant?.automation?.planner?.addEntry?.(payload) || { success: false, error: 'Planner unavailable' };
+    if (result?.success) sendPlannerEntries(payload.type);
+    return result;
+  });
+
+  registerIpcHandler('planner:deleteEntry', async (_event, { id }) => {
+    const result = assistant?.automation?.planner?.deleteEntry?.(id) || { success: false, error: 'Planner unavailable' };
+    if (result?.success) sendPlannerEntries();
+    return result;
   });
 
   registerIpcHandler('app:quit', async () => {
@@ -802,6 +956,7 @@ async function cleanupRuntime() {
     if (chatWindow && !chatWindow.isDestroyed()) chatWindow.destroy();
     if (alertWindow && !alertWindow.isDestroyed()) alertWindow.destroy();
     if (timerWidgetWindow && !timerWidgetWindow.isDestroyed()) timerWidgetWindow.destroy();
+    if (plannerWindow && !plannerWindow.isDestroyed()) plannerWindow.destroy();
     if (tray) {
       tray.destroy();
       tray = null;
@@ -1050,7 +1205,7 @@ process.on('SIGINT', () => handleSignal('SIGINT'));
 process.on('SIGTERM', () => handleSignal('SIGTERM'));
 
 app.on('child-process-gone', (_event, details) => {
-  if (details.reason === 'clean-exit' || cleanupFinished) return;
+  if (details.reason === 'clean-exit' || cleanupFinished || cleanupPromise) return;
   const error = new Error(`${details.type || 'Electron child'} process exited: ${details.reason}`);
   Logger.writeCrashSync(error, { type: 'child-process', details }, BASE_CONFIG.logging);
   mainLogger.error('Electron child process exited unexpectedly', { details });
@@ -1066,6 +1221,7 @@ app.whenReady().then(async () => {
     presentScheduleAlert(envelope.payload);
   });
   eventBus.subscribe(EVENTS.COMMAND_EXECUTED, envelope => handleTimerWidgetCommand(envelope.payload));
+  eventBus.subscribe(EVENTS.COMMAND_EXECUTED, envelope => handlePlannerCommand(envelope.payload));
   setupIPC();
   createTray();
   await initializeAssistant();

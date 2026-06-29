@@ -89,16 +89,31 @@ describe('Electron Security Boundary', function() {
     );
   });
 
+  it('should validate planner IPC payloads', function() {
+    assert.deepEqual(
+      IPC_VALIDATORS['window:openPlanner']({ view: 'timetable' }),
+      { view: 'timetable' }
+    );
+    assert.deepEqual(
+      IPC_VALIDATORS['planner:addEntry']({ type: 'calendar', title: 'Review', date: '2026-06-29' }),
+      { type: 'calendar', title: 'Review', date: '2026-06-29' }
+    );
+    assert.throws(() => IPC_VALIDATORS['window:openPlanner']({ view: 'settings' }), /planner view/);
+    assert.throws(() => IPC_VALIDATORS['planner:addEntry']({ type: 'email', title: 'Bad' }), /planner entry type/);
+  });
+
   it('should provide a validator for every registered IPC channel', function() {
     const expectedChannels = [
       'command:process', 'command:confirm', 'assistant:status', 'tts:speak', 'tts:stop',
-      'window:openChat', 'window:openSettings', 'config:get', 'settings:get',
+      'window:openChat', 'window:openSettings', 'window:openPlanner', 'window:closePlanner',
+      'config:get', 'settings:get',
       'phone:pairingQR:create', 'phone:server:status', 'phone:devices:list',
       'phone:device:permissions:update', 'phone:device:remove', 'phone:device:disconnect',
       'settings:save', 'settings:reset',
       'schedule:alertAction', 'timerWidget:getState', 'timerWidget:close',
       'timerWidget:stopStopwatch', 'timerWidget:resumeStopwatch',
-      'timerWidget:resetStopwatch', 'app:quit'
+      'timerWidget:resetStopwatch', 'planner:getEntries', 'planner:addEntry',
+      'planner:deleteEntry', 'app:quit'
     ];
 
     assert.deepEqual(Object.keys(IPC_VALIDATORS).sort(), expectedChannels.sort());

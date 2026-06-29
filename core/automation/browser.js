@@ -3,6 +3,7 @@ const { launchTarget } = require('./common/launcher');
 const WindowsSessionController = require('./common/windows-session');
 const { resolveTrustedWebTarget } = require('../assistant/nlp/web-targets');
 const dns = require('dns');
+const fs = require('fs');
 const https = require('https');
 
 const INTERNET_ERROR_MESSAGE = 'Please check your connection.';
@@ -142,13 +143,41 @@ class BrowserController {
 
     for (const browser of browsers) {
       try {
-        if (require('fs').existsSync(browser.path)) return browser;
+        if (fs.existsSync(browser.path)) return browser;
       } catch (e) {
         continue;
       }
     }
 
     return { path: null, name: 'msedge' };
+  }
+
+  _resolveBrowserExecutable(requestedBrowser) {
+    const browserName = this._normalizeBrowserName(requestedBrowser);
+    const candidates = {
+      chrome: [
+        'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+        'C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe'
+      ],
+      edge: [
+        'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe',
+        'C:\\Program Files\\Microsoft\\Edge\\Application\\msedge.exe'
+      ],
+      firefox: [
+        'C:\\Program Files\\Mozilla Firefox\\firefox.exe',
+        'C:\\Program Files (x86)\\Mozilla Firefox\\firefox.exe'
+      ]
+    };
+
+    for (const candidate of candidates[browserName] || []) {
+      try {
+        if (fs.existsSync(candidate)) return candidate;
+      } catch (e) {
+        continue;
+      }
+    }
+
+    return null;
   }
 
   open(url, options = {}) {
@@ -205,12 +234,16 @@ class BrowserController {
     }
 
     try {
-      if (this.defaultBrowser.path) {
-        launchTarget(this.defaultBrowser.path, [formattedUrl]);
+      const requestedBrowserPath = options.browserName
+        ? this._resolveBrowserExecutable(blankTabBrowser)
+        : null;
+      const browserPath = requestedBrowserPath || this.defaultBrowser.path;
+      if (browserPath) {
+        launchTarget(browserPath, [formattedUrl]);
       } else {
         launchTarget(formattedUrl);
       }
-      return { success: true, data: { url: formattedUrl } };
+      return { success: true, data: { url: formattedUrl, browserName: blankTabBrowser } };
     } catch (err) {
       return { success: false, error: `Failed to open: ${formattedUrl}` };
     }

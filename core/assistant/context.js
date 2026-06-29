@@ -572,6 +572,8 @@ class ContextManager {
       entities.filename,
       entities.fileName,
       entities.contactName,
+      entities.plannerText,
+      data.entry?.title,
       data.query
     ].map(value => String(value || '').trim()).find(Boolean) || '';
   }

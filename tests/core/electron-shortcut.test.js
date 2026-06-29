@@ -19,4 +19,14 @@ describe('Electron Chat Shortcut', function() {
     assert.match(script, /if \(!includeStopwatch && state\?\.mode === 'stopwatch'\) return \{ visible: false \}/);
     assert.match(script, /showTimerWidget\(preferredId, \{ includeStopwatch: intent\.startsWith\('stopwatch\.'\) \}\)/);
   });
+
+  it('should recover renderer failures without tight restart loops', function() {
+    assert.match(script, /const MAX_RENDERER_RECOVERY_DELAY_MS = 5000/);
+    assert.match(script, /const RENDERER_RECOVERABLE_REASONS = new Set/);
+    assert.match(script, /function isRendererExitRecoverable\(reason\)/);
+    assert.match(script, /function clearUnresponsiveTimeout\(browserWindow\)/);
+    assert.match(script, /RENDERER_RESTART_DELAY_MS \* Math\.max\(1, budget\.crashCount\)/);
+    assert.match(script, /reloadIgnoringCache\(\)/);
+    assert.match(script, /renderer-unresponsive/);
+  });
 });

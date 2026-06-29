@@ -571,6 +571,48 @@ const INTENT_DEFINITIONS = [
     action: 'alarm.clear', entities: [], description: 'Cancel all alarms'
   },
   {
+    id: 'calendar.open',
+    patterns: ['open calendar', 'show calendar', 'open my calendar', 'show my calendar'],
+    permissionLevel: 'low',
+    action: 'calendar.open',
+    entities: [],
+    description: 'Open the assistant calendar'
+  },
+  {
+    id: 'timetable.open',
+    patterns: ['open timetable', 'show timetable', 'open daily timetable', 'show daily timetable', 'open time table'],
+    permissionLevel: 'low',
+    action: 'timetable.open',
+    entities: [],
+    description: 'Open the assistant timetable'
+  },
+  {
+    id: 'calendar.add',
+    patterns: ['add to calendar', 'update this in calendar', 'put this in calendar', 'schedule this in calendar'],
+    permissionLevel: 'low',
+    action: 'calendar.add',
+    entities: [
+      { name: 'plannerText', type: 'string', required: false },
+      { name: 'dateExpression', type: 'string', required: false },
+      { name: 'timeExpression', type: 'string', required: false },
+      { name: 'reference', type: 'string', required: false }
+    ],
+    description: 'Add an item to the assistant calendar'
+  },
+  {
+    id: 'timetable.add',
+    patterns: ['add to timetable', 'update this in timetable', 'put this in timetable', 'add this to time table'],
+    permissionLevel: 'low',
+    action: 'timetable.add',
+    entities: [
+      { name: 'plannerText', type: 'string', required: false },
+      { name: 'dateExpression', type: 'string', required: false },
+      { name: 'timeExpression', type: 'string', required: false },
+      { name: 'reference', type: 'string', required: false }
+    ],
+    description: 'Add an item to the assistant timetable'
+  },
+  {
     id: 'system.shutdown',
     patterns: ['shutdown', 'shut down', 'turn off computer', 'power off'],
     permissionLevel: 'critical',

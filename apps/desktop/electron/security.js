@@ -116,6 +116,31 @@ function validateTimerWidgetClose(payload) {
   return {};
 }
 
+function validatePlannerView(payload) {
+  requirePlainObject(payload);
+  const view = requireString(payload.view || 'calendar', 'view', { maxLength: 20 });
+  if (!['calendar', 'timetable'].includes(view)) throw new TypeError('planner view is not supported');
+  return { view };
+}
+
+function validatePlannerEntry(payload) {
+  requirePlainObject(payload);
+  const type = requireString(payload.type || 'calendar', 'type', { maxLength: 20 });
+  if (!['calendar', 'timetable'].includes(type)) throw new TypeError('planner entry type is not supported');
+  const normalized = { type };
+  for (const field of ['title', 'plannerText', 'notes', 'date', 'dateExpression', 'startTime', 'timeExpression', 'endTime']) {
+    if (payload[field] !== undefined) {
+      normalized[field] = requireString(payload[field], field, { maxLength: field === 'notes' ? 1000 : 200, allowEmpty: true });
+    }
+  }
+  return normalized;
+}
+
+function validatePlannerDelete(payload) {
+  requirePlainObject(payload);
+  return { id: requireString(payload.id, 'id', { maxLength: 128 }) };
+}
+
 function validatePhoneDevice(payload) {
   requirePlainObject(payload);
   const deviceId = requireString(payload.deviceId, 'deviceId', { maxLength: 128 });
@@ -151,6 +176,8 @@ const IPC_VALIDATORS = Object.freeze({
   'tts:stop': validateEmpty,
   'window:openChat': validateEmpty,
   'window:openSettings': validateEmpty,
+  'window:openPlanner': validatePlannerView,
+  'window:closePlanner': validateEmpty,
   'config:get': validateEmpty,
   'settings:get': validateEmpty,
   'phone:pairingQR:create': validateEmpty,
@@ -167,6 +194,9 @@ const IPC_VALIDATORS = Object.freeze({
   'timerWidget:stopStopwatch': validateEmpty,
   'timerWidget:resumeStopwatch': validateEmpty,
   'timerWidget:resetStopwatch': validateEmpty,
+  'planner:getEntries': validateEmpty,
+  'planner:addEntry': validatePlannerEntry,
+  'planner:deleteEntry': validatePlannerDelete,
   'app:quit': validateEmpty
 });
 

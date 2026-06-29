@@ -800,6 +800,18 @@ const RESPONSE_BUILDERS = {
       return count ? `You have ${count} active alarm${count === 1 ? '' : 's'}.` : 'You have no active alarms.';
     },
     'alarm.clear': context => `Cancelled ${valueFromContext(context, 'count', 0)} alarm${valueFromContext(context, 'count', 0) === 1 ? '' : 's'}.`,
+    'calendar.open': () => 'Opening your calendar.',
+    'timetable.open': () => 'Opening your timetable.',
+    'calendar.add': context => {
+      const entry = valueFromContext(context, 'entry', {});
+      const title = entry?.title || valueFromContext(context, 'plannerText', 'that item');
+      return `Added ${title} to your calendar.`;
+    },
+    'timetable.add': context => {
+      const entry = valueFromContext(context, 'entry', {});
+      const title = entry?.title || valueFromContext(context, 'plannerText', 'that item');
+      return `Added ${title} to your timetable.`;
+    },
     'system.shutdown': () => chooseVariant('sys.shutdown', [
       `Initiating system shutdown now.`,
       `The system will power down shortly.`,

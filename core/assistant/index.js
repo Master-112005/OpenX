@@ -565,7 +565,8 @@ class Assistant extends EventEmitter {
       return null;
     }
 
-    if (/\b(?:meetings?|calendar|next\s+event)\b/.test(normalized)) {
+    const localPlannerCommand = /\b(?:open|show|display|launch|add|update|put|schedule|create|save)\b.*\b(?:calendar|calender|timetable|time table|daily schedule)\b/.test(normalized);
+    if (!localPlannerCommand && /\b(?:meetings?|calendar|next\s+event)\b/.test(normalized)) {
       return this._directContextResult(source, 'Calendar reading is not connected yet, so I cannot reliably list your meetings from the system.');
     }
 
