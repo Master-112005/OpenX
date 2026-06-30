@@ -1,5 +1,10 @@
 const fs = require('fs');
 const path = require('path');
+const {
+  buildDataPaths,
+  readJsonFile,
+  writeJsonAtomic
+} = require('../assistant/Data');
 
 const ENTRY_TYPES = new Set(['calendar', 'timetable']);
 
@@ -76,7 +81,9 @@ function cleanTitle(value) {
 class PlannerController {
   constructor(config = {}) {
     this.config = config;
-    this.plannerPath = path.join(config?.app?.dataDir || process.cwd(), 'planner.json');
+    const dataPaths = config?.app?.dataPaths || buildDataPaths(config);
+    this.plannerPath = config?.app?.plannerPath || dataPaths.plannerPath;
+    this._migrateWorkingDirectoryPlanner(config);
     this.entries = this._loadEntries();
   }
 
@@ -166,21 +173,44 @@ class PlannerController {
   }
 
   _loadEntries() {
-    try {
-      if (!fs.existsSync(this.plannerPath)) return [];
-      const parsed = JSON.parse(fs.readFileSync(this.plannerPath, 'utf8'));
-      return Array.isArray(parsed)
-        ? parsed.filter(entry => entry && ENTRY_TYPES.has(entry.type) && entry.id && entry.title).slice(-500)
-        : [];
-    } catch (_) {
-      return [];
-    }
+    const parsed = readJsonFile(this.plannerPath, [], {
+      createIfMissing: false,
+      validate: value => Array.isArray(value)
+    });
+    return Array.isArray(parsed)
+      ? parsed.filter(entry => entry && ENTRY_TYPES.has(entry.type) && entry.id && entry.title).slice(-500)
+      : [];
   }
 
   _saveEntries() {
-    const directory = path.dirname(this.plannerPath);
-    if (!fs.existsSync(directory)) fs.mkdirSync(directory, { recursive: true });
-    fs.writeFileSync(this.plannerPath, JSON.stringify(this.entries.slice(-500), null, 2), 'utf8');
+    writeJsonAtomic(this.plannerPath, this.entries.slice(-500), { backup: true });
+  }
+
+  _migrateWorkingDirectoryPlanner(config) {
+    const shouldMigrate = config?.app?.migrateCwdPlanner === true || !config?.app?.dataDir;
+    if (!shouldMigrate) return;
+
+    const sourcePath = path.resolve(process.cwd(), 'planner.json');
+    const targetPath = path.resolve(this.plannerPath);
+    if (sourcePath === targetPath || !fs.existsSync(sourcePath)) return;
+
+    try {
+      const sourceEntries = readJsonFile(sourcePath, [], {
+        createIfMissing: false,
+        validate: value => Array.isArray(value)
+      });
+      const targetEntries = readJsonFile(targetPath, [], {
+        createIfMissing: false,
+        validate: value => Array.isArray(value)
+      });
+      const merged = [...targetEntries, ...sourceEntries]
+        .filter(entry => entry && ENTRY_TYPES.has(entry.type) && entry.id && entry.title)
+        .slice(-500);
+      writeJsonAtomic(targetPath, merged, { backup: true });
+      fs.unlinkSync(sourcePath);
+    } catch (_) {
+      // Planner migration is best effort; normal loading still uses the managed path.
+    }
   }
 }
 

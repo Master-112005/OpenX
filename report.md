@@ -2,13 +2,13 @@
 
 **Project:** OpenX
 
-**Package version:** 1.0.2
+**Package version:** 2.5.0
 
 **Platform:** Windows desktop
 
 **Runtime:** Electron 28 and Node.js
 
-**Report date:** 2026-06-22
+**Report date:** 2026-06-30
 
 ## 1. Executive summary
 
@@ -16,7 +16,9 @@ OpenX is a deterministic, local-first Windows desktop assistant. The current imp
 
 The previous directory-per-controller architecture has been removed. Implementations now live directly in the files documented below; there are no compatibility facades pointing back to the removed core structure.
 
-The assistant processes commands through NLP, NLU, parsing, entity extraction, intent resolution, validation, permissions, Natural Language Execution (NLE), automation, verification, confirmation, response generation, context, and active learning. The language regression corpus contains **2,102 commands**, all of which are classified by the sandbox corpus test.
+The assistant processes commands through NLP, NLU, parsing, language relations, entity extraction, intent resolution, validation, permissions, Natural Language Execution (NLE), automation, verification, confirmation, response generation, context, and active learning. The language regression corpus contains **2,102 commands**, all of which are classified by the sandbox corpus test.
+
+Recent implementation work added a glass-themed calendar/timetable planner window, a persistent timer/stopwatch widget, daily reminder and alarm recurrence, snooze actions, phone pairing and file transfer support, stronger crash recovery and renderer security, and tighter reminder parsing for flexible time phrases such as `after 30 min`, `after 1hr`, and misspelled `tommrow`.
 
 Classification does not mean every requested operating-system feature is implemented. OpenX explicitly distinguishes successful execution, clarification, and recognized-but-unconnected capabilities.
 
@@ -28,6 +30,7 @@ The implementation is designed to provide:
 - typo, spelling, filler-word, abbreviation, and noisy-input handling;
 - multi-command planning and sequential execution;
 - clear intent and entity boundaries;
+- context-aware reminder, planner, phone, browser, file, and app routing;
 - validation before execution and verification after execution;
 - permission-aware confirmation for sensitive actions;
 - bounded context and privacy-conscious active learning;
@@ -41,7 +44,7 @@ The implementation is designed to provide:
 Input
   -> NLP
   -> NLU and context
-  -> parser and entities
+  -> parser, language relations, and entities
   -> intent resolution
   -> action validation
   -> permission/confirmation gate
@@ -109,7 +112,7 @@ OpenX/
 │   │   ├── Active-learning.js
 │   │   ├── contest.js
 │   │   ├── context.js
-│   │   ├── ContextLanguage.js
+│   │   ├── language.js
 │   │   ├── Data.js
 │   │   ├── entities.js
 │   │   ├── index.js
@@ -242,6 +245,8 @@ OpenX/
 └── RULES.md
 ```
 
+Current source additions beyond the older generated tree include `apps/desktop/renderer/planner/`, `apps/desktop/renderer/timer-widget/`, `apps/desktop/phone-verification.js`, `core/phone/`, `core/automation/planner.js`, and `core/assistant/language.js`.
+
 ### 3.2 Assistant layer
 
 | File | Current responsibility |
@@ -255,6 +260,7 @@ OpenX/
 | `core/assistant/parser.js` | Input parser plus integrated word-level command-frame parser |
 | `core/assistant/entities.js` | Entity extraction and target normalization |
 | `core/assistant/intents.js` | Intent registry, patterns, action IDs, required entities, and permission levels |
+| `core/assistant/language.js` | Combined context-language and word-relation helpers for NLU, context interpretation, and active learning |
 | `core/assistant/router.js` | Multi-command planning, specific intent resolvers, validation, permissions, NLE delegation, and response result assembly |
 | `core/assistant/nle.js` | Single assistant-to-automation execution boundary |
 | `core/assistant/context.js` | Session command and conversation history |
@@ -284,7 +290,8 @@ OpenX/
 - folder create, open, delete, and move;
 - browser URL opening, web search, site search, first-result handling, tab open/close/list;
 - media play/search/control, fullscreen, volume, shuffle, repeat, favorites, likes, subscriptions, and status;
-- timers, alarms, and reminders;
+- timers, alarms, reminders, recurrence, snooze, and stopwatch state;
+- calendar and daily timetable entries through the planner controller;
 - direct-recipient message and email composition plus calls, without persistent contact storage;
 - CPU, RAM, battery, disk, processes, system insights, Bluetooth settings, calculations, time, and date;
 - screenshot capture;
@@ -368,6 +375,22 @@ Commands with a recognizable desktop operation but no connected action are route
 
 This improves language coverage without simulating success or performing an unrelated web search.
 
+### 4.8 Scheduling, reminders, and planner integration
+
+The scheduler now supports timers, alarms, reminders, daily/weekly/hourly recurrence, snooze actions, and stopwatch state used by the desktop timer widget. Reminder parsing accepts schedule clauses before or after the reminder text, including compact and word-based durations:
+
+```text
+remind me to call mummy after 30 min
+remind me after 5 min to call mummy
+remind me to call daddy after 1hr
+remind me to call daddy after one hr
+remind me tommrow to wish charan on his birthday
+```
+
+The assistant-level clarification gate lets complete reminder phrases reach the router instead of incorrectly asking for a missing time. Date-only reminders such as `tomorrow` are valid and default to 9:00 AM local time when the user does not provide an exact clock time.
+
+The planner integrates calendar and daily timetable data. `calendar.open` and `timetable.open` show the same planner window, and clicking a date reveals that day's timetable. Assistant-created reminders and alarms are surfaced as schedule entries so calendar dates can show reminder counts and the timetable can reflect upcoming personal tasks.
+
 ## 5. Command corpus
 
 `commands.md` is the authoritative natural-language regression corpus. It currently contains **2,102 numbered commands** spanning:
@@ -405,7 +428,20 @@ Plugin actions and intents must use `plugin.<id>.*`. A plugin may call a core au
 
 Plugin loading is enabled in `config.js`, and the default trusted list is `sample_plugin`, `youtube`, `chrome`, and `discord`. The forms and communications packages are composed directly by their owning automation controllers.
 
-## 7. Active learning and personality
+## 7. Phone bridge
+
+The `core/phone/` package provides local phone integration:
+
+- `PhoneServer` hosts the local device bridge.
+- `QRPairingService`, `PairingService`, and `PairingTokenManager` create short-lived pairing sessions.
+- `IdentityVerificationService` and `apps/desktop/phone-verification.js` require Windows identity verification before QR pairing.
+- `DeviceRegistry`, `SessionManager`, and `SecurityManager` track trusted devices and permissions.
+- `FileTransferProtocol`, `FileTransferManager`, `TransferIntegrity`, and `TransferHistory` handle file/folder transfer.
+- `PhoneCommandRouter` routes commands from a trusted phone through the same assistant pipeline with phone context and device permissions.
+
+Settings expose Connect Phone and Connected Devices as separate phone panels. Trusted devices can be listed, disconnected, removed, and permission-scoped from the desktop UI.
+
+## 8. Active learning and personality
 
 Active learning stores:
 
@@ -421,7 +457,7 @@ Sensitive credential-like fields are rejected. Writes are sanitized, pruned, and
 
 Personality applies configurable titles and honorifics to deterministic responses. It changes presentation, not intent or permission decisions.
 
-## 8. Data and persistence
+## 9. Data and persistence
 
 The managed data root is:
 
@@ -433,6 +469,7 @@ The managed data root is:
 
 - data-root and legacy-root resolution;
 - managed paths for settings, learning, schedules, logs, runtime state, media, screenshots, and backups;
+- managed paths for phone pairing, trusted phone devices, phone permissions, and phone transfer history;
 - atomic file and JSON writes;
 - optional backup files;
 - migration from `%USERPROFILE%\.jarvis` without overwriting newer OpenX data;
@@ -440,7 +477,7 @@ The managed data root is:
 - shared event names and event bus;
 - normalization, validation, and ID utilities.
 
-## 9. Electron application and security
+## 10. Electron application and security
 
 The desktop application is implemented in `apps/desktop/`.
 
@@ -454,12 +491,17 @@ Security properties include:
 - confirmation payload validation;
 - bounded renderer restart policy;
 - bounded UI history and rendering;
+- trusted planner, alert, timer-widget, and settings renderer windows;
+- Windows identity verification before phone pairing QR generation;
+- phone-device permissions for remote command and file-transfer capabilities;
 - plugin trust and namespace enforcement;
 - safe user-path validation for file operations.
 
 The preload bridge exposes a narrow API. Renderer code cannot directly access controllers or execute operating-system actions.
 
-## 10. Settings and configuration
+Desktop renderer surfaces now include chat/activity/settings, the alert window, the glass-themed planner window, and the timer/stopwatch widget. The planner window is focused separately from chat so calendar/timetable work is not interrupted by the assistant chat surface.
+
+## 11. Settings and configuration
 
 `config.js` contains runtime defaults for:
 
@@ -470,10 +512,11 @@ The preload bridge exposes a narrow API. Renderer code cannot directly access co
 - permission levels;
 - logging;
 - plugin directory, enablement, and trusted plugin IDs.
+- phone server host/port defaults and trusted-device paths.
 
-`apps/desktop/settings.js` persists user-facing settings, themes, profiles, and modes under the managed data root. Contact storage and its renderer/IPC surface have been removed.
+`apps/desktop/settings.js` persists user-facing settings, themes, profiles, and modes under the managed data root. The chat and planner surfaces consume the same theme snapshot so glass tint, contrast, and readability stay consistent across background changes. Contact storage and its renderer/IPC surface have been removed.
 
-## 11. Testing and verification
+## 12. Testing and verification
 
 Available commands:
 
@@ -490,47 +533,51 @@ Current verification evidence:
 - ESLint completes successfully.
 - The 2,102-command sandbox corpus passes with every command classified.
 - Router, assistant, architecture, security, UI, media, settings, and plugin tests pass in focused runs.
-- The latest full run reached 512 passing tests and exposed one environment-dependent app-launch test because a real Chrome window was visible. That test was isolated from live window state and its focused rerun passes.
+- Recent focused regression evidence includes assistant reminder tests with 55 passing, router reminder tests with 6 passing, and automation reminder checks with 2 passing.
+- `npm run lint` passes after the latest reminder, planner, security, and UI changes.
+- Full desktop automation suites can observe live Windows state; environment-dependent app/window tests should be run with deterministic mocks or an isolated desktop state.
 - `git diff --check` completes without whitespace errors.
 
 The full test suite intentionally logs expected errors for negative tests such as unknown actions, unsafe paths, and invalid plugins.
 
-## 12. Knowledge graph
+## 13. Knowledge graph
 
 The graphify graph was rebuilt after the implementation changes. The latest recorded update contains:
 
-- **1,218 nodes**;
-- **2,650 edges**;
-- **84 communities**.
+- **1,765 nodes**;
+- **3,912 edges**;
+- **48 communities**.
 
-The highest-connectivity abstractions remain `ActionRouter`, `Assistant`, `MediaController`, `ContextManager`, `EntityExtractor`, `AppController`, `ActiveLearningStore`, and `SystemController`.
+The highest-connectivity abstractions include `ActionRouter`, `Assistant`, `ActiveLearningManager`, `normalizeText()`, `ContextManager`, `MediaController`, `EntityExtractor`, `SchedulerController`, and `ActiveLearningStore`.
 
 The graph still identifies `ActionRouter` as a god node. This is a maintainability risk, but splitting it must preserve resolver precedence, multi-command behavior, clarification, and fallback semantics.
 
-## 13. Packaging
+## 14. Packaging
 
 `npm run build` invokes Electron Builder for Windows x64 and creates an NSIS installer. The package includes application, core, and plugin code inside an ASAR archive. Tests, docs, graph output, and development metadata are excluded.
 
-## 14. Known limitations
+## 15. Known limitations
 
 - Some command-corpus operations are classified but intentionally reported as unconnected capabilities.
 - Screen capture is connected; full screen recording is not currently connected to a recorder controller.
 - Messaging and call behavior depends on explicitly supplied chat names, phone numbers, or email addresses and available URI/desktop integration.
 - Browser tab discovery and control depend on visible windows, UI Automation, or an available debugging endpoint.
 - Application-launch observations can vary when a target application is already open.
+- Phone pairing and file transfer require the local phone bridge to be running, Windows identity verification to pass, and the device to hold the required permission scope.
+- Calendar/timetable entries are local assistant planner data; external calendar providers are not connected.
 - Research and other workspace modes require corresponding user mode configuration to perform useful startup actions.
 - The router remains large and should only be decomposed with resolver-precedence regression coverage.
 
-## 15. Recommended next work
+## 16. Recommended next work
 
-1. Connect high-value recognized capabilities from `commands.md` to real controllers, prioritizing screen recording, update management, archives/backups, notifications, and richer communication controls.
+1. Connect high-value recognized capabilities from `commands.md` to real controllers, prioritizing screen recording, update management, archives/backups, external calendar providers, notifications, and richer communication controls.
 2. Add explicit corpus expectations for executable, clarification, and unsupported outcomes instead of checking intent classification alone.
 3. Decompose `ActionRouter` into domain resolver modules while retaining one orchestrator and the current ordering contract.
-4. Add plugin-specific integration tests for Chrome, YouTube, and Discord actions.
-5. Add deterministic mocks for all tests that can observe live Windows applications.
+4. Add plugin-specific integration tests for Chrome, YouTube, Discord, planner, and phone actions.
+5. Add deterministic mocks for all tests that can observe live Windows applications, visible browser tabs, or paired phones.
 
-## 16. Conclusion
+## 17. Conclusion
 
-OpenX now has the requested flat architecture and a connected assistant execution pipeline. It provides broad natural-language classification, deterministic automation for connected actions, safe clarification for missing details, explicit unsupported responses, restricted plugins, active learning, secured Electron IPC, managed persistence, and a large sandbox command corpus.
+OpenX now has the requested flat architecture and a connected assistant execution pipeline. It provides broad natural-language classification, deterministic automation for connected actions, safe clarification for missing details, explicit unsupported responses, restricted plugins, active learning, secured Electron IPC, managed persistence, phone pairing/file transfer, local calendar/timetable planning, timer/reminder/stopwatch UI, and a large sandbox command corpus.
 
 The next engineering priority is not broader generic recognition; it is converting the most valuable recognized capabilities into verified, real automation controllers while preserving the current safety contract.

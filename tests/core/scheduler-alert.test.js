@@ -31,6 +31,54 @@ describe('Scheduler Alert Delivery', function() {
     scheduler.destroy();
   });
 
+  it('should use OpenX schedule names and migrate accidental cwd schedules', function() {
+    const originalCwd = process.cwd();
+    const originalDataDir = process.env.OPENX_DATA_DIR;
+    const cwdDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openx-cwd-schedules-'));
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openx-managed-schedules-'));
+
+    try {
+      process.env.OPENX_DATA_DIR = dataDir;
+      process.chdir(cwdDir);
+      fs.writeFileSync(path.join(cwdDir, 'schedules.json'), JSON.stringify([{
+        id: 'JARVIS_Reminder_legacy',
+        taskName: 'JARVIS_Reminder_legacy',
+        kind: 'Reminder',
+        title: 'JARVIS Reminder Reminder',
+        message: 'legacy reminder',
+        dueAt: new Date(Date.now() + 60000).toISOString(),
+        status: 'scheduled',
+        createdAt: new Date().toISOString()
+      }], null, 2), 'utf8');
+
+      const scheduler = new SchedulerController({
+        app: { cleanupLegacySchedules: false, migrateCwdSchedules: true }
+      });
+      const result = scheduler.setReminder('call mummy', { duration: 30 });
+      const entries = JSON.parse(fs.readFileSync(path.join(dataDir, 'schedules.json'), 'utf8'));
+
+      assert.equal(result.success, true);
+      assert.equal(fs.existsSync(path.join(cwdDir, 'schedules.json')), false);
+      assert.ok(entries.every(item => !String(item.id).startsWith('JARVIS_')));
+      assert.ok(entries.every(item => !String(item.taskName).startsWith('JARVIS_')));
+      assert.ok(entries.every(item => !/^JARVIS\b/.test(String(item.title || ''))));
+      assert.ok(entries.some(item => item.id === 'OpenX_Reminder_legacy'));
+      assert.ok(entries.some(item => item.title === 'OpenX Reminder'));
+      assert.match(result.data.id, /^OpenX_Reminder_/);
+      assert.equal(result.data.title, 'OpenX Reminder');
+      scheduler.destroy();
+    } finally {
+      process.chdir(originalCwd);
+      if (originalDataDir === undefined) {
+        delete process.env.OPENX_DATA_DIR;
+      } else {
+        process.env.OPENX_DATA_DIR = originalDataDir;
+      }
+      fs.rmSync(cwdDir, { recursive: true, force: true });
+      fs.rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
+
   it('should classify reminders and persist category symbols', function() {
     const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openx-reminder-category-'));
     const scheduler = new SchedulerController({

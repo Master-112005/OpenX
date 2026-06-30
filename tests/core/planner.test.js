@@ -51,4 +51,41 @@ describe('Planner Controller', function() {
     assert.equal(result.data.entry.title, 'submit the lab form');
     assert.equal(result.data.entry.startTime, '17:00');
   });
+
+  it('should migrate accidental cwd planner data into the managed data root', function() {
+    const originalCwd = process.cwd();
+    const originalDataDir = process.env.OPENX_DATA_DIR;
+    const cwdDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openx-cwd-planner-'));
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openx-managed-planner-'));
+
+    try {
+      process.env.OPENX_DATA_DIR = dataDir;
+      process.chdir(cwdDir);
+      fs.writeFileSync(path.join(cwdDir, 'planner.json'), JSON.stringify([{
+        id: 'planner-legacy',
+        type: 'calendar',
+        title: 'legacy entry',
+        date: '2026-06-30',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString()
+      }], null, 2), 'utf8');
+
+      const planner = new PlannerController({
+        app: { migrateCwdPlanner: true }
+      });
+
+      assert.equal(fs.existsSync(path.join(cwdDir, 'planner.json')), false);
+      assert.equal(fs.existsSync(path.join(dataDir, 'planner.json')), true);
+      assert.equal(planner.listEntries().data.count, 1);
+    } finally {
+      process.chdir(originalCwd);
+      if (originalDataDir === undefined) {
+        delete process.env.OPENX_DATA_DIR;
+      } else {
+        process.env.OPENX_DATA_DIR = originalDataDir;
+      }
+      fs.rmSync(cwdDir, { recursive: true, force: true });
+      fs.rmSync(dataDir, { recursive: true, force: true });
+    }
+  });
 });

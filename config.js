@@ -12,7 +12,9 @@ const CONFIG = {
     dataDir: DATA_PATHS.root,
     dataPaths: DATA_PATHS,
     legacyDataDir: LEGACY_DATA_DIR,
-    migrateLegacyData: true
+    migrateLegacyData: true,
+    migrateCwdSchedules: true,
+    migrateCwdPlanner: true
   },
 
   voice: {

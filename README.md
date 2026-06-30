@@ -7,11 +7,14 @@ The product name is **OpenX**. The default configurable assistant display name r
 ## Current status
 
 - Flat production architecture; the previous directory-per-controller implementation has been removed.
-- NLP, NLU, parsing, validation, routing, NLE, verification, confirmation, responses, context, learning, and data management are connected in one command pipeline.
+- NLP, NLU, parsing, language relations, validation, routing, NLE, verification, confirmation, responses, context, learning, and data management are connected in one command pipeline.
 - `commands.md` is the authoritative language regression corpus and currently contains **2,102 commands**.
 - Every command in the corpus is classified in a sandbox test without performing real desktop actions.
 - Incomplete commands request clarification and do not execute.
 - Recognized operations without a connected controller are reported as unsupported; OpenX does not claim they ran.
+- Reminders, timers, alarms, daily recurrence, snooze, stopwatch controls, calendar, and daily timetable commands are routed through connected controllers and UI surfaces.
+- Calendar and timetable entries share the assistant planner window; reminders and alarms are reflected in the timetable/calendar view.
+- The desktop app includes a persistent timer/stopwatch widget, alert window, crash recovery, readable glass themes, and phone pairing/file-transfer support.
 - Chrome, YouTube, Discord, forms, and communication adapters are isolated under `plugins/`.
 
 ## Command pipeline
@@ -44,6 +47,7 @@ The main implementation files are:
 | Parser | `core/assistant/parser.js` | Input parsing and word-level command frames |
 | Entities | `core/assistant/entities.js` | Structured values, paths, apps, contacts, times, and targets |
 | Intents | `core/assistant/intents.js` | Intent definitions, patterns, permissions, and action mapping |
+| Language | `core/assistant/language.js` | Context-language and word-relation helpers used by NLU and learning |
 | Router | `core/assistant/router.js` | Multi-command planning, intent completion, routing, and safe fallback classification |
 | Validation | `core/automation/common/action-velidation.js` | Required-entity validation before execution |
 | NLE | `core/assistant/nle.js` | The assistant-to-automation execution boundary |
@@ -64,6 +68,7 @@ Connected controllers are implemented directly in `core/automation/`:
 - `browser.js`: URLs, searches, site searches, results, and browser tabs.
 - `media.js`: playback, search, pause/resume, track navigation, volume, fullscreen, repeat, shuffle, likes, subscriptions, and status.
 - `scheduler.js`: timers, alarms, and reminders.
+- `planner.js`: calendar and daily timetable entries, including assistant-created reminders and schedule references.
 - `communications.js`: direct-recipient WhatsApp messages, email drafts, and calls without an assistant address book.
 - `system.js`: CPU, memory, battery, disk, processes, calculations, date/time, system insights, and Bluetooth settings.
 - `windows.js`: minimize, maximize, close, lock, sleep, restart, shutdown, hibernate, and session operations.
@@ -140,9 +145,12 @@ The Electron application lives in `apps/desktop/`:
 - `preload.js`: narrow renderer API bridge.
 - `settings.js`: settings, profiles, themes, and modes.
 - `permissions.js`: permission levels, throttling, and confirmation requirements.
+- `phone-verification.js`: Windows identity check before phone pairing.
 - `voice/tts.js`: Windows SAPI text-to-speech output.
-- `renderer/chat/`: primary chat and settings interface.
+- `renderer/chat/`: primary chat, activity, settings, theme, and phone-management interface.
 - `renderer/alert/`: dedicated timer/reminder alert window.
+- `renderer/planner/`: glass-themed calendar and timetable window.
+- `renderer/timer-widget/`: always-visible timer and stopwatch mini widget.
 
 Renderer code cannot execute automation directly. Commands and confirmations cross validated IPC boundaries.
 
@@ -229,6 +237,8 @@ OpenX/
 └── report.md
 ```
 
+Current source additions include `apps/desktop/renderer/planner/`, `apps/desktop/renderer/timer-widget/`, `apps/desktop/phone-verification.js`, `core/phone/`, `core/automation/planner.js`, and `core/assistant/language.js`.
+
 ## Documentation
 
 - `report.md`: detailed current implementation report.
@@ -236,6 +246,19 @@ OpenX/
 - `docs/workflows/command-execution.md`: execution workflow.
 - `docs/plugins/development.md`: plugin authoring and restrictions.
 - `graphify-out/GRAPH_REPORT.md`: generated knowledge-graph analysis.
+
+## Latest assistant behavior
+
+Current verified reminder examples include:
+
+```text
+remind me to call mummy after 30 min
+remind me after 5 min to call mummy
+remind me to call daddy after 1hr
+remind me tommrow to wish charan on his birthday
+```
+
+The assistant parses these as reminders without asking for missing time. Date-only reminders such as `tomorrow` default to 9:00 AM local time when no exact time is supplied.
 
 ## License
 

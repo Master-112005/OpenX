@@ -1,9 +1,16 @@
 const fs = require('fs');
 const path = require('path');
 const { spawn } = require('child_process');
-const Logger = require('../assistant/Data').Logger;
-const IdGenerator = require('../assistant/Data').IdGenerator;
-const { EVENTS } = require('../assistant/Data');
+const {
+  Logger,
+  IdGenerator,
+  EVENTS,
+  buildDataPaths,
+  readJsonFile,
+  writeJsonAtomic
+} = require('../assistant/Data');
+
+const PRODUCT_NAME = 'OpenX';
 
 const REMINDER_PRESENTATIONS = Object.freeze({
   education: { symbol: '\u{1F393}', label: 'School & college' },
@@ -32,10 +39,16 @@ class SchedulerController {
   constructor(config) {
     this.logger = new Logger(config?.logging || { level: 'info' });
     this.eventBus = config?.eventBus || null;
-    this.schedulePath = path.join(config?.app?.dataDir || process.cwd(), 'schedules.json');
+    const dataPaths = config?.app?.dataPaths || buildDataPaths(config);
+    this.schedulePath = config?.app?.schedulesPath || dataPaths.schedulesPath;
+    this._migrateWorkingDirectorySchedules(config);
+    this._loadedSchedulesChanged = false;
     this.scheduledItems = this._loadScheduledItems();
     this.timers = new Map();
     this._cleanupLegacyWindowsTasks(config);
+    if (this._loadedSchedulesChanged) {
+      this._saveScheduledItems();
+    }
     this.scheduledItems.filter(item => item.status === 'scheduled').forEach(item => this._arm(item));
   }
 
@@ -47,7 +60,7 @@ class SchedulerController {
     const dueAt = new Date(Date.now() + (durationMinutes * 60 * 1000));
     return this._scheduleNotification({
       kind: 'Timer',
-      title: 'JARVIS Timer',
+      title: `${PRODUCT_NAME} Timer`,
       message: `Your ${durationMinutes} minute timer is done.`,
       dueAt,
       category: 'timer',
@@ -65,13 +78,13 @@ class SchedulerController {
       return { success: true, data: this._stopwatchData(existing) };
     }
 
-    const taskName = `JARVIS_Stopwatch_${IdGenerator.short()}`;
+    const taskName = this._scheduleTaskName('Stopwatch');
     const now = new Date().toISOString();
     const item = {
       id: taskName,
       taskName,
       kind: 'Stopwatch',
-      title: 'JARVIS Stopwatch',
+      title: `${PRODUCT_NAME} Stopwatch`,
       message: 'Stopwatch is running.',
       category: 'stopwatch',
       symbol: '\u23F1\uFE0F',
@@ -146,7 +159,7 @@ class SchedulerController {
     const recurrence = String(options.recurrence || '').trim();
     return this._scheduleNotification({
       kind: 'Alarm',
-      title: label ? `JARVIS Alarm: ${label}` : 'JARVIS Alarm',
+      title: label ? `${PRODUCT_NAME} Alarm: ${label}` : `${PRODUCT_NAME} Alarm`,
       message: label || `Alarm for ${timeExpression} is ringing.`,
       dueAt,
       category: 'alarm',
@@ -181,7 +194,7 @@ class SchedulerController {
     const presentation = REMINDER_PRESENTATIONS[category];
     return this._scheduleNotification({
       kind: 'Reminder',
-      title: `JARVIS ${presentation.label} Reminder`,
+      title: this._reminderTitle(presentation),
       message,
       dueAt,
       category,
@@ -427,7 +440,7 @@ class SchedulerController {
 
   _scheduleNotification({ kind, title, message, dueAt, category = null, symbol = null, metadata = {} }) {
     try {
-      const taskName = `JARVIS_${kind}_${IdGenerator.short()}`;
+      const taskName = this._scheduleTaskName(kind);
       const item = {
         id: taskName,
         taskName,
@@ -469,19 +482,51 @@ class SchedulerController {
   }
 
   _loadScheduledItems() {
+    const parsed = readJsonFile(this.schedulePath, [], {
+      createIfMissing: false,
+      validate: value => Array.isArray(value)
+    });
+    if (!Array.isArray(parsed)) return [];
+    return parsed.map(item => {
+      const normalized = this._normalizeStoredSchedule(item);
+      if (normalized && JSON.stringify(normalized) !== JSON.stringify(item)) {
+        this._loadedSchedulesChanged = true;
+      }
+      return normalized;
+    }).filter(Boolean);
+  }
+
+  _migrateWorkingDirectorySchedules(config) {
+    const shouldMigrate = config?.app?.migrateCwdSchedules === true || !config?.app?.dataDir;
+    if (!shouldMigrate) return;
+
+    const sourcePath = path.resolve(process.cwd(), 'schedules.json');
+    const targetPath = path.resolve(this.schedulePath);
+    if (sourcePath === targetPath || !fs.existsSync(sourcePath)) return;
+
     try {
-      if (!fs.existsSync(this.schedulePath)) return [];
-      const parsed = JSON.parse(fs.readFileSync(this.schedulePath, 'utf8'));
-      return Array.isArray(parsed) ? parsed : [];
+      const sourceItems = readJsonFile(sourcePath, [], {
+        createIfMissing: false,
+        validate: value => Array.isArray(value)
+      });
+      const targetItems = readJsonFile(targetPath, [], {
+        createIfMissing: false,
+        validate: value => Array.isArray(value)
+      });
+      const merged = [...targetItems, ...sourceItems]
+        .map(item => this._normalizeStoredSchedule(item))
+        .filter(Boolean)
+        .slice(-100);
+      writeJsonAtomic(targetPath, merged, { backup: true });
+      fs.unlinkSync(sourcePath);
     } catch (error) {
-      this.logger.warn('Could not load persisted schedules', error.message);
-      return [];
+      this.logger.warn('Could not migrate working-directory schedules', error.message);
     }
   }
 
   _cleanupLegacyWindowsTasks(config) {
     if (process.platform !== 'win32' || !config?.app?.dataDir || config.app.cleanupLegacySchedules === false) return;
-    const script = "Get-ScheduledTask -TaskName 'JARVIS_*' -ErrorAction SilentlyContinue | Unregister-ScheduledTask -Confirm:$false";
+    const script = "$patterns=@('JARVIS_*','OpenX_*'); foreach($pattern in $patterns){ Get-ScheduledTask -TaskName $pattern -ErrorAction SilentlyContinue | Unregister-ScheduledTask -Confirm:$false }";
     const child = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
       stdio: 'ignore',
       detached: true,
@@ -492,9 +537,36 @@ class SchedulerController {
   }
 
   _saveScheduledItems() {
-    const directory = path.dirname(this.schedulePath);
-    if (!fs.existsSync(directory)) fs.mkdirSync(directory, { recursive: true });
-    fs.writeFileSync(this.schedulePath, JSON.stringify(this.scheduledItems.slice(-100), null, 2), 'utf8');
+    this.scheduledItems = this.scheduledItems
+      .map(item => this._normalizeStoredSchedule(item))
+      .filter(Boolean);
+    writeJsonAtomic(this.schedulePath, this.scheduledItems.slice(-100), { backup: true });
+  }
+
+  _scheduleTaskName(kind) {
+    return `${PRODUCT_NAME}_${kind}_${IdGenerator.short()}`;
+  }
+
+  _reminderTitle(presentation = {}) {
+    const label = String(presentation.label || '').trim();
+    return !label || /^reminder$/i.test(label)
+      ? `${PRODUCT_NAME} Reminder`
+      : `${PRODUCT_NAME} ${label} Reminder`;
+  }
+
+  _normalizeStoredSchedule(item) {
+    if (!item || typeof item !== 'object') return null;
+    const next = { ...item };
+    if (next.id) next.id = String(next.id).replace(/^JARVIS_/i, `${PRODUCT_NAME}_`);
+    if (next.taskName) next.taskName = String(next.taskName).replace(/^JARVIS_/i, `${PRODUCT_NAME}_`);
+    if (!next.id && next.taskName) next.id = next.taskName;
+    if (!next.taskName && next.id) next.taskName = next.id;
+    if (next.title) {
+      next.title = String(next.title)
+        .replace(/^JARVIS\b/i, PRODUCT_NAME)
+        .replace(/^OpenX\s+Reminder\s+Reminder$/i, `${PRODUCT_NAME} Reminder`);
+    }
+    return next;
   }
 
   _arm(item) {

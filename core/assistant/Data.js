@@ -33,6 +33,8 @@ function buildDataPaths(config = {}) {
     root,
     settingsPath: path.join(root, 'settings.json'),
     learningPath: path.join(root, 'learning.json'),
+    schedulesPath: path.join(root, 'schedules.json'),
+    plannerPath: path.join(root, 'planner.json'),
     learningDir: path.join(root, 'learning'),
     learningAliasesPath: path.join(root, 'learning', 'aliases.json'),
     learningPreferencesPath: path.join(root, 'learning', 'preferences.json'),
