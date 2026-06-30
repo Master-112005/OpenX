@@ -516,12 +516,17 @@ function startVoiceCaptureStream(options = {}) {
 }
 
 function stopVoiceCaptureStream(reason = 'stop') {
+  if (!voiceCaptureShouldRun && !voiceCaptureStartOptions) {
+    mainLogger.info('Voice microphone capture stop skipped because capture is already stopped', { reason, runId: voiceCaptureRunId });
+    return false;
+  }
   voiceCaptureRunId += 1;
   voiceCaptureShouldRun = false;
   voiceCaptureStartOptions = null;
   voiceCaptureFrameReceiver = null;
   const sent = sendVoiceCaptureCommand('voiceCapture:stop', { reason, runId: voiceCaptureRunId });
   mainLogger.info('Voice microphone capture stop requested', { sent, reason, runId: voiceCaptureRunId });
+  return sent;
 }
 
 function resetVoiceCaptureFrameStats() {
@@ -593,14 +598,6 @@ function receiveVoiceCaptureFrame(payload = {}) {
 
   if (!voiceCaptureShouldRun || frame.runId !== voiceCaptureRunId) {
     voiceCaptureFrameStats.dropped += 1;
-    if (voiceCaptureFrameStats.dropped <= 3 || voiceCaptureFrameStats.dropped % 250 === 0) {
-      mainLogger.warn('Voice PCM frame dropped because capture run is stale', {
-        frameIndex: frame.frameIndex,
-        frameRunId: frame.runId,
-        activeRunId: voiceCaptureRunId,
-        dropped: voiceCaptureFrameStats.dropped
-      });
-    }
     return;
   }
 
@@ -1239,6 +1236,8 @@ function setupIPC() {
     createChatWindow();
   });
 
+  registerIpcHandler('voice:start', async () => startVoiceListeningFromShortcut('chat-voice-button'));
+
   registerIpcHandler('window:openSettings', async () => {
     createSettingsWindow();
   });
@@ -1541,12 +1540,29 @@ function unregisterChatShortcut() {
 }
 
 function getChatShortcuts() {
-  const primary = runtimeConfig?.chat?.activationShortcut || BASE_CONFIG.chat.activationShortcut || 'Alt+Space';
+  const primary = runtimeConfig?.chat?.activationShortcut || BASE_CONFIG.chat.activationShortcut || 'Control+Space';
   const fallbacks = runtimeConfig?.chat?.activationFallbackShortcuts
     || BASE_CONFIG.chat.activationFallbackShortcuts
-    || ['Control+Alt+Space', 'Control+Space'];
+    || [];
 
-  return [...new Set([primary, ...fallbacks].filter(Boolean))];
+  return [...new Set([primary, ...fallbacks].filter(Boolean))]
+    .filter(shortcut => shortcut !== 'Alt+Space');
+}
+
+function getVoiceShortcuts() {
+  const primary = runtimeConfig?.voice?.activationShortcut || BASE_CONFIG.voice?.activationShortcut || 'Alt+Space';
+  const fallbacks = runtimeConfig?.voice?.activationFallbackShortcuts
+    || BASE_CONFIG.voice?.activationFallbackShortcuts
+    || [];
+
+  return [...new Set([primary, ...fallbacks].filter(Boolean))]
+    .filter(shortcut => shortcut !== 'Control+Space');
+}
+
+function openChatFromShortcut(shortcut = '') {
+  createChatWindow();
+  mainLogger.info('Chat shortcut opened chat', { shortcut });
+  return { success: true };
 }
 
 function startVoiceListeningFromShortcut(shortcut = '') {
@@ -1560,6 +1576,10 @@ function startVoiceListeningFromShortcut(shortcut = '') {
       const cancelled = voiceSessionManager.cancelSession('Voice shortcut pressed while listening.');
       mainLogger.info('Voice shortcut cancelled active listening session', { shortcut });
       return { success: true, cancelled: true, state: cancelled.state };
+    }
+
+    if (chatWindow && !chatWindow.isDestroyed() && chatWindow.isVisible()) {
+      chatWindow.hide();
     }
 
     const started = voiceSessionManager.startSession({ id: `voice-shortcut-${Date.now()}` });
@@ -1586,6 +1606,25 @@ function registerChatShortcut() {
   unregisterChatShortcut();
 
   for (const shortcut of getChatShortcuts()) {
+    try {
+      const registered = globalShortcut.register(shortcut, () => {
+        mainLogger.info('Chat shortcut pressed', { shortcut });
+        openChatFromShortcut(shortcut);
+      });
+
+      if (!registered) {
+        mainLogger.error('Failed to register chat shortcut', { shortcut });
+        continue;
+      }
+
+      registeredChatShortcuts.push(shortcut);
+      mainLogger.info('Registered chat shortcut', { shortcut });
+    } catch (error) {
+      mainLogger.error('Invalid chat shortcut', { shortcut, error: error.message });
+    }
+  }
+
+  for (const shortcut of getVoiceShortcuts()) {
     try {
       const registered = globalShortcut.register(shortcut, () => {
         mainLogger.info('Voice shortcut pressed', { shortcut });

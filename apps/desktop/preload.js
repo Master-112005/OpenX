@@ -83,6 +83,9 @@ contextBridge.exposeInMainWorld('jarvis', {
   stopSpeaking: () =>
     ipcRenderer.invoke('tts:stop'),
 
+  startVoice: () =>
+    ipcRenderer.invoke('voice:start'),
+
   openChat: () =>
     ipcRenderer.invoke('window:openChat'),
 

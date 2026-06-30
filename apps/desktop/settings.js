@@ -293,6 +293,7 @@ class SettingsService {
         role: String(this.baseConfig?.assistant?.userProfile?.role || '').trim()
       },
       voice: {
+        activationShortcut: normalizeActivationShortcut(this.baseConfig?.voice?.activationShortcut, 'Alt+Space'),
         tts: {
           rate: clampNumber(this.baseConfig?.voice?.tts?.rate, -10, 10, 0),
           volume: clampNumber(this.baseConfig?.voice?.tts?.volume, 0, 100, 100),
@@ -309,7 +310,7 @@ class SettingsService {
         askForFeedback: this.baseConfig?.activeLearning?.askForFeedback !== false
       },
       chat: {
-        activationShortcut: normalizeActivationShortcut(this.baseConfig?.chat?.activationShortcut, 'Alt+Space'),
+        activationShortcut: normalizeActivationShortcut(this.baseConfig?.chat?.activationShortcut, 'Control+Space'),
         themeId: CHAT_THEMES[this.baseConfig?.chat?.activeTheme] ? this.baseConfig.chat.activeTheme : 'graphite',
         glassTint: clampNumber(this.baseConfig?.chat?.glassTint, 0, 100, 42),
         maxHistory: clampNumber(this.baseConfig?.chat?.maxHistory, 50, 2000, 500)
@@ -379,6 +380,8 @@ class SettingsService {
     runtimeConfig.assistant.userProfile = deepClone(settings.userProfile);
 
     runtimeConfig.voice = runtimeConfig.voice || {};
+    runtimeConfig.voice.activationShortcut = settings.voice.activationShortcut || 'Alt+Space';
+    runtimeConfig.voice.activationFallbackShortcuts = this.baseConfig?.voice?.activationFallbackShortcuts || [];
     runtimeConfig.voice.tts = runtimeConfig.voice.tts || {};
     runtimeConfig.voice.tts.rate = settings.voice.tts.rate;
     runtimeConfig.voice.tts.volume = settings.voice.tts.volume;
@@ -399,7 +402,7 @@ class SettingsService {
 
     runtimeConfig.chat = runtimeConfig.chat || {};
     runtimeConfig.chat.activationShortcut = settings.chat.activationShortcut;
-    runtimeConfig.chat.activationFallbackShortcuts = this.baseConfig?.chat?.activationFallbackShortcuts || [];
+    runtimeConfig.chat.activationFallbackShortcuts = [];
     runtimeConfig.chat.maxHistory = settings.chat.maxHistory;
     runtimeConfig.chat.activeTheme = settings.chat.themeId;
     runtimeConfig.chat.glassTint = settings.chat.glassTint;
@@ -434,6 +437,10 @@ class SettingsService {
         role: String(source.userProfile?.role || '').trim()
       },
       voice: {
+        activationShortcut: normalizeActivationShortcut(
+          source.voice?.activationShortcut,
+          this.defaults.voice.activationShortcut
+        ),
         tts: {
           rate: normalizeTtsRate(source.voice?.tts?.rate, this.defaults.voice.tts.rate),
           volume: clampNumber(source.voice?.tts?.volume, 0, 100, this.defaults.voice.tts.volume),
@@ -452,16 +459,18 @@ class SettingsService {
         askForFeedback: source.activeLearning?.askForFeedback !== false
       },
       chat: {
-        activationShortcut: normalizeActivationShortcut(
-          source.chat?.activationShortcut || source.voice?.activationShortcut,
-          this.defaults.chat.activationShortcut
-        ),
+        activationShortcut: this._normalizeChatActivationShortcut(source.chat?.activationShortcut),
         themeId,
         glassTint: clampNumber(source.chat?.glassTint, 0, 100, this.defaults.chat.glassTint),
         maxHistory: clampNumber(source.chat?.maxHistory, 50, 2000, this.defaults.chat.maxHistory)
       },
       modes: sanitizeModes(source.modes)
     };
+  }
+
+  _normalizeChatActivationShortcut(shortcut) {
+    const normalized = normalizeActivationShortcut(shortcut, this.defaults.chat.activationShortcut);
+    return normalized === 'Alt+Space' ? 'Control+Space' : normalized;
   }
 }
 

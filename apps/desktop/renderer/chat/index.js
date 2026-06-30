@@ -3,6 +3,7 @@ const inputBox = document.getElementById('input-box');
 const sendBtn = document.getElementById('send-btn');
 const closeBtn = document.getElementById('close-btn');
 const settingsBtn = document.getElementById('settings-btn');
+const voiceStartBtn = document.getElementById('voice-start-btn');
 const assistantMuteBtn = document.getElementById('assistant-mute-btn');
 const settingsOverlay = document.getElementById('settings-overlay');
 const settingsCloseBtn = document.getElementById('settings-close-btn');
@@ -768,6 +769,20 @@ async function toggleAssistantMute() {
     isAssistantMuted ? 'Spoken replies are off. Other app audio is unchanged.' : 'Spoken assistant replies are enabled.',
     'info'
   );
+}
+
+async function startVoiceFromChat() {
+  if (!window.jarvis?.startVoice) return;
+  voiceStartBtn.disabled = true;
+  voiceStartBtn.classList.add('active');
+  try {
+    await window.jarvis.startVoice();
+  } catch (error) {
+    addMessage(error?.message || 'Voice could not start.', 'system', `${getAssistantDisplayName()} - voice`);
+  } finally {
+    voiceStartBtn.disabled = false;
+    voiceStartBtn.classList.remove('active');
+  }
 }
 
 async function sendCommand(text) {
@@ -1733,6 +1748,7 @@ quickBtns.forEach(button => {
 
 closeBtn.addEventListener('click', () => window.close());
 settingsBtn.addEventListener('click', openSettingsPanel);
+voiceStartBtn.addEventListener('click', startVoiceFromChat);
 assistantMuteBtn.addEventListener('click', toggleAssistantMute);
 settingsCloseBtn.addEventListener('click', closeSettingsPanel);
 settingsNavButtons.forEach(button => {
@@ -1796,7 +1812,7 @@ async function initialize() {
     settingsSnapshot = {
       settings: {
         assistant: { displayName: 'Jaanu', title: 'Desktop Assistant', honorific: 'sir' },
-        chat: { activationShortcut: 'Alt+Space', themeId: 'graphite', glassTint: 42, maxHistory: 500 },
+        chat: { activationShortcut: 'Control+Space', themeId: 'graphite', glassTint: 42, maxHistory: 500 },
         system: { permissionLevel: 'medium' },
         user: { profile: {} },
         modes: []

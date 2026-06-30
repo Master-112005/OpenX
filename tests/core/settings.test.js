@@ -24,6 +24,7 @@ describe('Settings Service', function() {
         userProfile: {}
       },
       voice: {
+        activationShortcut: 'Alt+Space',
         tts: {
           rate: 2,
           volume: 100
@@ -33,7 +34,7 @@ describe('Settings Service', function() {
         volumeStep: 5
       },
       chat: {
-        activationShortcut: 'Alt+Space',
+        activationShortcut: 'Control+Space',
         activeTheme: 'graphite',
         glassTint: 42,
         maxHistory: 500
@@ -51,6 +52,8 @@ describe('Settings Service', function() {
     const snapshot = service.getSnapshot();
 
     assert.equal(snapshot.settings.assistant.displayName, 'JARVIS');
+    assert.equal(snapshot.settings.voice.activationShortcut, 'Alt+Space');
+    assert.equal(snapshot.settings.chat.activationShortcut, 'Control+Space');
     assert.equal(snapshot.settings.chat.themeId, 'graphite');
     assert.equal(snapshot.settings.chat.glassTint, 42);
     assert.equal(snapshot.dataRoot, tempDir);
@@ -182,7 +185,7 @@ describe('Settings Service', function() {
       }
     });
 
-    assert.equal(saved.chat.activationShortcut, 'Alt+Space');
+    assert.equal(saved.chat.activationShortcut, 'Control+Space');
   });
 
   it('should migrate the old slow default TTS rate to the faster default', function() {

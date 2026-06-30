@@ -202,6 +202,7 @@ const IPC_VALIDATORS = Object.freeze({
   'assistant:status': validateEmpty,
   'tts:speak': validateSpeech,
   'tts:stop': validateEmpty,
+  'voice:start': validateEmpty,
   'window:openChat': validateEmpty,
   'window:openSettings': validateEmpty,
   'window:openPlanner': validatePlannerView,

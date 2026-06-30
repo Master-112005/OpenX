@@ -72,8 +72,10 @@ class VoiceSessionManager {
       finalizationRequests: 0,
       audioFramesWhileBusy: 0,
       staleAudioFrames: 0,
-      capturePauses: 0,
-      captureResumes: 0,
+      recognitionConsumerPauses: 0,
+      recognitionConsumerResumes: 0,
+      captureBufferFlushes: 0,
+      captureBufferFlushedFrames: 0,
       listeningCycles: 0,
       lastPartialTranscript: '',
       lastLogAt: 0
@@ -400,7 +402,7 @@ class VoiceSessionManager {
   beginProcessing() {
     this._assertSession();
     this._transitionTo(VoiceStateMachine.STATES.PROCESSING, { reason: 'begin-processing' });
-    this._pauseAudioCaptureForRecognitionTurn('begin-processing');
+    this._pauseRecognitionConsumerForTurn('begin-processing');
     this._scheduleLifecycleTimeout('processing', this.timeouts.processingMs);
     return this._result();
   }
@@ -437,7 +439,7 @@ class VoiceSessionManager {
     }
 
     let audioProcessingReset = false;
-    let audioCaptureResumed = false;
+    let captureBufferFlushed = false;
     let sttRestarted = false;
     this.runtimePipelineStats.listeningCycles += 1;
     this.runtimePipelineStats.lastPartialTranscript = '';
@@ -452,7 +454,7 @@ class VoiceSessionManager {
     }
 
     try {
-      audioCaptureResumed = this._resumeAudioCaptureForRecognitionTurn(reason);
+      captureBufferFlushed = this._prepareContinuousCaptureForRecognitionTurn(reason);
       const sttEngine = this._getSTTEngine();
       if (!sttEngine.isRunning || !sttEngine.isRunning()) {
         this.startSpeechToText();
@@ -470,7 +472,7 @@ class VoiceSessionManager {
       listeningCycles: this.runtimePipelineStats.listeningCycles,
       sttRestarted,
       audioProcessingReset,
-      audioCaptureResumed
+      captureBufferFlushed
     });
     return {
       success: true,
@@ -479,7 +481,7 @@ class VoiceSessionManager {
       session: this.getSession(),
       sttRestarted,
       audioProcessingReset,
-      audioCaptureResumed
+      captureBufferFlushed
     };
   }
 
@@ -1306,71 +1308,65 @@ class VoiceSessionManager {
   }
 
   /**
-   * Pause microphone capture during assistant processing/execution.
+   * Pause only the recognition consumer while microphone capture remains alive.
    * @param {string} reason Pause reason.
    * @returns {boolean}
    * @private
    */
-  _pauseAudioCaptureForRecognitionTurn(reason = 'recognition-turn-processing') {
-    const audioCapture = this.resources.audioCapture;
-    if (!audioCapture || typeof audioCapture.getStatus !== 'function' || typeof audioCapture.pause !== 'function') {
-      return false;
-    }
-    try {
-      const status = audioCapture.getStatus();
-      if (!status.capturing) return false;
-      audioCapture.pause();
-      this.runtimePipelineStats.capturePauses += 1;
-      this._log('Audio Capture Paused For Turn', {
-        reason,
-        recognitionCycleId: this.recognitionCycle.id
-      });
-      return true;
-    } catch (error) {
-      this._log('Audio Capture Pause Skipped', {
-        reason,
-        error: error.message
-      });
-      return false;
-    }
+  _pauseRecognitionConsumerForTurn(reason = 'recognition-turn-processing') {
+    this.runtimePipelineStats.recognitionConsumerPauses += 1;
+    this._log('Recognition Consumer Paused For Turn', {
+      reason,
+      recognitionCycleId: this.recognitionCycle.id
+    });
+    return true;
   }
 
   /**
-   * Resume microphone capture for a fresh recognition cycle.
+   * Prepare the continuously running microphone pipeline for a fresh recognition cycle.
    * @param {string} reason Resume reason.
    * @returns {boolean}
    * @private
    */
-  _resumeAudioCaptureForRecognitionTurn(reason = 'recognition-turn-resume') {
+  _prepareContinuousCaptureForRecognitionTurn(reason = 'recognition-turn-resume') {
+    this.runtimePipelineStats.recognitionConsumerResumes += 1;
+    const flushed = this._flushAudioCaptureBuffer(reason);
+    this._log('Recognition Consumer Resumed For Turn', {
+      reason,
+      recognitionCycleId: this.recognitionCycle.id,
+      captureBufferFlushed: flushed
+    });
+    return flushed;
+  }
+
+  /**
+   * Flush queued microphone frames that arrived while recognition was paused.
+   * @param {string} reason Flush reason.
+   * @returns {boolean}
+   * @private
+   */
+  _flushAudioCaptureBuffer(reason = 'recognition-cycle-boundary') {
     const audioCapture = this.resources.audioCapture;
-    if (!audioCapture || typeof audioCapture.getStatus !== 'function') return false;
+    if (!audioCapture || typeof audioCapture.getBuffer !== 'function') return false;
     try {
-      const status = audioCapture.getStatus();
-      if (status.paused && typeof audioCapture.resume === 'function') {
-        audioCapture.resume();
-        this.runtimePipelineStats.captureResumes += 1;
-        this._log('Audio Capture Resumed For Turn', {
-          reason,
-          recognitionCycleId: this.recognitionCycle.id
-        });
-        return true;
-      }
-      if (!status.capturing && status.available && typeof audioCapture.start === 'function') {
-        audioCapture.start();
-        this.runtimePipelineStats.captureResumes += 1;
-        this._log('Audio Capture Restarted For Turn', {
-          reason,
-          recognitionCycleId: this.recognitionCycle.id
-        });
-        return true;
-      }
+      const buffer = audioCapture.getBuffer();
+      if (!buffer || typeof buffer.flush !== 'function') return false;
+      const result = buffer.flush();
+      this.runtimePipelineStats.captureBufferFlushes += 1;
+      this.runtimePipelineStats.captureBufferFlushedFrames += Number(result?.droppedFrames) || 0;
+      this._log('Audio Capture Buffer Flushed For Recognition Boundary', {
+        reason,
+        recognitionCycleId: this.recognitionCycle.id,
+        droppedFrames: Number(result?.droppedFrames) || 0
+      });
+      return true;
     } catch (error) {
-      this._log('Audio Capture Resume Skipped', {
+      this._log('Audio Capture Buffer Flush Skipped', {
         reason,
         error: error.message
       });
+      return false;
     }
-    return false;
   }
 
   /**
@@ -1507,8 +1503,10 @@ class VoiceSessionManager {
       finalizationRequests: 0,
       audioFramesWhileBusy: 0,
       staleAudioFrames: 0,
-      capturePauses: 0,
-      captureResumes: 0,
+      recognitionConsumerPauses: 0,
+      recognitionConsumerResumes: 0,
+      captureBufferFlushes: 0,
+      captureBufferFlushedFrames: 0,
       listeningCycles: 0,
       lastPartialTranscript: '',
       lastLogAt: 0

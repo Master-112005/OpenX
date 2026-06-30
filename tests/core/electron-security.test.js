@@ -111,7 +111,7 @@ describe('Electron Security Boundary', function() {
 
   it('should provide a validator for every registered IPC channel', function() {
     const expectedChannels = [
-      'command:process', 'command:confirm', 'assistant:status', 'tts:speak', 'tts:stop',
+      'command:process', 'command:confirm', 'assistant:status', 'tts:speak', 'tts:stop', 'voice:start',
       'window:openChat', 'window:openSettings', 'window:openPlanner', 'window:closePlanner',
       'config:get', 'settings:get',
       'phone:pairingQR:create', 'phone:server:status', 'phone:devices:list',

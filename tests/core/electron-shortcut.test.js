@@ -12,17 +12,23 @@ describe('Electron Chat Shortcut', function() {
   const captureScript = fs.readFileSync(captureScriptPath, 'utf8');
   const preloadScript = fs.readFileSync(preloadPath, 'utf8');
 
-  it('should route the hidden activation shortcut to voice listening', function() {
+  it('should route Alt+Space to voice listening and Ctrl+Space to chat', function() {
     assert.match(script, /function getChatShortcuts\(\)/);
-    assert.match(script, /runtimeConfig\?\.chat\?\.activationShortcut/);
+    assert.match(script, /function getVoiceShortcuts\(\)/);
+    assert.match(script, /Control\+Space/);
+    assert.match(script, /Alt\+Space/);
+    assert.match(script, /function openChatFromShortcut\(shortcut = ''\)/);
     assert.match(script, /function startVoiceListeningFromShortcut\(shortcut = ''\)/);
     assert.match(script, /function createDesktopVoiceResources\(\)/);
     assert.match(script, /globalShortcut\.register\(shortcut/);
+    assert.match(script, /openChatFromShortcut\(shortcut\)/);
     assert.match(script, /startVoiceListeningFromShortcut\(shortcut\)/);
+    assert.match(script, /chatWindow\.hide\(\)/);
     assert.match(script, /voiceSessionManager\.startSession/);
     assert.match(script, /voiceSessionManager\.startAudioCapture\(\)/);
     assert.match(script, /voiceSessionManager\.startSpeechToText\(\)/);
     assert.match(script, /Registered voice shortcut/);
+    assert.match(script, /Registered chat shortcut/);
     assert.doesNotMatch(script, /global chat shortcuts are disabled/i);
   });
 
@@ -56,7 +62,7 @@ describe('Electron Chat Shortcut', function() {
     assert.match(script, /voiceCaptureFrameReceiver\(frame\)/);
     assert.match(script, /let voiceCaptureRunId = 0/);
     assert.match(script, /frame\.runId !== voiceCaptureRunId/);
-    assert.match(script, /voiceCaptureFrameStats\.dropped % 250 === 0/);
+    assert.doesNotMatch(script, /Voice PCM frame dropped because capture run is stale/);
     assert.match(preloadScript, /contextBridge\.exposeInMainWorld\('openxVoiceCapture'/);
     assert.match(preloadScript, /sendFrame: \(frame\) =>/);
     assert.match(captureHtml, /Content-Security-Policy/);
@@ -76,6 +82,21 @@ describe('Electron Chat Shortcut', function() {
   it('should open chat from tray double click instead of the voice hotkey', function() {
     assert.match(script, /tray\.setIgnoreDoubleClickEvents\(false\)/);
     assert.match(script, /tray\.on\('double-click', \(\) => createChatWindow\(\)\)/);
+  });
+
+  it('should expose a chat header voice launcher without changing command routing', function() {
+    const chatHtmlPath = path.join(__dirname, '..', '..', 'apps', 'desktop', 'renderer', 'chat', 'index.html');
+    const chatScriptPath = path.join(__dirname, '..', '..', 'apps', 'desktop', 'renderer', 'chat', 'index.js');
+    const chatHtml = fs.readFileSync(chatHtmlPath, 'utf8');
+    const chatScript = fs.readFileSync(chatScriptPath, 'utf8');
+
+    assert.match(preloadScript, /startVoice: \(\) =>\s*ipcRenderer\.invoke\('voice:start'\)/);
+    assert.match(script, /registerIpcHandler\('voice:start'/);
+    assert.match(chatHtml, /id="voice-start-btn"/);
+    assert.match(chatScript, /const voiceStartBtn = document\.getElementById\('voice-start-btn'\)/);
+    assert.match(chatScript, /window\.jarvis\.startVoice\(\)/);
+    assert.match(chatScript, /voiceStartBtn\.addEventListener\('click', startVoiceFromChat\)/);
+    assert.match(chatScript, /processCommand\(text, 'chat'\)/);
   });
 
   it('should not show stale stopwatch widgets during startup restore', function() {

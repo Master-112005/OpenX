@@ -1357,32 +1357,36 @@ describe('Voice Subsystem Architecture', function() {
     assert.equal(manager.getMetrics().runtimePipeline.staleAudioFrames, 1);
   });
 
-  it('should pause capture during assistant execution and resume with the next cycle', function() {
+  it('should keep capture alive and flush queued frames between recognition cycles', function() {
     const { VoiceSessionManager, VoiceStateMachine } = require('../../apps/desktop/voice');
-    let captureState = 'CAPTURING';
     let sttRunning = true;
-    let pauses = 0;
-    let resumes = 0;
+    let pauseCalls = 0;
+    let resumeCalls = 0;
+    let flushes = 0;
     let sttStarts = 0;
     const manager = new VoiceSessionManager({
       resources: {
         audioCapture: {
           on() {},
           getStatus: () => ({
-            capturing: captureState === 'CAPTURING',
-            paused: captureState === 'PAUSED',
+            capturing: true,
+            paused: false,
             available: true
           }),
           pause: () => {
-            captureState = 'PAUSED';
-            pauses += 1;
+            pauseCalls += 1;
             return { paused: true };
           },
           resume: () => {
-            captureState = 'CAPTURING';
-            resumes += 1;
+            resumeCalls += 1;
             return { resumed: true };
           },
+          getBuffer: () => ({
+            flush: () => {
+              flushes += 1;
+              return { flushed: true, droppedFrames: 12 };
+            }
+          }),
           close: () => ({ closed: true })
         },
         audioProcessor: {
@@ -1416,11 +1420,14 @@ describe('Voice Subsystem Architecture', function() {
     manager.resumeListeningCycle('assistant-complete');
 
     assert.equal(manager.getCurrentState(), VoiceStateMachine.STATES.LISTENING);
-    assert.equal(pauses, 1);
-    assert.equal(resumes, 1);
+    assert.equal(pauseCalls, 0);
+    assert.equal(resumeCalls, 0);
+    assert.equal(flushes, 1);
     assert.equal(sttStarts, 1);
-    assert.equal(manager.getMetrics().runtimePipeline.capturePauses, 1);
-    assert.equal(manager.getMetrics().runtimePipeline.captureResumes, 1);
+    assert.equal(manager.getMetrics().runtimePipeline.recognitionConsumerPauses, 1);
+    assert.equal(manager.getMetrics().runtimePipeline.recognitionConsumerResumes, 1);
+    assert.equal(manager.getMetrics().runtimePipeline.captureBufferFlushes, 1);
+    assert.equal(manager.getMetrics().runtimePipeline.captureBufferFlushedFrames, 12);
   });
 
   it('should emit exactly one final transcript per recognition cycle', function() {

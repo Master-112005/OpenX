@@ -18,6 +18,8 @@ const CONFIG = {
   },
 
   voice: {
+    activationShortcut: 'Alt+Space',
+    activationFallbackShortcuts: [],
     tts: {
       rate: 2,
       volume: 100,
@@ -62,8 +64,8 @@ const CONFIG = {
   },
 
   chat: {
-    activationShortcut: 'Alt+Space',
-    activationFallbackShortcuts: ['Control+Alt+Space', 'Control+Space'],
+    activationShortcut: 'Control+Space',
+    activationFallbackShortcuts: [],
     maxHistory: 500,
     maxDisplayMessages: 100,
     fontSize: 14,
