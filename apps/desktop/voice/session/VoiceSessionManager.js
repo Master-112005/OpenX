@@ -76,6 +76,13 @@ class VoiceSessionManager {
       recognitionConsumerResumes: 0,
       captureBufferFlushes: 0,
       captureBufferFlushedFrames: 0,
+      assistantTurns: 0,
+      userTurns: 0,
+      ttsStarts: 0,
+      ttsCompletions: 0,
+      ttsCancellations: 0,
+      ttsFailures: 0,
+      duplicateConversationResumes: 0,
       listeningCycles: 0,
       lastPartialTranscript: '',
       lastLogAt: 0
@@ -187,6 +194,7 @@ class VoiceSessionManager {
   beginListening() {
     this._assertSession();
     this._transitionTo(VoiceStateMachine.STATES.LISTENING, { reason: 'begin-listening' });
+    this.runtimePipelineStats.userTurns += 1;
     this.currentSession.start(this.clock());
     this._scheduleLifecycleTimeout('listening', this.timeouts.listeningMs);
     this._publish(SESSION_EVENTS.VOICE_SESSION_STARTED, this._buildEventPayload());
@@ -419,6 +427,42 @@ class VoiceSessionManager {
   }
 
   /**
+   * Move the current session into assistant-speaking mode.
+   * @param {string} reason Speaking reason.
+   * @returns {{success: boolean, state: string, session: object}}
+   */
+  beginSpeaking(reason = 'assistant-speaking') {
+    this._assertSession();
+    this.runtimePipelineStats.assistantTurns += 1;
+    this.runtimePipelineStats.ttsStarts += 1;
+    this._transitionTo(VoiceStateMachine.STATES.SPEAKING, { reason });
+    this._log('Conversation Turn Transferred', {
+      owner: 'assistant',
+      reason,
+      assistantTurns: this.runtimePipelineStats.assistantTurns
+    });
+    return this._result();
+  }
+
+  /**
+   * Record completion of the assistant speaking turn.
+   * @param {'completed'|'cancelled'|'failed'} outcome TTS outcome.
+   * @param {object} metadata TTS metadata.
+   * @returns {{recorded: boolean, outcome: string}}
+   */
+  completeSpeakingTurn(outcome = 'completed', metadata = {}) {
+    const normalizedOutcome = ['completed', 'cancelled', 'failed'].includes(outcome) ? outcome : 'completed';
+    if (normalizedOutcome === 'completed') this.runtimePipelineStats.ttsCompletions += 1;
+    if (normalizedOutcome === 'cancelled') this.runtimePipelineStats.ttsCancellations += 1;
+    if (normalizedOutcome === 'failed') this.runtimePipelineStats.ttsFailures += 1;
+    this._log('Assistant Speaking Turn Completed', {
+      outcome: normalizedOutcome,
+      ...metadata
+    });
+    return { recorded: true, outcome: normalizedOutcome };
+  }
+
+  /**
    * Resume the same Voice session for another utterance after one assistant turn.
    * @param {string} reason Resume reason for logs and state metadata.
    * @returns {{success: boolean, resumed: boolean, state: string, session: object|null, sttRestarted?: boolean, audioProcessingReset?: boolean}}
@@ -427,7 +471,7 @@ class VoiceSessionManager {
     this._assertSession();
     const states = VoiceStateMachine.STATES;
     this._clearSessionRecognitionTurn();
-    if ([states.PROCESSING, states.EXECUTING].includes(this.currentState)) {
+    if ([states.PROCESSING, states.EXECUTING, states.SPEAKING].includes(this.currentState)) {
       this._transitionTo(states.LISTENING, { reason });
     } else if (this.currentState !== states.LISTENING) {
       return {
@@ -442,6 +486,7 @@ class VoiceSessionManager {
     let captureBufferFlushed = false;
     let sttRestarted = false;
     this.runtimePipelineStats.listeningCycles += 1;
+    this.runtimePipelineStats.userTurns += 1;
     this.runtimePipelineStats.lastPartialTranscript = '';
 
     try {
@@ -483,6 +528,20 @@ class VoiceSessionManager {
       audioProcessingReset,
       captureBufferFlushed
     };
+  }
+
+  /**
+   * Record a suppressed duplicate turn resume attempt.
+   * @param {string} reason Suppression reason.
+   * @returns {{recorded: boolean}}
+   */
+  recordDuplicateConversationResume(reason = 'duplicate-resume') {
+    this.runtimePipelineStats.duplicateConversationResumes += 1;
+    this._log('Duplicate Conversation Resume Suppressed', {
+      reason,
+      duplicateConversationResumes: this.runtimePipelineStats.duplicateConversationResumes
+    });
+    return { recorded: true };
   }
 
   /**
@@ -707,6 +766,7 @@ class VoiceSessionManager {
       [states.READY]: ['initialization'],
       [states.PROCESSING]: ['listening'],
       [states.EXECUTING]: ['processing'],
+      [states.SPEAKING]: ['execution'],
       [states.FINISHED]: ['execution'],
       [states.CANCELLED]: ['listening', 'processing', 'execution'],
       [states.ERROR]: ['initialization', 'listening', 'processing', 'execution'],
@@ -1507,6 +1567,13 @@ class VoiceSessionManager {
       recognitionConsumerResumes: 0,
       captureBufferFlushes: 0,
       captureBufferFlushedFrames: 0,
+      assistantTurns: 0,
+      userTurns: 0,
+      ttsStarts: 0,
+      ttsCompletions: 0,
+      ttsCancellations: 0,
+      ttsFailures: 0,
+      duplicateConversationResumes: 0,
       listeningCycles: 0,
       lastPartialTranscript: '',
       lastLogAt: 0

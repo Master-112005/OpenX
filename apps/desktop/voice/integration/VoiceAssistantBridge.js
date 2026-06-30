@@ -18,7 +18,7 @@ const { BridgeAttachmentFailedError } = require('./VoiceIntegrationErrors');
 class VoiceAssistantBridge extends EventEmitter {
   /**
    * Create bridge.
-   * @param {{manager?: object, adapter?: AssistantInputAdapter, assistant?: object, coordinator?: VoiceExecutionCoordinator, configuration?: object|VoiceIntegrationConfiguration, logger?: object}} dependencies Bridge dependencies.
+   * @param {{manager?: object, adapter?: AssistantInputAdapter, assistant?: object, coordinator?: VoiceExecutionCoordinator, textToSpeech?: object, configuration?: object|VoiceIntegrationConfiguration, logger?: object}} dependencies Bridge dependencies.
    */
   constructor(dependencies = {}) {
     super();
@@ -32,6 +32,7 @@ class VoiceAssistantBridge extends EventEmitter {
     });
     this.coordinator = dependencies.coordinator || new VoiceExecutionCoordinator({
       manager: dependencies.manager,
+      textToSpeech: dependencies.textToSpeech,
       configuration: this.configuration,
       logger: dependencies.logger
     });
@@ -59,7 +60,11 @@ class VoiceAssistantBridge extends EventEmitter {
     }
     this.detach();
     this.manager = manager;
-    this.coordinator.manager = manager;
+    if (this.coordinator && typeof this.coordinator.attachToSessionManager === 'function') {
+      this.coordinator.attachToSessionManager(manager);
+    } else {
+      this.coordinator.manager = manager;
+    }
     const listener = event => {
       this.handleNormalizedTranscript(event).catch(error => {
         this.metrics.failures += 1;
@@ -83,6 +88,9 @@ class VoiceAssistantBridge extends EventEmitter {
       }
     }
     this.subscriptions = [];
+    if (this.coordinator && typeof this.coordinator.detachFromSessionManager === 'function') {
+      this.coordinator.detachFromSessionManager();
+    }
     this.manager = null;
     return this;
   }
@@ -106,11 +114,11 @@ class VoiceAssistantBridge extends EventEmitter {
     try {
       const result = await this.adapter.handle(normalizedTranscript);
       this.metrics.commandsDispatched += 1;
-      this.coordinator.finishExecution(result);
+      await this.coordinator.finishExecution(result);
       this.emit(EVENTS.VOICE_EXECUTION_FINISHED, Object.freeze({ result }));
       return result;
     } catch (error) {
-      this.coordinator.finishExecution({
+      await this.coordinator.finishExecution({
         success: false,
         error: this._normalizeError(error)
       });

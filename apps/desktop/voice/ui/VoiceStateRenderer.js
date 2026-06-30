@@ -53,6 +53,14 @@ const STATE_VIEW_MODELS = Object.freeze({
     description: 'The assistant is executing the command.',
     animation: 'executing-transition'
   }),
+  [STATES.SPEAKING]: Object.freeze({
+    visible: true,
+    icon: 'voice',
+    title: 'Speaking',
+    statusText: 'Speaking...',
+    description: 'The assistant is speaking and recognition is paused.',
+    animation: 'speaking-pulse'
+  }),
   [STATES.FINISHED]: Object.freeze({
     visible: true,
     icon: 'check',

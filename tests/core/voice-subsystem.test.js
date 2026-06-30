@@ -200,6 +200,8 @@ describe('Voice Subsystem Architecture', function() {
     assert.equal(stateMachine.canTransition(states.LISTENING, states.PROCESSING).allowed, true);
     assert.equal(stateMachine.canTransition(states.PROCESSING, states.EXECUTING).allowed, true);
     assert.equal(stateMachine.canTransition(states.PROCESSING, states.LISTENING).allowed, true);
+    assert.equal(stateMachine.canTransition(states.EXECUTING, states.SPEAKING).allowed, true);
+    assert.equal(stateMachine.canTransition(states.SPEAKING, states.LISTENING).allowed, true);
     assert.equal(stateMachine.canTransition(states.EXECUTING, states.LISTENING).allowed, true);
     assert.equal(stateMachine.canTransition(states.EXECUTING, states.FINISHED).allowed, true);
     assert.equal(stateMachine.canTransition(states.FINISHED, states.CLOSING).allowed, true);
@@ -1153,6 +1155,7 @@ describe('Voice Subsystem Architecture', function() {
     assert.equal(renderer.render('LISTENING', { partialTranscript: 'Open Visual' }).icon, 'microphone');
     assert.equal(renderer.render('PROCESSING', { finalTranscript: 'Open VS Code' }).title, 'Thinking');
     assert.equal(renderer.render('EXECUTING', { commandText: 'Open VS Code' }).statusText, 'Executing command...');
+    assert.equal(renderer.render('SPEAKING').statusText, 'Speaking...');
     assert.equal(renderer.render('FINISHED').animation, 'completion');
     assert.equal(renderer.render('ERROR', { error: { message: 'Microphone unavailable.' } }).statusText, 'Microphone unavailable.');
     assert.equal(accessibility.apply(renderer.render('LISTENING')).live, 'polite');
@@ -1698,6 +1701,155 @@ describe('Voice Subsystem Architecture', function() {
     assert.equal(sttRunning, true);
     assert.equal(sttStarts, 2);
     assert.equal(audioResets, 1);
+    bridge.detach();
+  });
+
+  it('should wait for voice TTS completion before resuming recognition', async function() {
+    const { VoiceAssistantBridge, VoiceSessionManager, VoiceStateMachine, TranscriptResult } = require('../../apps/desktop/voice');
+    let sttRunning = false;
+    let sttStarts = 0;
+    let audioResets = 0;
+    let resolveTts;
+    let spokenText = '';
+    const sttEngine = {
+      on() {},
+      initialize: () => ({ initialized: true }),
+      start: () => {
+        sttRunning = true;
+        sttStarts += 1;
+        return { started: true, state: 'DECODING' };
+      },
+      isRunning: () => sttRunning,
+      cancel: () => {
+        sttRunning = false;
+        return { cancelled: true, state: 'STOPPED' };
+      },
+      getStatus: () => ({ running: sttRunning })
+    };
+    const manager = new VoiceSessionManager({
+      resources: {
+        sttEngine,
+        audioProcessor: {
+          on() {},
+          reset: () => {
+            audioResets += 1;
+            return { reset: true };
+          },
+          getStatus: () => ({ initialized: true })
+        }
+      },
+      setTimeout: () => ({ unref() {} }),
+      clearTimeout: () => {}
+    });
+    const bridge = new VoiceAssistantBridge({
+      manager,
+      assistant: {
+        processCommand: async () => ({ success: true, response: 'The time is 8 PM.' })
+      },
+      textToSpeech: {
+        speakAsync: text => {
+          spokenText = text;
+          return new Promise(resolve => {
+            resolveTts = resolve;
+          });
+        },
+        stop: () => {}
+      }
+    });
+
+    manager.startSession({ id: 'tts-synchronized-session' });
+    manager.startSpeechToText();
+    sttRunning = false;
+    manager.beginProcessing();
+    manager.processTranscript(new TranscriptResult({
+      finalTranscript: 'what is the time',
+      confidence: 0.9,
+      partial: false
+    }));
+    await new Promise(resolve => setImmediate(resolve));
+
+    assert.equal(spokenText, 'The time is 8 PM.');
+    assert.equal(manager.getCurrentState(), VoiceStateMachine.STATES.SPEAKING);
+    assert.equal(sttRunning, false);
+    assert.equal(sttStarts, 1);
+
+    resolveTts({ outcome: 'completed' });
+    await new Promise(resolve => setImmediate(resolve));
+
+    assert.equal(manager.getCurrentState(), VoiceStateMachine.STATES.LISTENING);
+    assert.equal(sttRunning, true);
+    assert.equal(sttStarts, 2);
+    assert.equal(audioResets, 1);
+    assert.equal(manager.getMetrics().runtimePipeline.ttsCompletions, 1);
+    assert.equal(manager.getMetrics().runtimePipeline.listeningCycles, 1);
+    bridge.detach();
+  });
+
+  it('should stop TTS and not resume listening when a speaking voice session is cancelled', async function() {
+    const { VoiceAssistantBridge, VoiceSessionManager, VoiceStateMachine, TranscriptResult } = require('../../apps/desktop/voice');
+    let sttRunning = false;
+    let stopped = false;
+    let resolveTts;
+    const manager = new VoiceSessionManager({
+      resources: {
+        sttEngine: {
+          on() {},
+          initialize: () => ({ initialized: true }),
+          start: () => {
+            sttRunning = true;
+            return { started: true, state: 'DECODING' };
+          },
+          isRunning: () => sttRunning,
+          cancel: () => {
+            sttRunning = false;
+            return { cancelled: true, state: 'STOPPED' };
+          },
+          getStatus: () => ({ running: sttRunning })
+        },
+        audioProcessor: {
+          on() {},
+          reset: () => ({ reset: true }),
+          getStatus: () => ({ initialized: true })
+        }
+      },
+      setTimeout: () => ({ unref() {} }),
+      clearTimeout: () => {}
+    });
+    const bridge = new VoiceAssistantBridge({
+      manager,
+      assistant: {
+        processCommand: async () => ({ success: true, response: 'Cancelling is supported.' })
+      },
+      textToSpeech: {
+        speakAsync: () => new Promise(resolve => {
+          resolveTts = resolve;
+        }),
+        stop: () => {
+          stopped = true;
+          resolveTts?.({ outcome: 'cancelled' });
+        }
+      }
+    });
+
+    manager.startSession({ id: 'cancel-speaking-session' });
+    manager.startSpeechToText();
+    sttRunning = false;
+    manager.beginProcessing();
+    manager.processTranscript(new TranscriptResult({
+      finalTranscript: 'cancel test',
+      confidence: 0.9,
+      partial: false
+    }));
+    await new Promise(resolve => setImmediate(resolve));
+
+    assert.equal(manager.getCurrentState(), VoiceStateMachine.STATES.SPEAKING);
+    manager.cancelSession('cancel while speaking');
+    await new Promise(resolve => setImmediate(resolve));
+
+    assert.equal(stopped, true);
+    assert.equal(manager.getCurrentState(), VoiceStateMachine.STATES.IDLE);
+    assert.equal(sttRunning, false);
+    assert.equal(manager.getMetrics().runtimePipeline.ttsCancellations, 1);
     bridge.detach();
   });
 

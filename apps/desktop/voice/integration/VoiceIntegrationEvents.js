@@ -15,7 +15,11 @@ const VOICE_INTEGRATION_EVENTS = Object.freeze({
   ASSISTANT_FAILED: 'voice.integration.assistant.failed',
   VOICE_RESPONSE_READY: 'voice.integration.response.ready',
   VOICE_EXECUTION_FINISHED: 'voice.integration.execution.finished',
-  VOICE_COMMAND_CANCELLED: 'voice.integration.command.cancelled'
+  VOICE_COMMAND_CANCELLED: 'voice.integration.command.cancelled',
+  TTS_STARTED: 'voice.integration.tts.started',
+  TTS_COMPLETED: 'voice.integration.tts.completed',
+  TTS_CANCELLED: 'voice.integration.tts.cancelled',
+  TTS_FAILED: 'voice.integration.tts.failed'
 });
 
 module.exports = VOICE_INTEGRATION_EVENTS;

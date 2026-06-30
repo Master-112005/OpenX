@@ -1668,6 +1668,7 @@ async function initializeAssistant() {
   voiceAssistantBridge = new VoiceAssistantBridge({
     manager: voiceSessionManager,
     assistant,
+    textToSpeech,
     logger: mainLogger
   });
   diagnosticsManager = new DiagnosticsManager({

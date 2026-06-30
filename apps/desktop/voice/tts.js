@@ -137,9 +137,9 @@ class TextToSpeech extends EventEmitter {
         cleanup();
         resolve(value);
       };
-      const onCompleted = (value) => finish(value);
-      const onError = (value) => finish(value);
-      const onStopped = (value) => finish(value);
+      const onCompleted = (value) => finish({ outcome: 'completed', value });
+      const onError = (value) => finish({ outcome: 'failed', error: value });
+      const onStopped = (value) => finish({ outcome: 'cancelled', value });
 
       this.once('completed', onCompleted);
       this.once('error', onError);
@@ -149,6 +149,7 @@ class TextToSpeech extends EventEmitter {
   }
 
   stop() {
+    const wasSpeaking = Boolean(this.activeProcess || this.isSpeaking);
     if (this.activeProcess) {
       try {
         const pid = this.activeProcess.pid;
@@ -161,7 +162,7 @@ class TextToSpeech extends EventEmitter {
       this.activeProcess = null;
     }
     this.isSpeaking = false;
-    this.emit('stopped');
+    if (wasSpeaking) this.emit('stopped');
   }
 
   setVoice(voiceName) {
