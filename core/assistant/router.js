@@ -3999,11 +3999,11 @@ const newTabMatch = input.match(
     const corrected = String(preparedInput?.correctedText || rawText || '').trim();
     const raw = String(rawText || corrected || '').trim();
     const input = corrected.toLowerCase().replace(/\s+/g, ' ').trim();
-    if (!/\b(?:calendar|calender|timetable|time\s+table|daily\s+schedule)\b/.test(input)) {
+    if (!/\b(?:calendar|calender|calander|clander|timetable|time\s+table|time-table|daily\s+schedule)\b/.test(input)) {
       return null;
     }
 
-    const target = /\b(?:timetable|time\s+table|daily\s+schedule)\b/.test(input) ? 'timetable' : 'calendar';
+    const target = /\b(?:timetable|time\s+table|time-table|daily\s+schedule)\b/.test(input) ? 'timetable' : 'calendar';
     if (/^(?:open|show|display|launch)\b/.test(input) && !/\b(?:add|update|put|schedule|create|save)\b/.test(input)) {
       const intent = this.intentRegistry.get(`${target}.open`);
       return intent ? { intent, confidence: 1, entities: {} } : null;
@@ -4032,8 +4032,8 @@ const newTabMatch = input.match(
 
   _extractPlannerText(rawText, target) {
     const targetPattern = target === 'timetable'
-      ? '(?:timetable|time\\s+table|daily\\s+schedule)'
-      : '(?:calendar|calender)';
+      ? '(?:timetable|time\\s+table|time-table|daily\\s+schedule)'
+      : '(?:calendar|calender|calander|clander)';
     const patterns = [
       new RegExp(`^(?:add|put|save|schedule|create)\\s+(.+?)\\s+(?:to|in|on)\\s+(?:my\\s+)?${targetPattern}\\b`, 'i'),
       new RegExp(`^(?:add|put|save|schedule|create)\\s+(?:this|that)\\s+(?:to|in|on)\\s+(?:my\\s+)?${targetPattern}\\s*(.*)$`, 'i'),

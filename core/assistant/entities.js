@@ -815,13 +815,13 @@ class EntityExtractor {
     }
 
     const directReminderTrailingDurationMatch = source.match(
-      new RegExp(`^(?:remind|alert|notify)\\s+me\\s+to\\s+.+?\\s+in\\s+(${SCHEDULE_DURATION_PATTERN})$`, 'i')
+      new RegExp(`^(?:remind|alert|notify)\\s+me\\s+to\\s+.+?\\s+(?:in|after)\\s+(${SCHEDULE_DURATION_PATTERN})$`, 'i')
     );
     if (directReminderTrailingDurationMatch?.[1]) {
       return normalizeClock(directReminderTrailingDurationMatch[1]);
     }
 
-    const reminderMatch = source.match(/\b(?:remind|alert|notify)(?: me)?\s+(?:at|for|in)\s+(.+?)(?:\s+to\s+.+)?$/i);
+    const reminderMatch = source.match(/\b(?:remind|alert|notify)(?: me)?\s+(?:at|for|in|after)\s+(.+?)(?:\s+to\s+.+)?$/i);
     if (reminderMatch && reminderMatch[1]) {
       return normalizeClock(reminderMatch[1]);
     }
@@ -846,7 +846,7 @@ class EntityExtractor {
     }
 
     const setReminderDurationMatch = source.match(
-      new RegExp(`\\bset\\s+(?:a\\s+)?reminder\\s+(?:for|in)\\s+(${SCHEDULE_DURATION_PATTERN})\\b`, 'i')
+      new RegExp(`\\bset\\s+(?:a\\s+)?reminder\\s+(?:for|in|after)\\s+(${SCHEDULE_DURATION_PATTERN})\\b`, 'i')
     );
     if (setReminderDurationMatch?.[1]) {
       return normalizeClock(setReminderDurationMatch[1]);
@@ -960,7 +960,7 @@ class EntityExtractor {
     if (!cleaned) return null;
 
     const suffixPatterns = [
-      new RegExp(`\\s+\\bin\\s+${SCHEDULE_DURATION_PATTERN}\\s*$`, 'i'),
+      new RegExp(`\\s+\\b(?:in|after)\\s+${SCHEDULE_DURATION_PATTERN}\\s*$`, 'i'),
       new RegExp(`\\s+\\b(?:at|on)\\s+(?:${SCHEDULE_CLOCK_PATTERN}|${SCHEDULE_DAY_PATTERN}|${SCHEDULE_NATURAL_TIME_PATTERN})\\s*$`, 'i'),
       new RegExp(`\\s+\\b(?:today|tomorrow|tonight|next\\s+week)\\s*$`, 'i')
     ];

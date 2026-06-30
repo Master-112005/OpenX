@@ -273,6 +273,39 @@ describe('Assistant Confirmation Flow', function() {
     assert.deepEqual(routedInputs, ['remind me at tomorrow morning to attend class']);
   });
 
+  it('should route complete reminder duration phrases without asking for missing time', async function() {
+    const routedInputs = [];
+    const router = {
+      process: async input => {
+        routedInputs.push(input);
+        return {
+          commandId: `reminder-${routedInputs.length}`,
+          success: true,
+          intent: 'reminder.set',
+          entities: { reminderText: 'done', duration: 1 },
+          data: { dueAt: new Date().toISOString() },
+          response: 'Scheduled.'
+        };
+      },
+      entityExtractor: {
+        _extractReminderCategory: () => 'general'
+      }
+    };
+    const assistant = new Assistant({}, { router, automation: {}, eventBus: { publish() {} } });
+
+    const afterMinutes = await assistant.processCommand('remind me to call mummy after 30 min');
+    const afterCompactHour = await assistant.processCommand('remind me to call daddy after 1hr');
+
+    assert.equal(afterMinutes.success, true);
+    assert.equal(afterCompactHour.success, true);
+    assert.equal(afterMinutes.needsClarification, undefined);
+    assert.equal(afterCompactHour.needsClarification, undefined);
+    assert.deepEqual(routedInputs, [
+      'remind me to call mummy after 30 min',
+      'remind me to call daddy after 1hr'
+    ]);
+  });
+
   it('should clear pending schedule clarification when a new standalone request arrives', async function() {
     const router = {
       process: async input => {

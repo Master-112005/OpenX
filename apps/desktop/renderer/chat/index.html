@@ -23,6 +23,7 @@
         <button class="header-btn view-tab" id="activity-view-btn" type="button" aria-pressed="false">
           Activity <span id="activity-badge" hidden>0</span>
         </button>
+        <button class="header-btn view-tab calendar-view-tab" id="activity-calendar-btn" type="button" title="Open calendar" aria-label="Open calendar">&#128197;</button>
         <button class="window-btn voice-btn" id="assistant-mute-btn" type="button" title="Mute assistant voice" aria-label="Mute assistant voice" aria-pressed="false">
           <span class="voice-icon" aria-hidden="true">&#128266;</span>
         </button>
@@ -60,10 +61,8 @@
             <div>
               <div class="eyebrow">Your day</div>
               <h1>Activity</h1>
-              <p>Upcoming alarms, timers, reminders, and recent assistant notices.</p>
             </div>
             <div class="activity-tools">
-              <button class="activity-calendar-btn" id="activity-calendar-btn" type="button" title="Open calendar" aria-label="Open calendar">&#128197;</button>
               <div class="activity-date" id="activity-date"></div>
             </div>
           </header>
@@ -307,52 +306,62 @@
           </section>
 
           <section class="settings-section" data-settings-section="phone" id="settings-section-phone">
-            <div class="section-heading">Connect Phone</div>
-            <div class="section-note">Windows will verify your identity before OpenX creates a five-minute pairing code. OpenX never receives or stores your Windows credentials.</div>
-            <div class="phone-pairing-card">
-              <div class="phone-pairing-copy">
-                <strong>Desktop identity verification</strong>
-                <span id="phone-pairing-status">Generate a code when your phone is ready to pair.</span>
-              </div>
-              <button class="primary-btn" id="phone-generate-token-btn" type="button">Generate Pairing QR</button>
-              <div class="phone-pairing-qr-wrap">
-                <img id="phone-pairing-qr" alt="OpenX phone pairing QR code" hidden>
-              </div>
-              <output class="phone-pairing-token" id="phone-pairing-token" aria-live="polite">--------</output>
-              <div class="section-note" id="phone-pairing-expiry"></div>
-              <div class="phone-pairing-countdown" id="phone-pairing-countdown" aria-live="polite"></div>
-            </div>
-            <div class="phone-server-card">
-              <div class="phone-server-heading">
-                <strong>Server Status</strong>
-                <span id="phone-server-status">Checking...</span>
-              </div>
-              <div class="phone-server-grid">
-                <div class="phone-server-item">
-                  <span>Current Listening Address</span>
-                  <strong id="phone-server-address">--</strong>
-                </div>
-                <div class="phone-server-item">
-                  <span>Current Port</span>
-                  <strong id="phone-server-port">--</strong>
-                </div>
-                <div class="phone-server-item">
-                  <span>Connected Devices</span>
-                  <strong id="phone-server-devices">0</strong>
-                </div>
-                <div class="phone-server-item">
-                  <span>Protocol Version</span>
-                  <strong id="phone-server-version">1</strong>
-                </div>
+            <div class="phone-section-header">
+              <div class="section-heading">Phone</div>
+              <div class="phone-section-tabs" role="tablist" aria-label="Phone settings">
+                <button class="phone-section-tab active" data-phone-panel-target="connect" type="button" role="tab" aria-selected="true">Connect Phone</button>
+                <button class="phone-section-tab" data-phone-panel-target="devices" type="button" role="tab" aria-selected="false">Connected Devices</button>
               </div>
             </div>
-            <div class="phone-devices-heading">
-              <div>
-                <strong>Connected Devices</strong>
-                <div class="section-note">Manage what each trusted phone can do.</div>
+            <div class="phone-panel active" data-phone-panel="connect">
+              <div class="section-note">Windows will verify your identity before OpenX creates a five-minute pairing code. OpenX never receives or stores your Windows credentials.</div>
+              <div class="phone-pairing-card">
+                <div class="phone-pairing-copy">
+                  <strong>Desktop identity verification</strong>
+                  <span id="phone-pairing-status">Generate a code when your phone is ready to pair.</span>
+                </div>
+                <button class="primary-btn" id="phone-generate-token-btn" type="button">Generate Pairing QR</button>
+                <div class="phone-pairing-qr-wrap">
+                  <img id="phone-pairing-qr" alt="OpenX phone pairing QR code" hidden>
+                </div>
+                <output class="phone-pairing-token" id="phone-pairing-token" aria-live="polite">--------</output>
+                <div class="section-note" id="phone-pairing-expiry"></div>
+                <div class="phone-pairing-countdown" id="phone-pairing-countdown" aria-live="polite"></div>
+              </div>
+              <div class="phone-server-card">
+                <div class="phone-server-heading">
+                  <strong>Server Status</strong>
+                  <span id="phone-server-status">Checking...</span>
+                </div>
+                <div class="phone-server-grid">
+                  <div class="phone-server-item">
+                    <span>Current Listening Address</span>
+                    <strong id="phone-server-address">--</strong>
+                  </div>
+                  <div class="phone-server-item">
+                    <span>Current Port</span>
+                    <strong id="phone-server-port">--</strong>
+                  </div>
+                  <div class="phone-server-item">
+                    <span>Connected Devices</span>
+                    <strong id="phone-server-devices">0</strong>
+                  </div>
+                  <div class="phone-server-item">
+                    <span>Protocol Version</span>
+                    <strong id="phone-server-version">1</strong>
+                  </div>
+                </div>
               </div>
             </div>
-            <div class="phone-device-list" id="phone-device-list"></div>
+            <div class="phone-panel" data-phone-panel="devices" hidden>
+              <div class="phone-devices-heading">
+                <div>
+                  <strong>Connected Devices</strong>
+                  <div class="section-note">Manage what each trusted phone can do.</div>
+                </div>
+              </div>
+              <div class="phone-device-list" id="phone-device-list"></div>
+            </div>
           </section>
 
           <section class="settings-section" data-settings-section="modes" id="settings-section-modes">

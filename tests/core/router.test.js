@@ -1778,11 +1778,15 @@ describe('Action Router', function() {
 
     const openCalendar = await router.process('open calendar', 'chat');
     const openTimetable = await router.process('open daily timetable', 'chat');
+    const misspelledCalendar = await router.process('open clander', 'chat');
+    const hyphenTimetable = await router.process('open time-table', 'chat');
     const addCalendar = await router.process('add team review to calendar tomorrow at 4 pm', 'chat');
     const updateThis = await router.process('update this in timetable tomorrow at 7 am', 'chat');
 
     assert.equal(openCalendar.intent, 'calendar.open');
     assert.equal(openTimetable.intent, 'timetable.open');
+    assert.equal(misspelledCalendar.intent, 'calendar.open');
+    assert.equal(hyphenTimetable.intent, 'timetable.open');
     assert.equal(addCalendar.intent, 'calendar.add');
     assert.equal(addCalendar.entities.plannerText, 'team review');
     assert.equal(addCalendar.entities.dateExpression, 'tomorrow');
@@ -2721,6 +2725,41 @@ describe('Action Router', function() {
     assert.equal(result.intent, 'reminder.set');
     assert.equal(result.entities.timeExpression, 'next sunday');
     assert.equal(result.entities.reminderText, 'watch the sunshine movie');
+  });
+
+  it('should understand flexible reminder date and duration phrasing', async function() {
+    const config = {
+      permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } }
+    };
+    const stubEngine = {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...entities } };
+      }
+    };
+    const router = new ActionRouter(config, stubEngine);
+
+    const birthday = await router.process('remind me tommrow to wish charan on his birthday', 'chat');
+    const birthdayAlt = await router.process('remind me tommrow to wish charan happy birthday', 'chat');
+    const afterMinutes = await router.process('remind me after 5 min to call mummy', 'chat');
+    const afterThirtyTrailing = await router.process('remind me to call mummy after 30 min', 'chat');
+    const afterHourWords = await router.process('remind me to call daddy after one hr', 'chat');
+    const afterHourCompact = await router.process('remind me to call daddy after 1hr', 'chat');
+
+    assert.equal(birthday.intent, 'reminder.set');
+    assert.equal(birthday.entities.timeExpression, 'tomorrow');
+    assert.equal(birthday.entities.reminderText, 'wish charan on his birthday');
+    assert.equal(birthday.entities.reminderCategory, 'birthday');
+    assert.equal(birthdayAlt.entities.timeExpression, 'tomorrow');
+    assert.equal(birthdayAlt.entities.reminderText, 'wish charan happy birthday');
+    assert.equal(afterMinutes.intent, 'reminder.set');
+    assert.equal(afterMinutes.entities.duration, 5);
+    assert.equal(afterMinutes.entities.reminderText, 'call mummy');
+    assert.equal(afterThirtyTrailing.entities.duration, 30);
+    assert.equal(afterThirtyTrailing.entities.reminderText, 'call mummy');
+    assert.equal(afterHourWords.entities.duration, 60);
+    assert.equal(afterHourWords.entities.reminderText, 'call daddy');
+    assert.equal(afterHourCompact.entities.duration, 60);
+    assert.equal(afterHourCompact.entities.reminderText, 'call daddy');
   });
 
   it('should not accept bare remind me as a valid reminder', async function() {

@@ -25,4 +25,17 @@ describe('Renderer Content Security', function() {
       assert.ok(css.length > 100);
     });
   }
+
+  it('should wire default-deny session security and renderer load recovery in the main process', function() {
+    const mainScript = fs.readFileSync(path.join(__dirname, '..', '..', 'apps', 'desktop', 'electron', 'main.js'), 'utf8');
+
+    assert.match(mainScript, /function configureSessionSecurity/);
+    assert.match(mainScript, /setPermissionRequestHandler/);
+    assert.match(mainScript, /setPermissionCheckHandler/);
+    assert.match(mainScript, /onBeforeRequest/);
+    assert.match(mainScript, /Blocked renderer network navigation/);
+    assert.match(mainScript, /function isLoadFailureRecoverable/);
+    assert.match(mainScript, /scheduleRendererRecovery\(`\$\{windowType\}:load`/);
+    assert.match(mainScript, /scheduleRendererRecovery\(`\$\{windowType\}:preload`/);
+  });
 });

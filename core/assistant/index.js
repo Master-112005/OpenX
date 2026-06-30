@@ -1450,6 +1450,9 @@ class Assistant extends EventEmitter {
 
       const untimedReminder = String(input || '').match(/^remind\s+me\s+to\s+(.+)$/i);
       if (!intent && untimedReminder?.[1]) {
+        if (this._reminderTextContainsSchedule(untimedReminder[1])) {
+          return null;
+        }
         intent = 'reminder.set';
         entities = {
           reminderText: untimedReminder[1].trim(),
@@ -1468,6 +1471,23 @@ class Assistant extends EventEmitter {
       source,
       response: this.personality.applyToResponse(response)
     };
+  }
+
+  _reminderTextContainsSchedule(text) {
+    const normalized = Normalizer.normalizeText(String(text || ''))
+      .replace(/\b(?:tommrow|tommorow|tomorow)\b/g, 'tomorrow')
+      .trim();
+    if (!normalized) return false;
+
+    const amount = String.raw`(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|fifteen|twenty|thirty|forty(?:\s*five)?|sixty)`;
+    const durationUnit = String.raw`(?:seconds?|secs?|minutes?|mins?|min|hours?|hrs?|hr)`;
+    const clock = String.raw`\d{1,2}(?:(?::|\s+)\d{2})?\s*(?:am|pm)?`;
+    const day = String.raw`today|tomorrow(?:\s+(?:morning|afternoon|evening|night))?|tonight|next\s+week|(?:next\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)`;
+    const naturalTime = String.raw`noon|midnight|morning|afternoon|evening|night`;
+
+    return new RegExp(String.raw`\b(?:in|after)\s+${amount}\s*${durationUnit}\s*$`, 'i').test(normalized) ||
+      new RegExp(String.raw`\b(?:at|on)\s+(?:${clock}|${day}|${naturalTime})(?:\s+${day})?\s*$`, 'i').test(normalized) ||
+      new RegExp(String.raw`\b(?:${day})\s*$`, 'i').test(normalized);
   }
 
   async _handlePendingScheduleCompletion(input, source) {

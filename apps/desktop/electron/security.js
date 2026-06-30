@@ -6,6 +6,17 @@ const ALLOWED_COMMAND_SOURCES = new Set(['chat', 'voice']);
 const PHONE_PERMISSION_NAMES = new Set([
   'remoteCommands', 'fileTransfer', 'receiveFiles', 'sendFiles', 'powerActions'
 ]);
+const UNSAFE_TEXT_CONTROL_PATTERN = /[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/;
+const UNSAFE_DIRECTIONAL_PATTERN = /[\u202A-\u202E\u2066-\u2069]/;
+
+function assertSafeString(value, name) {
+  if (UNSAFE_TEXT_CONTROL_PATTERN.test(value)) {
+    throw new TypeError(`${name} contains unsafe control characters`);
+  }
+  if (UNSAFE_DIRECTIONAL_PATTERN.test(value)) {
+    throw new TypeError(`${name} contains unsafe directional characters`);
+  }
+}
 
 function isPlainObject(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
@@ -32,6 +43,7 @@ function requireString(value, name, options = {}) {
   if (normalized.length > maxLength) {
     throw new RangeError(`${name} exceeds ${maxLength} characters`);
   }
+  assertSafeString(normalized, name);
   return normalized;
 }
 
@@ -40,7 +52,15 @@ function validateJsonValue(value, name, state = { seen: new Set(), nodes: 0 }, d
   if (state.nodes > 2000 || depth > 12) {
     throw new RangeError(`${name} is too complex`);
   }
-  if (value === null || ['string', 'number', 'boolean'].includes(typeof value)) return;
+  if (value === null || typeof value === 'boolean') return;
+  if (typeof value === 'number') {
+    if (!Number.isFinite(value)) throw new TypeError(`${name} contains an invalid number`);
+    return;
+  }
+  if (typeof value === 'string') {
+    assertSafeString(value, name);
+    return;
+  }
   if (typeof value !== 'object') {
     throw new TypeError(`${name} contains an unsupported value`);
   }
@@ -131,6 +151,14 @@ function validatePlannerEntry(payload) {
   for (const field of ['title', 'plannerText', 'notes', 'date', 'dateExpression', 'startTime', 'timeExpression', 'endTime']) {
     if (payload[field] !== undefined) {
       normalized[field] = requireString(payload[field], field, { maxLength: field === 'notes' ? 1000 : 200, allowEmpty: true });
+    }
+  }
+  if (normalized.date && !/^\d{4}-\d{2}-\d{2}$/.test(normalized.date)) {
+    throw new TypeError('date must use YYYY-MM-DD format');
+  }
+  for (const field of ['startTime', 'endTime']) {
+    if (normalized[field] && !/^\d{2}:\d{2}$/.test(normalized[field])) {
+      throw new TypeError(`${field} must use HH:MM format`);
     }
   }
   return normalized;
@@ -238,6 +266,8 @@ function createSecureWebPreferences(preloadPath) {
     backgroundThrottling: false,
     allowRunningInsecureContent: false,
     enableRemoteModule: false,
+    safeDialogs: true,
+    navigateOnDragDrop: false,
     webviewTag: false,
     spellcheck: false
   });

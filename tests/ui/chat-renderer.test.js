@@ -12,6 +12,8 @@ describe('Chat Renderer UI', function() {
   it('should provide dedicated chat, activity, notification, and alarm surfaces', function() {
     ['conversation-view', 'activity-view', 'toast-region', 'alarm-overlay', 'schedule-list', 'notification-list', 'activity-calendar-btn']
       .forEach(id => assert.match(html, new RegExp(`id="${id}"`)));
+    assert.match(html, /id="activity-view-btn"[\s\S]*id="activity-calendar-btn"[\s\S]*id="assistant-mute-btn"/);
+    assert.doesNotMatch(html, /Upcoming alarms, timers, reminders, and recent assistant notices\./);
     assert.match(script, /openPlanner\?\.\('calendar'\)/);
     assert.match(script, /classList\.add\('opening'\)/);
     assert.match(script, /aria-busy/);
@@ -102,6 +104,10 @@ describe('Chat Renderer UI', function() {
 
   it('should expose identity-protected phone pairing controls', function() {
     assert.match(html, /data-section-target="phone"/);
+    assert.match(html, /data-phone-panel-target="connect"/);
+    assert.match(html, /data-phone-panel-target="devices"/);
+    assert.match(html, /data-phone-panel="connect"/);
+    assert.match(html, /data-phone-panel="devices"/);
     assert.match(html, /id="phone-generate-token-btn"/);
     assert.match(html, /id="phone-pairing-qr"/);
     assert.match(html, /id="phone-pairing-token"/);
@@ -112,6 +118,10 @@ describe('Chat Renderer UI', function() {
     assert.match(script, /Expires in \$\{formatPairingCountdown\(remaining\)\}/);
     assert.match(script, /setInterval\(update, 1000\)/);
     assert.match(script, /Pairing code expired\./);
+    assert.match(script, /function setActivePhonePanel/);
+    assert.match(script, /phoneSectionTabs\.forEach/);
+    assert.match(css, /\.phone-section-tabs/);
+    assert.match(css, /\.phone-panel\.active/);
   });
 
   it('should group identity, theme, and access under System while keeping Phone separate', function() {
@@ -140,6 +150,7 @@ describe('Chat Renderer UI', function() {
 
   it('should manage trusted device permissions and device actions', function() {
     assert.match(html, /id="phone-device-list"/);
+    assert.match(html, /<button class="phone-section-tab"[^>]*>Connected Devices<\/button>[\s\S]*<div class="phone-panel" data-phone-panel="devices" hidden>/);
     assert.match(script, /Remote Commands/);
     assert.match(script, /File Transfer/);
     assert.match(script, /Receive Files/);

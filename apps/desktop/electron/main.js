@@ -38,6 +38,7 @@ const MAX_RENDERER_RECOVERY_DELAY_MS = 5000;
 const UNRESPONSIVE_RELOAD_DELAY_MS = 15 * 1000;
 const FATAL_CLEANUP_TIMEOUT_MS = 3000;
 const STABLE_RUNTIME_MS = 2 * 60 * 1000;
+const ERR_ABORTED = -3;
 const RENDERER_RECOVERABLE_REASONS = new Set([
   'abnormal-exit',
   'crashed',
@@ -206,6 +207,38 @@ function disableSpellChecker() {
   }
 }
 
+function configureSessionSecurity() {
+  try {
+    const defaultSession = session.defaultSession;
+    defaultSession?.setPermissionRequestHandler?.((webContents, permission, callback, details) => {
+      mainLogger.warn('Blocked renderer permission request', {
+        permission,
+        requestingUrl: details?.requestingUrl || webContents?.getURL?.() || ''
+      });
+      callback(false);
+    });
+    defaultSession?.setPermissionCheckHandler?.((_webContents, permission, requestingOrigin) => {
+      mainLogger.warn('Blocked renderer permission check', { permission, requestingOrigin });
+      return false;
+    });
+    defaultSession?.webRequest?.onBeforeRequest?.({
+      urls: ['http://*/*', 'https://*/*', 'ws://*/*', 'wss://*/*']
+    }, (details, callback) => {
+      if (details.resourceType === 'mainFrame' || details.resourceType === 'subFrame') {
+        mainLogger.warn('Blocked renderer network navigation', {
+          url: details.url,
+          resourceType: details.resourceType
+        });
+        callback({ cancel: true });
+        return;
+      }
+      callback({});
+    });
+  } catch (error) {
+    mainLogger.warn('Failed to configure session security', { error: error.message });
+  }
+}
+
 function clearUnresponsiveTimeout(browserWindow) {
   const timeout = unresponsiveTimeouts.get(browserWindow);
   if (!timeout) return;
@@ -215,6 +248,17 @@ function clearUnresponsiveTimeout(browserWindow) {
 
 function isRendererExitRecoverable(reason) {
   return RENDERER_RECOVERABLE_REASONS.has(String(reason || ''));
+}
+
+function isLoadFailureRecoverable(errorCode, validatedUrl, expectedPath) {
+  if (Number(errorCode) === ERR_ABORTED) return false;
+  if (!validatedUrl) return false;
+  try {
+    const { fileURLToPath } = require('url');
+    return path.resolve(fileURLToPath(validatedUrl)) === expectedPath;
+  } catch (_) {
+    return false;
+  }
 }
 
 function consumeRendererRestartBudget(windowType) {
@@ -273,6 +317,10 @@ function secureWindow(browserWindow, options) {
       errorDescription,
       validatedUrl
     });
+    if (createWindow && isLoadFailureRecoverable(errorCode, validatedUrl, expectedPath)) {
+      if (!browserWindow.isDestroyed()) browserWindow.destroy();
+      scheduleRendererRecovery(`${windowType}:load`, createWindow);
+    }
   });
 
   browserWindow.webContents.on('preload-error', (_event, preloadPath, error) => {
@@ -281,6 +329,10 @@ function secureWindow(browserWindow, options) {
       preloadPath,
       error: error.message
     });
+    if (createWindow) {
+      if (!browserWindow.isDestroyed()) browserWindow.destroy();
+      scheduleRendererRecovery(`${windowType}:preload`, createWindow);
+    }
   });
 
   browserWindow.webContents.on('will-navigate', (event, url) => {
@@ -1266,6 +1318,7 @@ app.on('child-process-gone', (_event, details) => {
 
 app.whenReady().then(async () => {
   disableSpellChecker();
+  configureSessionSecurity();
   settingsService = new SettingsService(BASE_CONFIG);
   runtimeConfig = settingsService.buildRuntimeConfig();
   eventBus = new AssistantEventBus();

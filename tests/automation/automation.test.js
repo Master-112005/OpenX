@@ -835,11 +835,16 @@ describe('Automation Engine', function() {
     const scheduler = new SchedulerController({});
 
     const tomorrow = scheduler._parseTimeExpression('tomorrow 10pm');
+    const tomorrowDefault = scheduler._parseTimeExpression('tomorrow');
     const nextSunday = scheduler._parseTimeExpression('next sunday');
 
     assert.ok(tomorrow instanceof Date);
+    assert.ok(tomorrowDefault instanceof Date);
     assert.ok(nextSunday instanceof Date);
     assert.ok(tomorrow.getTime() > Date.now());
+    assert.ok(tomorrowDefault.getTime() > Date.now());
+    assert.equal(tomorrowDefault.getHours(), 9);
+    assert.equal(tomorrowDefault.getMinutes(), 0);
     assert.ok(nextSunday.getTime() > Date.now());
   });
 

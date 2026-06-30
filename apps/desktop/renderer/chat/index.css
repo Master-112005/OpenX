@@ -2580,6 +2580,11 @@ body {
   width: 36px;
 }
 
+.calendar-view-tab {
+  min-width: 40px;
+  padding-inline: 0;
+}
+
 .activity-calendar-btn:hover {
   background: rgba(255, 255, 255, 0.14);
   border-color: rgba(255, 255, 255, 0.18);
@@ -3691,3 +3696,97 @@ html[data-glass-contrast] #send-btn {
 #workspace,#messages,.settings-content,#schedule-list,#notification-list { contain: layout paint style; }
 .message { contain: layout paint; content-visibility: auto; contain-intrinsic-size: 64px; }
 .toast,.schedule-card,.notice-item,.alarm-card { contain: layout paint; }
+
+/* Requested compact settings refinements */
+.settings-content .settings-section[data-settings-section="system"] {
+  flex: 0 0 auto;
+  min-height: auto;
+}
+
+.settings-content .settings-section[data-settings-section="system"].open {
+  display: flex;
+}
+
+.settings-content .settings-section[data-settings-section="system"] .section-heading {
+  margin-bottom: 0;
+}
+
+.phone-section-header {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.phone-section-header .section-heading {
+  flex: 0 0 auto;
+}
+
+.phone-section-tabs {
+  align-items: center;
+  display: flex;
+  gap: 5px;
+  min-width: 0;
+}
+
+.phone-section-tab {
+  background: var(--adaptive-control, rgba(255,255,255,.09));
+  border: 1px solid var(--adaptive-border, rgba(255,255,255,.16));
+  border-radius: 12px;
+  color: var(--adaptive-muted, rgba(255,255,255,.72));
+  cursor: pointer;
+  font: inherit;
+  font-size: 10px;
+  font-weight: 750;
+  min-height: 34px;
+  padding: 0 10px;
+  transition: background-color .24s ease, border-color .24s ease, color .24s ease, transform .24s ease;
+  white-space: nowrap;
+}
+
+.phone-section-tab:hover {
+  background: var(--adaptive-control-strong, rgba(255,255,255,.16));
+  color: var(--adaptive-text, #f8f8fa);
+  transform: translateY(-1px);
+}
+
+.phone-section-tab.active {
+  background: var(--adaptive-control-strong, rgba(255,255,255,.16));
+  border-color: color-mix(in srgb, var(--accent-color) 45%, var(--adaptive-border, rgba(255,255,255,.16)));
+  color: var(--adaptive-text, #f8f8fa);
+}
+
+.phone-panel {
+  display: none;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+}
+
+.phone-panel.active {
+  animation: compact-section-in .22s ease;
+  display: flex;
+}
+
+.phone-panel .phone-pairing-card,
+.phone-panel .phone-server-card,
+.phone-panel .phone-devices-heading,
+.phone-panel .phone-device-list {
+  margin-top: 0;
+}
+
+@media (max-width: 460px) {
+  .phone-section-header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .phone-section-tabs {
+    width: 100%;
+  }
+
+  .phone-section-tab {
+    flex: 1 1 0;
+  }
+}

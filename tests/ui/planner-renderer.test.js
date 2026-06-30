@@ -11,8 +11,9 @@ describe('Planner Renderer', function() {
 
   it('should render calendar and timetable in an assistant-matched glass window', function() {
     assert.match(html, /class="planner-shell"/);
-    assert.match(html, /id="calendar-tab"/);
+    assert.doesNotMatch(html, /id="calendar-tab"/);
     assert.doesNotMatch(html, /id="timetable-tab"/);
+    assert.doesNotMatch(html, /id="timetable-date"/);
     assert.match(html, /id="month-grid"/);
     assert.match(html, /id="time-grid"/);
     assert.match(html, /id="quick-add-toggle"/);
@@ -23,7 +24,7 @@ describe('Planner Renderer', function() {
     assert.match(css, /--panel-bg:\s*rgba\(20,\s*20,\s*40,\s*0\.92\)/);
     assert.match(css, /backdrop-filter:\s*blur\(18px\)\s*saturate\(115%\)/);
     assert.match(css, /var\(--glass-shadow\)/);
-    assert.match(css, /\.view-switch/);
+    assert.doesNotMatch(html, /class="view-switch"/);
     assert.match(css, /grid-template-columns:\s*minmax\(0,\s*1fr\)/);
     assert.match(css, /\.planner-shell\.date-selected \.content-grid/);
     assert.match(css, /grid-template-columns:\s*minmax\(0,\s*1\.25fr\)\s*minmax\(320px,\s*0\.75fr\)/);

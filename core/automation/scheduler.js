@@ -235,7 +235,7 @@ class SchedulerController {
       return dueAt;
     }
 
-    const relativeDayMatch = value.match(/^(today|tonight)$/i);
+    const relativeDayMatch = value.match(/^(today|tomorrow|tonight)$/i);
     if (relativeDayMatch) {
       const dueAt = new Date();
       dueAt.setSeconds(0, 0);

@@ -58,6 +58,17 @@ function formatTime(value) {
   });
 }
 
+function getSelectedDateKey() {
+  return selectedDateKey || entryDateEl.value || timetableDateEl?.value || localDateKey(new Date());
+}
+
+function setSelectedDateKey(key) {
+  const value = key || localDateKey(new Date());
+  selectedDateKey = value;
+  entryDateEl.value = value;
+  if (timetableDateEl) timetableDateEl.value = value;
+}
+
 function sortEntries(list) {
   return list.slice().sort((a, b) =>
     `${a.date || ''} ${a.startTime || '99:99'} ${a.title || ''}`
@@ -155,7 +166,7 @@ async function loadTheme() {
 function renderMonth() {
   const monthName = visibleMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
   monthTitleEl.textContent = monthName;
-  currentPeriodEl.textContent = shellEl.classList.contains('date-selected') ? formatDateLabel(timetableDateEl.value) : monthName;
+  currentPeriodEl.textContent = shellEl.classList.contains('date-selected') ? formatDateLabel(getSelectedDateKey()) : monthName;
 
   const first = new Date(visibleMonth);
   const start = new Date(first);
@@ -204,8 +215,7 @@ function renderMonth() {
     cell.append(numberWrap, itemWrap);
     cell.addEventListener('click', () => {
       selectedDateKey = key;
-      entryDateEl.value = key;
-      timetableDateEl.value = key;
+      setSelectedDateKey(key);
       shellEl.classList.add('date-selected');
       monthGridEl.querySelectorAll('.day-cell.selected').forEach(day => day.classList.remove('selected'));
       cell.classList.add('selected');
@@ -221,7 +231,7 @@ function renderMonth() {
 }
 
 function renderTimetable() {
-  const selectedDate = timetableDateEl.value || localDateKey(new Date());
+  const selectedDate = getSelectedDateKey();
   if (shellEl.classList.contains('date-selected') || currentView === 'timetable') {
     currentPeriodEl.textContent = formatDateLabel(selectedDate);
   }
@@ -256,7 +266,7 @@ function renderTimetable() {
 
 function renderAgenda() {
   const focusDate = currentView === 'timetable'
-    ? timetableDateEl.value
+    ? getSelectedDateKey()
     : (entryDateEl.value || localDateKey(new Date()));
   const visible = sortEntries(entries.filter(entry => !focusDate || entry.date === focusDate));
   agendaCountEl.textContent = `${visible.length} item${visible.length === 1 ? '' : 's'}`;
@@ -336,7 +346,7 @@ quickAddEl.addEventListener('submit', async event => {
     const result = await window.jarvis?.addPlannerEntry?.({
       type,
       title,
-      date: entryDateEl.value || timetableDateEl.value || localDateKey(new Date()),
+      date: entryDateEl.value || getSelectedDateKey(),
       startTime: entryTimeEl.value,
       notes: entryNotesEl.value.trim()
     });
@@ -367,15 +377,12 @@ nextMonthEl.addEventListener('click', () => {
 todayButtonEl.addEventListener('click', () => {
   const today = new Date();
   visibleMonth = new Date(today.getFullYear(), today.getMonth(), 1);
-  entryDateEl.value = localDateKey(today);
-  timetableDateEl.value = localDateKey(today);
-  selectedDateKey = localDateKey(today);
+  setSelectedDateKey(localDateKey(today));
   shellEl.classList.add('date-selected');
   scheduleRender();
 });
-timetableDateEl.addEventListener('change', () => {
-  entryDateEl.value = timetableDateEl.value;
-  selectedDateKey = timetableDateEl.value;
+timetableDateEl?.addEventListener('change', () => {
+  setSelectedDateKey(timetableDateEl.value);
   shellEl.classList.add('date-selected');
   scheduleRender();
 });
@@ -389,9 +396,7 @@ window.jarvis?.onPlannerEntriesChanged?.(payload => {
 });
 
 const todayKey = localDateKey(new Date());
-selectedDateKey = todayKey;
-entryDateEl.value = todayKey;
-timetableDateEl.value = todayKey;
+setSelectedDateKey(todayKey);
 loadTheme();
 window.jarvis?.onSettingsChanged?.(snapshot => applySettingsTheme(snapshot));
 refreshEntries();

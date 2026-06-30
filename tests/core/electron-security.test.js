@@ -40,6 +40,8 @@ describe('Electron Security Boundary', function() {
     assert.equal(preferences.backgroundThrottling, false);
     assert.equal(preferences.allowRunningInsecureContent, false);
     assert.equal(preferences.enableRemoteModule, false);
+    assert.equal(preferences.safeDialogs, true);
+    assert.equal(preferences.navigateOnDragDrop, false);
     assert.equal(preferences.webviewTag, false);
     assert.equal(Object.isFrozen(preferences), true);
   });
@@ -52,12 +54,15 @@ describe('Electron Security Boundary', function() {
     assert.throws(() => IPC_VALIDATORS['command:process']({ input: '', source: 'chat' }), /must not be empty/);
     assert.throws(() => IPC_VALIDATORS['command:process']({ input: 'hello', source: 'web' }), /not supported/);
     assert.throws(() => IPC_VALIDATORS['command:process']({ input: 'x'.repeat(5001) }), /exceeds/);
+    assert.throws(() => IPC_VALIDATORS['command:process']({ input: 'open\u0000chrome', source: 'chat' }), /unsafe control/);
+    assert.throws(() => IPC_VALIDATORS['command:process']({ input: 'open\u202Echrome', source: 'chat' }), /unsafe directional/);
   });
 
   it('should reject dangerous or oversized structured IPC payloads', function() {
     const polluted = JSON.parse('{"__proto__":{"isAdmin":true}}');
 
     assert.throws(() => IPC_VALIDATORS['settings:save'](polluted), /forbidden field/);
+    assert.throws(() => IPC_VALIDATORS['settings:save']({ value: Number.POSITIVE_INFINITY }), /invalid number/);
     assert.throws(
       () => IPC_VALIDATORS['settings:save']({ value: 'x'.repeat(256 * 1024) }),
       /exceeds/
@@ -95,11 +100,13 @@ describe('Electron Security Boundary', function() {
       { view: 'timetable' }
     );
     assert.deepEqual(
-      IPC_VALIDATORS['planner:addEntry']({ type: 'calendar', title: 'Review', date: '2026-06-29' }),
-      { type: 'calendar', title: 'Review', date: '2026-06-29' }
+      IPC_VALIDATORS['planner:addEntry']({ type: 'calendar', title: 'Review', date: '2026-06-29', startTime: '09:30' }),
+      { type: 'calendar', title: 'Review', date: '2026-06-29', startTime: '09:30' }
     );
     assert.throws(() => IPC_VALIDATORS['window:openPlanner']({ view: 'settings' }), /planner view/);
     assert.throws(() => IPC_VALIDATORS['planner:addEntry']({ type: 'email', title: 'Bad' }), /planner entry type/);
+    assert.throws(() => IPC_VALIDATORS['planner:addEntry']({ type: 'calendar', title: 'Bad', date: '06/29/2026' }), /YYYY-MM-DD/);
+    assert.throws(() => IPC_VALIDATORS['planner:addEntry']({ type: 'calendar', title: 'Bad', startTime: '9:30' }), /HH:MM/);
   });
 
   it('should provide a validator for every registered IPC channel', function() {

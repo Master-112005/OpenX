@@ -30,6 +30,8 @@ const phoneServerPortEl = document.getElementById('phone-server-port');
 const phoneServerDevicesEl = document.getElementById('phone-server-devices');
 const phoneServerVersionEl = document.getElementById('phone-server-version');
 const phoneDeviceListEl = document.getElementById('phone-device-list');
+const phoneSectionTabs = document.querySelectorAll('.phone-section-tab');
+const phonePanels = document.querySelectorAll('[data-phone-panel]');
 const chatViewBtn = document.getElementById('chat-view-btn');
 const activityViewBtn = document.getElementById('activity-view-btn');
 const activityCalendarBtn = document.getElementById('activity-calendar-btn');
@@ -61,6 +63,7 @@ let settingsSnapshot = null;
 let selectedThemeId = 'graphite';
 let activeSettingsSection = null;
 let activeSystemBlock = 'identity';
+let activePhonePanel = 'connect';
 let hasRenderedWelcome = false;
 let modeDrafts = [];
 let selectedModeIndex = 0;
@@ -1061,6 +1064,23 @@ function setActiveSystemBlock(blockName) {
   });
 }
 
+function setActivePhonePanel(panelName) {
+  activePhonePanel = panelName === 'devices' ? 'devices' : 'connect';
+  phoneSectionTabs.forEach(button => {
+    const isActive = button.dataset.phonePanelTarget === activePhonePanel;
+    button.classList.toggle('active', isActive);
+    button.setAttribute('aria-selected', String(isActive));
+  });
+  phonePanels.forEach(panel => {
+    const isOpen = panel.dataset.phonePanel === activePhonePanel;
+    panel.classList.toggle('active', isOpen);
+    panel.hidden = !isOpen;
+  });
+  if (activePhonePanel === 'devices') {
+    loadPhoneDevices();
+  }
+}
+
 function setActiveSettingsSection(sectionName) {
   activeSettingsSection = sectionName || null;
 
@@ -1082,6 +1102,7 @@ function setActiveSettingsSection(sectionName) {
   });
 
   setActiveSystemBlock(activeSystemBlock);
+  if (activeSettingsSection === 'phone') setActivePhonePanel(activePhonePanel);
 
   settingsFooterSection.classList.toggle('open', Boolean(activeSettingsSection));
   const settingsContent = document.querySelector('.settings-content');
@@ -1729,6 +1750,11 @@ systemOptionButtons.forEach(button => {
     setActiveSystemBlock(button.dataset.systemBlockTarget);
     const settingsContent = document.querySelector('.settings-content');
     if (settingsContent) settingsContent.scrollTop = 0;
+  });
+});
+phoneSectionTabs.forEach(button => {
+  button.addEventListener('click', () => {
+    setActivePhonePanel(button.dataset.phonePanelTarget);
   });
 });
 document.getElementById('settings-save-btn').addEventListener('click', saveSettings);
