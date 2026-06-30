@@ -25,6 +25,7 @@ const timeGridEl = document.getElementById('time-grid');
 let entries = [];
 let currentView = 'calendar';
 let selectedDateKey = '';
+let renderFrame = null;
 let visibleMonth = new Date();
 visibleMonth.setDate(1);
 
@@ -71,11 +72,11 @@ function entriesForDate(dateKey, type = null) {
 function setView(view) {
   currentView = view === 'timetable' ? 'timetable' : 'calendar';
   shellEl.dataset.view = currentView;
-  calendarTabEl.classList.toggle('active', currentView === 'calendar');
-  timetableTabEl.classList.toggle('active', currentView === 'timetable');
-  calendarTabEl.setAttribute('aria-pressed', String(currentView === 'calendar'));
-  timetableTabEl.setAttribute('aria-pressed', String(currentView === 'timetable'));
-  render();
+  calendarTabEl?.classList.toggle('active', true);
+  timetableTabEl?.classList.toggle('active', currentView === 'timetable');
+  calendarTabEl?.setAttribute('aria-pressed', 'true');
+  timetableTabEl?.setAttribute('aria-pressed', String(currentView === 'timetable'));
+  scheduleRender();
 }
 
 function setQuickAddOpen(open) {
@@ -154,7 +155,7 @@ async function loadTheme() {
 function renderMonth() {
   const monthName = visibleMonth.toLocaleDateString(undefined, { month: 'long', year: 'numeric' });
   monthTitleEl.textContent = monthName;
-  currentPeriodEl.textContent = currentView === 'calendar' ? monthName : formatDateLabel(timetableDateEl.value);
+  currentPeriodEl.textContent = shellEl.classList.contains('date-selected') ? formatDateLabel(timetableDateEl.value) : monthName;
 
   const first = new Date(visibleMonth);
   const start = new Date(first);
@@ -167,7 +168,9 @@ function renderMonth() {
     const date = new Date(start);
     date.setDate(start.getDate() + index);
     const key = localDateKey(date);
-    const dayEntries = entriesForDate(key, 'calendar');
+    const allDayEntries = entriesForDate(key);
+    const reminderCount = allDayEntries.filter(entry =>
+      ['reminder', 'alarm'].includes(String(entry.sourceKind || '').toLowerCase())).length;
     const cell = document.createElement('button');
     cell.type = 'button';
     cell.className = 'day-cell';
@@ -180,16 +183,21 @@ function renderMonth() {
     const number = document.createElement('span');
     number.textContent = String(date.getDate());
     numberWrap.appendChild(number);
-    if (dayEntries.length) {
+    if (reminderCount > 0) {
+      const count = document.createElement('span');
+      count.className = 'day-reminder-count';
+      count.textContent = String(reminderCount);
+      numberWrap.appendChild(count);
+    } else if (allDayEntries.length) {
       const dot = document.createElement('span');
       dot.className = 'day-dot';
       numberWrap.appendChild(dot);
     }
     const itemWrap = document.createElement('span');
     itemWrap.className = 'day-items';
-    dayEntries.slice(0, 3).forEach(entry => {
+    allDayEntries.slice(0, 3).forEach(entry => {
       const item = document.createElement('span');
-      item.className = 'day-item';
+      item.className = `day-item${entry.sourceKind ? ` schedule-${entry.sourceKind}` : ''}`;
       item.textContent = `${entry.startTime ? `${formatTime(entry.startTime)} ` : ''}${entry.title}`;
       itemWrap.appendChild(item);
     });
@@ -198,10 +206,12 @@ function renderMonth() {
       selectedDateKey = key;
       entryDateEl.value = key;
       timetableDateEl.value = key;
+      shellEl.classList.add('date-selected');
       monthGridEl.querySelectorAll('.day-cell.selected').forEach(day => day.classList.remove('selected'));
       cell.classList.add('selected');
       cell.classList.add('clicked');
       window.setTimeout(() => cell.classList.remove('clicked'), 180);
+      renderTimetable();
       renderAgenda();
     });
     cells.push(cell);
@@ -212,7 +222,9 @@ function renderMonth() {
 
 function renderTimetable() {
   const selectedDate = timetableDateEl.value || localDateKey(new Date());
-  currentPeriodEl.textContent = formatDateLabel(selectedDate);
+  if (shellEl.classList.contains('date-selected') || currentView === 'timetable') {
+    currentPeriodEl.textContent = formatDateLabel(selectedDate);
+  }
   const dayEntries = entriesForDate(selectedDate);
   const rows = [];
 
@@ -231,7 +243,7 @@ function renderTimetable() {
       })
       .forEach(entry => {
         const item = document.createElement('div');
-        item.className = 'slot-entry';
+        item.className = `slot-entry${entry.sourceKind ? ` schedule-${entry.sourceKind}` : ''}`;
         item.textContent = `${entry.startTime ? `${formatTime(entry.startTime)} - ` : ''}${entry.title}`;
         slot.appendChild(item);
       });
@@ -259,27 +271,32 @@ function renderAgenda() {
 
   agendaListEl.replaceChildren(...visible.map(entry => {
     const card = document.createElement('article');
-    card.className = 'agenda-card';
+    card.className = `agenda-card${entry.sourceKind ? ` schedule-${entry.sourceKind}` : ''}`;
     const title = document.createElement('strong');
     title.textContent = entry.title;
     const time = document.createElement('time');
-    time.textContent = `${formatDateLabel(entry.date)} | ${formatTime(entry.startTime)} | ${entry.type === 'timetable' ? 'Timetable' : 'Calendar'}`;
+    const kind = entry.sourceKind
+      ? `${entry.sourceKind.charAt(0).toUpperCase()}${entry.sourceKind.slice(1)}`
+      : (entry.type === 'timetable' ? 'Timetable' : 'Calendar');
+    time.textContent = `${formatDateLabel(entry.date)} | ${formatTime(entry.startTime)} | ${kind}`;
     const notes = document.createElement('p');
     notes.textContent = entry.notes || entry.sourceText || '';
     const actions = document.createElement('div');
     actions.className = 'agenda-actions';
-    const remove = document.createElement('button');
-    remove.className = 'delete-entry';
-    remove.type = 'button';
-    remove.textContent = 'Delete';
-    remove.addEventListener('click', async () => {
-      await window.jarvis?.deletePlannerEntry?.(entry.id);
-      await refreshEntries();
-    });
-    actions.appendChild(remove);
+    if (!entry.readonly) {
+      const remove = document.createElement('button');
+      remove.className = 'delete-entry';
+      remove.type = 'button';
+      remove.textContent = 'Delete';
+      remove.addEventListener('click', async () => {
+        await window.jarvis?.deletePlannerEntry?.(entry.id);
+        await refreshEntries();
+      });
+      actions.appendChild(remove);
+    }
     card.append(title, time);
     if (notes.textContent) card.appendChild(notes);
-    card.appendChild(actions);
+    if (actions.children.length) card.appendChild(actions);
     return card;
   }));
 }
@@ -290,10 +307,19 @@ function render() {
   renderAgenda();
 }
 
+function scheduleRender() {
+  if (renderFrame) return;
+  const nextFrame = window.requestAnimationFrame || (callback => window.setTimeout(callback, 16));
+  renderFrame = nextFrame(() => {
+    renderFrame = null;
+    render();
+  });
+}
+
 async function refreshEntries() {
   const result = await window.jarvis?.getPlannerEntries?.();
   entries = Array.isArray(result?.data?.entries) ? result.data.entries : [];
-  render();
+  scheduleRender();
 }
 
 quickAddEl.addEventListener('submit', async event => {
@@ -328,26 +354,30 @@ quickAddEl.addEventListener('submit', async event => {
 
 quickAddToggleEl.addEventListener('click', () => setQuickAddOpen(sidePanelEl.hidden));
 quickAddCloseEl.addEventListener('click', () => setQuickAddOpen(false));
-calendarTabEl.addEventListener('click', () => setView('calendar'));
-timetableTabEl.addEventListener('click', () => setView('timetable'));
+calendarTabEl?.addEventListener('click', () => setView('calendar'));
+timetableTabEl?.addEventListener('click', () => setView('timetable'));
 prevMonthEl.addEventListener('click', () => {
   visibleMonth.setMonth(visibleMonth.getMonth() - 1);
-  render();
+  scheduleRender();
 });
 nextMonthEl.addEventListener('click', () => {
   visibleMonth.setMonth(visibleMonth.getMonth() + 1);
-  render();
+  scheduleRender();
 });
 todayButtonEl.addEventListener('click', () => {
   const today = new Date();
   visibleMonth = new Date(today.getFullYear(), today.getMonth(), 1);
   entryDateEl.value = localDateKey(today);
   timetableDateEl.value = localDateKey(today);
-  render();
+  selectedDateKey = localDateKey(today);
+  shellEl.classList.add('date-selected');
+  scheduleRender();
 });
 timetableDateEl.addEventListener('change', () => {
   entryDateEl.value = timetableDateEl.value;
-  render();
+  selectedDateKey = timetableDateEl.value;
+  shellEl.classList.add('date-selected');
+  scheduleRender();
 });
 closeWindowEl.addEventListener('click', () => window.jarvis?.closePlanner?.());
 
@@ -355,7 +385,7 @@ window.jarvis?.onPlannerView?.(view => setView(view));
 window.jarvis?.onPlannerEntriesChanged?.(payload => {
   entries = Array.isArray(payload?.entries) ? payload.entries : entries;
   if (payload?.view) setView(payload.view);
-  render();
+  scheduleRender();
 });
 
 const todayKey = localDateKey(new Date());

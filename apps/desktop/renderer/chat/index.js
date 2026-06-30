@@ -134,6 +134,21 @@ function saveStoredList(key, value) {
 
 function normalizeResultEntries(result) {
   const intent = String(result?.intent || '');
+  if (intent === 'browser.search') {
+    const sources = Array.isArray(result?.data?.searchSummary?.sources)
+      ? result.data.searchSummary.sources
+      : (Array.isArray(result?.data?.results) ? result.data.results : []);
+    return sources.slice(0, 4).map((entry, index) => ({
+      index: index + 1,
+      name: String(entry?.title || entry?.sourceDomain || `Source ${index + 1}`),
+      type: 'web',
+      path: String(entry?.url || ''),
+      location: String(entry?.sourceDomain || ''),
+      snippet: String(entry?.snippet || ''),
+      sizeMB: 0,
+      matchScore: Number(entry?.score || 0)
+    }));
+  }
   if (!['file.search', 'folder.search', 'file.smartFind', 'file.list'].includes(intent)) {
     return [];
   }
@@ -155,10 +170,10 @@ function addResultCards(bubble, resultEntries) {
   list.className = 'message-result-list';
   for (const entry of resultEntries) {
     const item = document.createElement('li');
-    item.className = `message-result ${entry.type === 'folder' ? 'folder-result' : 'file-result'}`;
+    item.className = `message-result ${entry.type === 'folder' ? 'folder-result' : entry.type === 'web' ? 'web-result' : 'file-result'}`;
     const icon = document.createElement('span');
     icon.className = 'message-result-icon';
-    icon.textContent = entry.type === 'folder' ? 'Folder' : 'File';
+    icon.textContent = entry.type === 'folder' ? 'Folder' : entry.type === 'web' ? 'Web' : 'File';
     const body = document.createElement('span');
     body.className = 'message-result-body';
     const name = document.createElement('strong');
@@ -167,8 +182,13 @@ function addResultCards(bubble, resultEntries) {
     const metaParts = [
       entry.location,
       entry.sizeMB > 0 ? `${entry.sizeMB} MB` : '',
-      entry.matchScore > 0 ? `${Math.round(entry.matchScore)}% match` : ''
+      entry.matchScore > 0 && entry.type !== 'web' ? `${Math.round(entry.matchScore)}% match` : ''
     ].filter(Boolean);
+    if (entry.snippet) {
+      const snippet = document.createElement('small');
+      snippet.textContent = entry.snippet;
+      body.appendChild(snippet);
+    }
     if (metaParts.length > 0 || entry.path) {
       const meta = document.createElement('small');
       meta.textContent = metaParts.length > 0 ? metaParts.join(' - ') : entry.path;

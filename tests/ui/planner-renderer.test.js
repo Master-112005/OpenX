@@ -12,7 +12,7 @@ describe('Planner Renderer', function() {
   it('should render calendar and timetable in an assistant-matched glass window', function() {
     assert.match(html, /class="planner-shell"/);
     assert.match(html, /id="calendar-tab"/);
-    assert.match(html, /id="timetable-tab"/);
+    assert.doesNotMatch(html, /id="timetable-tab"/);
     assert.match(html, /id="month-grid"/);
     assert.match(html, /id="time-grid"/);
     assert.match(html, /id="quick-add-toggle"/);
@@ -25,8 +25,15 @@ describe('Planner Renderer', function() {
     assert.match(css, /var\(--glass-shadow\)/);
     assert.match(css, /\.view-switch/);
     assert.match(css, /grid-template-columns:\s*minmax\(0,\s*1fr\)/);
+    assert.match(css, /\.planner-shell\.date-selected \.content-grid/);
+    assert.match(css, /grid-template-columns:\s*minmax\(0,\s*1\.25fr\)\s*minmax\(320px,\s*0\.75fr\)/);
+    assert.match(css, /\.planner-shell\.date-selected \.timetable-view/);
+    assert.match(css, /@keyframes timetable-reveal/);
     assert.match(css, /\.day-cell\.selected/);
     assert.match(css, /\.day-cell:active/);
+    assert.match(css, /\.day-reminder-count/);
+    assert.match(css, /\.day-item\.schedule-reminder/);
+    assert.match(css, /\.slot-entry\.schedule-alarm/);
     assert.match(css, /\.side-panel\[hidden\]/);
     assert.match(css, /\.side-panel-head/);
     assert.match(css, /\.panel-close-button/);
@@ -47,6 +54,11 @@ describe('Planner Renderer', function() {
     assert.match(script, /quickAddCloseEl\.addEventListener\('click'/);
     assert.match(script, /quickAddSubmitEl\.disabled = true/);
     assert.match(script, /selectedDateKey/);
+    assert.match(script, /scheduleRender/);
+    assert.match(script, /requestAnimationFrame/);
+    assert.match(script, /day-reminder-count/);
+    assert.match(script, /sourceKind/);
+    assert.match(script, /date-selected/);
     assert.match(script, /getPlannerEntries/);
     assert.match(script, /addPlannerEntry/);
     assert.match(script, /deletePlannerEntry/);
@@ -54,6 +66,9 @@ describe('Planner Renderer', function() {
     assert.match(script, /onPlannerEntriesChanged/);
     assert.match(script, /closePlanner/);
     assert.match(mainScript, /function createPlannerWindow/);
+    assert.match(mainScript, /function scheduleToPlannerEntry/);
+    assert.match(mainScript, /function getPlannerEntriesForRenderer/);
+    assert.match(mainScript, /planner:entriesChanged/);
     assert.match(mainScript, /transparent:\s*true/);
     assert.match(mainScript, /show:\s*false/);
     assert.match(mainScript, /paintWhenInitiallyHidden:\s*true/);

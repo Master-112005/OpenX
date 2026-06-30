@@ -27,7 +27,57 @@ describe('Browser Controller', function() {
     assert.equal(result.success, true);
     assert.equal(result.data.background, true);
     assert.equal(result.data.results[0].snippet, 'apple wwdc answer');
+    assert.equal(result.data.searchSummary.text, 'apple wwdc answer');
     assert.equal(opened, false);
+  });
+
+  it('should rank relevant web answers above low quality search pages', async function() {
+    const controller = new BrowserController({});
+    controller.checkInternetConnection = async () => true;
+
+    controller._searchInstantAnswer = async () => [];
+    controller._searchDuckDuckGoHtml = async function(query) {
+      return this._rankSearchResults(query, [
+        {
+          title: 'Subscribe to our newsletter',
+          snippet: 'Sign in and subscribe to continue reading. Privacy policy and cookie notice.',
+          url: 'https://example.com/paywall'
+        },
+        {
+          title: 'What is Node.js? - Node.js guide',
+          snippet: 'Node.js is a JavaScript runtime built on Chrome V8 that lets developers run JavaScript outside the browser.',
+          url: 'https://developer.mozilla.org/en-US/docs/Learn/Server-side/Node_server_without_framework'
+        }
+      ]);
+    };
+
+    const result = await controller.search('what is node js');
+
+    assert.match(result.data.answer.text, /Node\.js is a JavaScript runtime/);
+    assert.equal(result.data.results[0].sourceDomain, 'developer.mozilla.org');
+    assert.equal(result.data.searchSummary.sources[0].sourceDomain, 'developer.mozilla.org');
+  });
+
+  it('should build a source-backed search summary when no direct answer is strong enough', async function() {
+    const controller = new BrowserController({});
+    controller.checkInternetConnection = async () => true;
+
+    controller._searchInstantAnswer = async () => [];
+    controller._searchDuckDuckGoHtml = async function(query) {
+      return this._rankSearchResults(query, [
+        {
+          title: 'OpenX search result',
+          snippet: 'Ranked web sources.',
+          url: 'https://example.com/openx-search'
+        }
+      ]);
+    };
+
+    const result = await controller.search('openx assistant search routing');
+
+    assert.equal(result.data.answer, null);
+    assert.equal(result.data.searchSummary.sourceDomain, 'example.com');
+    assert.match(result.data.searchSummary.text, /Ranked web sources/);
   });
 
   it('should open the browser when explicitly requested', async function() {

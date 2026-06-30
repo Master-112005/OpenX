@@ -210,6 +210,11 @@ button {
   padding: 20px;
 }
 
+.planner-shell.date-selected .content-grid,
+.planner-shell[data-view="timetable"] .content-grid {
+  grid-template-columns: minmax(0, 1.25fr) minmax(320px, 0.75fr);
+}
+
 .workspace,
 .side-panel {
   background: var(--adaptive-surface);
@@ -300,9 +305,20 @@ button {
   transform: scale(0.94);
 }
 
-.planner-shell[data-view="calendar"] .timetable-view,
-.planner-shell[data-view="timetable"] .calendar-view {
+.timetable-view {
   display: none;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateX(12px);
+}
+
+.planner-shell.date-selected .timetable-view,
+.planner-shell[data-view="timetable"] .timetable-view {
+  animation: timetable-reveal 0.28s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  display: flex;
+  opacity: 1;
+  pointer-events: auto;
+  transform: translateX(0);
 }
 
 .section-head,
@@ -415,6 +431,7 @@ h1 {
   font-size: 13px;
   font-weight: 800;
   justify-content: space-between;
+  position: relative;
 }
 
 .day-dot {
@@ -422,6 +439,22 @@ h1 {
   border-radius: 50%;
   height: 7px;
   width: 7px;
+}
+
+.day-reminder-count {
+  align-items: center;
+  background: linear-gradient(145deg, rgba(255, 209, 102, 0.95), rgba(255, 151, 96, 0.9));
+  border: 1px solid rgba(255, 239, 190, 0.6);
+  border-radius: 999px;
+  box-shadow: 0 6px 18px rgba(255, 184, 76, 0.18);
+  color: #211609;
+  display: grid;
+  font-size: 10px;
+  font-weight: 850;
+  height: 18px;
+  justify-content: center;
+  min-width: 18px;
+  padding: 0 5px;
 }
 
 .day-items {
@@ -442,6 +475,20 @@ h1 {
   padding: 4px 6px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.day-item.schedule-reminder,
+.slot-entry.schedule-reminder {
+  background: linear-gradient(145deg, rgba(255, 209, 102, 0.24), rgba(255, 172, 76, 0.16));
+  border-color: rgba(255, 209, 102, 0.32);
+  color: #fff1c7;
+}
+
+.day-item.schedule-alarm,
+.slot-entry.schedule-alarm {
+  background: linear-gradient(145deg, rgba(255, 125, 134, 0.24), rgba(255, 96, 112, 0.14));
+  border-color: rgba(255, 125, 134, 0.32);
+  color: #ffd8dc;
 }
 
 .quick-add {
@@ -687,6 +734,13 @@ html[data-glass-contrast="dark-text"] .slot-entry {
   text-shadow: 0 1px 2px rgba(255, 255, 255, 0.46);
 }
 
+html[data-glass-contrast="dark-text"] .day-item.schedule-reminder,
+html[data-glass-contrast="dark-text"] .slot-entry.schedule-reminder,
+html[data-glass-contrast="dark-text"] .day-item.schedule-alarm,
+html[data-glass-contrast="dark-text"] .slot-entry.schedule-alarm {
+  color: #111827;
+}
+
 html[data-glass-contrast="dark-text"] .delete-entry {
   color: #8f1f2b;
 }
@@ -747,5 +801,17 @@ html[data-glass-contrast="dark-text"] .panel-close-button:hover {
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes timetable-reveal {
+  from {
+    opacity: 0;
+    transform: translateX(14px) scale(0.99);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
   }
 }

@@ -460,7 +460,8 @@ const INTENT_DEFINITIONS = [
     action: 'alarm.set',
     entities: [
       { name: 'timeExpression', type: 'string', required: true },
-      { name: 'alarmLabel', type: 'string', required: false }
+      { name: 'alarmLabel', type: 'string', required: false },
+      { name: 'recurrence', type: 'string', required: false }
     ],
     description: 'Set an alarm'
   },

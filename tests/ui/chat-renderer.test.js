@@ -42,6 +42,14 @@ describe('Chat Renderer UI', function() {
     assert.match(css, /\.message-result-path\s*\{/);
   });
 
+  it('should render web search sources as result cards', function() {
+    assert.match(script, /intent === 'browser\.search'/);
+    assert.match(script, /result\?\.data\?\.searchSummary\?\.sources/);
+    assert.match(script, /type: 'web'/);
+    assert.match(script, /entry\.type === 'web' \? 'Web'/);
+    assert.match(css, /\.message-result\.web-result \.message-result-icon/);
+  });
+
   it('should display category-specific reminder symbols', function() {
     assert.match(script, /education: \{ color: '[^']+', symbol: '🎓'/);
     assert.match(script, /water: \{ color: '[^']+', symbol: '💧'/);

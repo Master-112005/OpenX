@@ -207,6 +207,11 @@
   padding: 6px 7px;
 }
 
+.message-result.web-result .message-result-icon {
+  background: color-mix(in srgb, var(--success-color) 22%, transparent);
+  border-color: color-mix(in srgb, var(--success-color) 34%, transparent);
+}
+
 .message-result-body {
   display: flex;
   flex: 1 1 auto;

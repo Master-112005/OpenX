@@ -1724,6 +1724,27 @@ describe('Action Router', function() {
     assert.equal(compact.entities.alarmLabel, 'drink water');
   });
 
+  it('should route daily reminders and alarms with recurrence context', async function() {
+    const config = { permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } } };
+    const router = new ActionRouter(config, {
+      execute(actionId, entities) {
+        return { success: true, data: { actionId, ...entities, dueAt: new Date().toISOString() } };
+      }
+    });
+
+    const alarm = await router.process('set daily alarm at 6:30 am to wake up', 'chat');
+    const reminder = await router.process('remind me every day at 8 am to drink water', 'chat');
+
+    assert.equal(alarm.intent, 'alarm.set');
+    assert.equal(alarm.entities.timeExpression, '6:30 am');
+    assert.equal(alarm.entities.alarmLabel, 'wake up');
+    assert.equal(alarm.entities.recurrence, 'daily');
+    assert.equal(reminder.intent, 'reminder.set');
+    assert.equal(reminder.entities.timeExpression, '8 am');
+    assert.equal(reminder.entities.reminderText, 'drink water');
+    assert.equal(reminder.entities.recurrence, 'daily');
+  });
+
   it('should route timer reminder and alarm management commands', async function() {
     const config = { permissions: { levels: { low: { requiresConfirmation: false, requiresAuth: false } } } };
     const router = new ActionRouter(config, {

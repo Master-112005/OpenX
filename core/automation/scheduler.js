@@ -136,13 +136,14 @@ class SchedulerController {
     return { success: true, data: this._stopwatchData(item) };
   }
 
-  setAlarm(timeExpression, alarmLabel = '') {
+  setAlarm(timeExpression, alarmLabel = '', options = {}) {
     const dueAt = this._parseTimeExpression(timeExpression);
     if (!dueAt) {
       return { success: false, error: 'Invalid alarm time' };
     }
 
     const label = String(alarmLabel || '').trim();
+    const recurrence = String(options.recurrence || '').trim();
     return this._scheduleNotification({
       kind: 'Alarm',
       title: label ? `JARVIS Alarm: ${label}` : 'JARVIS Alarm',
@@ -150,7 +151,10 @@ class SchedulerController {
       dueAt,
       category: 'alarm',
       symbol: '\u23F0',
-      metadata: label ? { alarmLabel: label } : {}
+      metadata: {
+        ...(label ? { alarmLabel: label } : {}),
+        ...(recurrence ? { recurrence } : {})
+      }
     });
   }
 
@@ -453,7 +457,9 @@ class SchedulerController {
           symbol: item.symbol,
           id: item.id,
           durationMinutes: item.durationMinutes,
-          durationMs: item.durationMs
+          durationMs: item.durationMs,
+          alarmLabel: item.alarmLabel,
+          recurrence: item.recurrence || null
         }
       };
     } catch (err) {

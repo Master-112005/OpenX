@@ -546,16 +546,25 @@ const RESPONSE_BUILDERS = {
     'browser.search': context => {
       const query = valueFromContext(context, 'query');
       const answer = valueFromContext(context, 'answer', null);
+      const searchSummary = valueFromContext(context, 'searchSummary', null);
       if (answer?.text) {
-        return answer.text;
+        return answer.sourceTitle ? `${answer.text} Source: ${answer.sourceTitle}.` : answer.text;
+      }
+
+      if (searchSummary?.text) {
+        const source = searchSummary.sourceTitle || searchSummary.sourceDomain || '';
+        return source
+          ? `Most relevant result for "${query}": ${searchSummary.text} Source: ${source}.`
+          : `Most relevant result for "${query}": ${searchSummary.text}`;
       }
 
       const results = valueFromContext(context, 'results', []);
       if (Array.isArray(results) && results.length > 0) {
         const top = results[0];
         const snippet = top.snippet || top.title || '';
+        const source = top.sourceDomain || top.title || '';
         return snippet
-          ? `Here's what I found for "${query}": ${snippet}`
+          ? `Most relevant result for "${query}": ${snippet}${source ? ` Source: ${source}.` : ''}`
           : `I found results for "${query}".`;
       }
 
@@ -767,18 +776,22 @@ const RESPONSE_BUILDERS = {
     },
     'alarm.set': context => {
       const time = valueFromContext(context, 'timeExpression');
+      const recurrence = valueFromContext(context, 'recurrence', null);
+      const repeat = recurrence ? `${recurrence.replace(/-/g, ' ')} ` : '';
       return chooseVariant(`alarm.set:${time}`, [
-        `I've set an alarm for ${time}.`,
-        `Alarm is set for ${time}.`,
-        `Done, I'll wake you at ${time}.`
+        `I've set a ${repeat}alarm for ${time}.`,
+        `Your ${repeat}alarm is set for ${time}.`,
+        `Done, I'll wake you at ${time}${recurrence ? ` ${repeat.trim()}` : ''}.`
       ]);
     },
     'reminder.set': context => {
       const txt = valueFromContext(context, 'reminderText');
+      const recurrence = valueFromContext(context, 'recurrence', null);
+      const repeat = recurrence ? `${recurrence.replace(/-/g, ' ')} ` : '';
       return chooseVariant(`reminder.set:${txt}`, [
-        `I've added a reminder to ${txt}.`,
-        `Okay, I will remind you to ${txt}.`,
-        `Added reminder: ${txt}.`
+        `I've added a ${repeat}reminder to ${txt}.`,
+        `Okay, I will remind you ${recurrence ? repeat : ''}to ${txt}.`,
+        `Added ${repeat}reminder: ${txt}.`
       ]);
     },
     'timer.pause': () => 'Paused the active timer.',

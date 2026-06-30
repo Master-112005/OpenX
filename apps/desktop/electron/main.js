@@ -402,9 +402,57 @@ function createSettingsWindow() {
 
 function sendPlannerEntries(view = 'calendar') {
   if (!plannerWindow || plannerWindow.isDestroyed()) return;
-  const planner = assistant?.automation?.planner;
-  const entries = planner?.listEntries?.()?.data?.entries || [];
-  plannerWindow.webContents.send('planner:entriesChanged', { entries, view });
+  try {
+    const entries = getPlannerEntriesForRenderer();
+    plannerWindow.webContents.send('planner:entriesChanged', { entries, view });
+  } catch (error) {
+    mainLogger.warn('Failed to send planner entries', { error: error.message });
+  }
+}
+
+function localPlannerDateKey(date) {
+  const value = new Date(date);
+  return `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
+}
+
+function scheduleToPlannerEntry(item) {
+  if (!item?.id || !item.dueAt) return null;
+  const due = new Date(item.dueAt);
+  if (Number.isNaN(due.getTime())) return null;
+  const kind = String(item.kind || '').trim() || 'Schedule';
+  const isReminderOrAlarm = /^(?:reminder|alarm)$/i.test(kind);
+  if (!isReminderOrAlarm || !['scheduled', 'paused', 'due'].includes(item.status)) return null;
+  const title = item.message || item.title || kind;
+  return {
+    id: `schedule-${item.id}`,
+    type: 'timetable',
+    title,
+    notes: item.recurrence ? `${kind} - repeats ${String(item.recurrence).replace(/-/g, ' ')}` : kind,
+    date: localPlannerDateKey(due),
+    startTime: `${String(due.getHours()).padStart(2, '0')}:${String(due.getMinutes()).padStart(2, '0')}`,
+    endTime: '',
+    sourceText: item.title || title,
+    sourceKind: kind.toLowerCase(),
+    scheduleId: item.id,
+    category: item.category || '',
+    symbol: item.symbol || '',
+    recurrence: item.recurrence || '',
+    readonly: true,
+    createdAt: item.createdAt || item.dueAt,
+    updatedAt: item.dueAt
+  };
+}
+
+function getPlannerEntriesForRenderer() {
+  try {
+    const plannerEntries = assistant?.automation?.planner?.listEntries?.()?.data?.entries || [];
+    const schedules = assistant?.automation?.scheduler?.listSchedules?.(null, 'all')?.data?.entries || [];
+    const scheduleEntries = schedules.map(scheduleToPlannerEntry).filter(Boolean);
+    return [...plannerEntries, ...scheduleEntries];
+  } catch (error) {
+    mainLogger.warn('Failed to collect planner entries', { error: error.message });
+    return [];
+  }
 }
 
 function lowerChatWindowForPlanner() {
@@ -622,9 +670,12 @@ function handleTimerWidgetCommand(payload) {
 function handlePlannerCommand(payload) {
   if (!payload?.success || !payload.intent) return;
   const intent = String(payload.intent);
+  if (/^(?:reminder|alarm)\.(?:set|cancel|clear|snooze|list)$/.test(intent)) {
+    sendPlannerEntries('calendar');
+    return;
+  }
   if (!/^(?:calendar|timetable)\./.test(intent)) return;
-  const view = intent.startsWith('timetable.') ? 'timetable' : 'calendar';
-  createPlannerWindow(view);
+  createPlannerWindow('calendar');
 }
 
 function createTray() {
@@ -832,7 +883,9 @@ function setupIPC() {
   });
 
   registerIpcHandler('planner:getEntries', async () => {
-    return assistant?.automation?.planner?.listEntries?.() || { success: false, error: 'Planner unavailable' };
+    if (!assistant?.automation?.planner) return { success: false, error: 'Planner unavailable' };
+    const entries = getPlannerEntriesForRenderer();
+    return { success: true, data: { entries, count: entries.length } };
   });
 
   registerIpcHandler('planner:addEntry', async (_event, payload) => {
@@ -1219,6 +1272,7 @@ app.whenReady().then(async () => {
   eventBus.subscribe(EVENTS.SCHEDULE_DUE, envelope => {
     if (String(envelope.payload?.kind || '').toLowerCase() === 'timer') showTimerWidget();
     presentScheduleAlert(envelope.payload);
+    sendPlannerEntries('calendar');
   });
   eventBus.subscribe(EVENTS.COMMAND_EXECUTED, envelope => handleTimerWidgetCommand(envelope.payload));
   eventBus.subscribe(EVENTS.COMMAND_EXECUTED, envelope => handlePlannerCommand(envelope.payload));

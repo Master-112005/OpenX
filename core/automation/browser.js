@@ -293,6 +293,7 @@ class BrowserController {
     const results = await this._searchWebInBackground(query);
     this.lastSearch = { query, searchUrl, results };
     const answer = this._deriveAnswer(query, results);
+    const searchSummary = this._buildSearchSummary(query, results, answer);
     return {
       success: true,
       data: {
@@ -300,7 +301,8 @@ class BrowserController {
         searchUrl,
         background: true,
         results,
-        answer
+        answer,
+        searchSummary
       }
     };
   }
@@ -651,6 +653,18 @@ class BrowserController {
     if (/\b(?:best|top)\b.*\bmovies?\b/i.test(normalized)) {
       return `${normalized} ranked list`;
     }
+    if (/\b(?:latest|today|breaking|news|current|recent|updates?)\b/i.test(normalized)) {
+      return `${normalized} latest updated reliable source`;
+    }
+    if (/^(?:what\s+is|what\s+are|define|meaning\s+of|explain)\b/i.test(normalized)) {
+      return `${normalized} concise explanation`;
+    }
+    if (/^(?:how\s+to|how\s+do|how\s+can)\b/i.test(normalized)) {
+      return `${normalized} step by step guide`;
+    }
+    if (/\b(?:vs|versus|compare|comparison|difference between|better than)\b/i.test(normalized)) {
+      return `${normalized} comparison difference`;
+    }
     return normalized;
   }
 
@@ -696,20 +710,34 @@ class BrowserController {
     return results
       .map((result, index) => {
         const text = `${result.title || ''} ${result.snippet || ''}`.toLowerCase();
+        const title = String(result.title || '').toLowerCase();
+        const sourceDomain = this._sourceDomain(result.url);
         let score = Number(result.score || 0) + Math.max(0, 20 - index);
+        const titleHits = queryTokens.filter(token => title.includes(token)).length;
+        const bodyHits = queryTokens.filter(token => text.includes(token)).length;
+        const coverage = queryTokens.length > 0 ? bodyHits / queryTokens.length : 0;
 
         queryTokens.forEach(token => {
           if (text.includes(token)) score += 6;
         });
+        score += titleHits * 6;
+        if (coverage >= 0.75) score += 14;
+        if (coverage >= 0.5) score += 6;
         answerWords.forEach(word => {
           if (text.includes(word)) score += 5;
         });
         if (profile.phrases.some(phrase => text.includes(phrase))) score += 10;
         if (result.source === 'duckduckgo-instant-answer') score += 35;
+        if (this._isTrustedSourceDomain(sourceDomain, profile.kind)) score += 8;
         if (/full list|all season|history of/i.test(text)) score -= 14;
+        if (this._isLowQualitySearchText(text)) score -= 35;
+        if (profile.kind === 'latest' && /\b(?:latest|today|breaking|live|updated|2026)\b/i.test(text)) score += 12;
+        if (profile.kind === 'definition' && /\b(?:is|refers to|means|defined as|definition)\b/i.test(text)) score += 12;
+        if (profile.kind === 'how-to' && /\b(?:how to|steps?|guide|tutorial|instructions?)\b/i.test(text)) score += 10;
+        if (profile.kind === 'comparison' && /\b(?:vs|versus|compare|comparison|difference|better)\b/i.test(text)) score += 10;
         if (/official|wikipedia|imdb|rottentomatoes|scorecard|highlights|final|fixtures?|schedule|release date/i.test(text)) score += 4;
 
-        return { ...result, score };
+        return { ...result, score, sourceDomain };
       })
       .sort((left, right) => right.score - left.score)
       .slice(0, 5);
@@ -825,10 +853,13 @@ class BrowserController {
         if (part.kind === 'title') {
           score -= 30;
         }
+        if (this._isTrustedSourceDomain(result.sourceDomain || this._sourceDomain(result.url), profile.kind)) {
+          score += 10;
+        }
         if (/official|wikipedia|imdb|rottentomatoes|espn|fifa|apple|warner bros|legendary/i.test(`${sourceTitle} ${sentence}`)) {
           score += 8;
         }
-        if (/cookie|privacy policy|sign in|subscribe|advertisement/i.test(lower)) {
+        if (this._isLowQualitySearchText(lower)) {
           score -= 30;
         }
         candidates.push({ text: sentence, sourceTitle, score, termCoverage });
@@ -842,6 +873,34 @@ class BrowserController {
 
   _classifyAnswerProfile(query) {
     const normalized = String(query || '').toLowerCase();
+    if (/\b(?:latest|today|breaking|news|current|recent|updates?)\b/.test(normalized)) {
+      return {
+        kind: 'latest',
+        answerWords: ['latest', 'today', 'breaking', 'reported', 'announced', 'updated', 'live', 'current'],
+        phrases: ['latest news', 'breaking news', 'live updates', 'as of']
+      };
+    }
+    if (/^(?:what\s+is|what\s+are|define|meaning\s+of|explain)\b/.test(normalized)) {
+      return {
+        kind: 'definition',
+        answerWords: ['is', 'are', 'means', 'refers', 'definition', 'defined'],
+        phrases: ['refers to', 'is a', 'is an', 'defined as']
+      };
+    }
+    if (/^(?:how\s+to|how\s+do|how\s+can)\b/.test(normalized)) {
+      return {
+        kind: 'how-to',
+        answerWords: ['steps', 'step', 'guide', 'tutorial', 'instructions', 'use', 'create', 'install', 'fix'],
+        phrases: ['how to', 'step by step', 'follow these steps']
+      };
+    }
+    if (/\b(?:vs|versus|compare|comparison|difference between|better than)\b/.test(normalized)) {
+      return {
+        kind: 'comparison',
+        answerWords: ['compare', 'comparison', 'difference', 'versus', 'better', 'pros', 'cons'],
+        phrases: ['compared with', 'difference between', 'pros and cons']
+      };
+    }
     if (/\b(?:release date|premiere|launch date|when)\b/.test(normalized)) {
       return {
         kind: 'release-date',
@@ -907,6 +966,64 @@ class BrowserController {
       .split(/\s+/)
       .map(token => token.trim())
       .filter(token => token.length > 1 && !stopWords.has(token));
+  }
+
+  _buildSearchSummary(query, results, answer = null) {
+    const ranked = Array.isArray(results) ? results.filter(Boolean).slice(0, 3) : [];
+    const top = ranked[0] || null;
+    const summaryText = answer?.text || this._normalizeAnswerText(top?.snippet || top?.title || '');
+    return {
+      query: String(query || '').trim(),
+      text: summaryText || '',
+      sourceTitle: answer?.sourceTitle || top?.title || '',
+      sourceDomain: top?.sourceDomain || this._sourceDomain(top?.url),
+      resultCount: ranked.length,
+      sources: ranked.map((result, index) => ({
+        index: index + 1,
+        title: result.title || result.sourceDomain || `Result ${index + 1}`,
+        snippet: this._normalizeAnswerText(result.snippet || ''),
+        url: this._normalizeResultUrl(result.url || ''),
+        sourceDomain: result.sourceDomain || this._sourceDomain(result.url),
+        score: Number(result.score || 0)
+      }))
+    };
+  }
+
+  _sourceDomain(url) {
+    try {
+      return new URL(String(url || '')).hostname.replace(/^www\./i, '');
+    } catch (error) {
+      return '';
+    }
+  }
+
+  _isTrustedSourceDomain(domain, profileKind = 'general') {
+    const source = String(domain || '').toLowerCase();
+    if (!source) return false;
+    const trusted = [
+      'wikipedia.org',
+      'imdb.com',
+      'rottentomatoes.com',
+      'espncricinfo.com',
+      'espn.com',
+      'fifa.com',
+      'apple.com',
+      'microsoft.com',
+      'developer.mozilla.org',
+      'docs.github.com'
+    ];
+    if (trusted.some(domainName => source === domainName || source.endsWith(`.${domainName}`))) {
+      return true;
+    }
+    if (profileKind === 'latest') {
+      return /\b(?:reuters|apnews|bbc|thehindu|indianexpress|espncricinfo|espn|cricbuzz|techcrunch|theverge)\./.test(source);
+    }
+    return false;
+  }
+
+  _isLowQualitySearchText(text) {
+    return /\b(?:cookie|privacy policy|sign in|log in|subscribe|advertisement|enable javascript|404|access denied)\b/i
+      .test(String(text || ''));
   }
 
   _normalizeAnswerText(text) {

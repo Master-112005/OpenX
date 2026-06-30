@@ -843,6 +843,28 @@ describe('Automation Engine', function() {
     assert.ok(nextSunday.getTime() > Date.now());
   });
 
+  it('should preserve and reschedule recurring alarms', function() {
+    const SchedulerController = require('../../core/automation/scheduler');
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openx-scheduler-'));
+    const scheduler = new SchedulerController({ app: { dataDir: tempDir } });
+
+    try {
+      const result = scheduler.setAlarm('6:30 am', 'wake up', { recurrence: 'daily' });
+      assert.equal(result.success, true);
+      assert.equal(result.data.recurrence, 'daily');
+      assert.equal(result.data.alarmLabel, 'wake up');
+
+      const completed = scheduler.complete(result.data.id);
+      assert.equal(completed.success, true);
+      assert.equal(completed.data.status, 'scheduled');
+      assert.equal(completed.data.recurrence, 'daily');
+      assert.ok(new Date(completed.data.dueAt).getTime() > new Date(result.data.dueAt).getTime());
+    } finally {
+      scheduler.destroy();
+      fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it('should route media actions correctly', function() {
     const engine = new AutomationEngine({});
     const actions = engine.getActions();

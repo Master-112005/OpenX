@@ -160,7 +160,9 @@ class AutomationEngine {
         entities.platform
       ),
       'timer.set': (entities) => this.scheduler.setTimer(entities.duration),
-      'alarm.set': (entities) => this.scheduler.setAlarm(entities.timeExpression, entities.alarmLabel),
+      'alarm.set': (entities) => this.scheduler.setAlarm(entities.timeExpression, entities.alarmLabel, {
+        recurrence: entities.recurrence
+      }),
       'reminder.set': (entities) => this.scheduler.setReminder(entities.reminderText, {
         timeExpression: entities.timeExpression,
         duration: entities.duration,

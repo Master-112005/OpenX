@@ -111,6 +111,27 @@ describe('Response Generator', function() {
     assert.ok(!result.includes('Full list'));
   });
 
+  it('should summarize source-backed web search results when no direct answer exists', function() {
+    const gen = new ResponseGenerator();
+    const result = gen.generate('success', 'browser.search', {
+      entities: { query: 'node js' },
+      result: {
+        data: {
+          query: 'node js',
+          searchSummary: {
+            text: 'Node.js is a JavaScript runtime built on Chrome V8.',
+            sourceTitle: 'Node.js guide'
+          },
+          results: [{ snippet: 'Generic result.' }]
+        }
+      }
+    });
+
+    assert.ok(result.includes('Most relevant result'));
+    assert.ok(result.includes('Node.js is a JavaScript runtime'));
+    assert.ok(result.includes('Node.js guide'));
+  });
+
   it('should describe site-specific browser searches', function() {
     const gen = new ResponseGenerator();
     const result = gen.generate('success', 'browser.siteSearch', {

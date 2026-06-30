@@ -4073,6 +4073,7 @@ const newTabMatch = input.match(
 
   _resolveExplicitReminderIntent(rawText, preparedInput) {
     const input = String(preparedInput?.correctedText || rawText || '').trim();
+    const raw = String(rawText || input || '').trim();
     const durationWords = '(?:\\d+|one|two|three|four|five|six|seven|eight|nine|ten|fifteen|twenty|thirty|forty(?:\\s*five)?|sixty)';
     const durationUnits = '(?:seconds?|secs?|minutes?|mins?|hours?|hrs?)';
     const taskTimer = input.match(/^(?:set|create|add)\s+(?:a\s+)?timer\s+for\s+(.+?)\s+at\s+(\d{1,2}(?:(?::|\s+)\d{2})?\s*(?:am|pm)?)$/i);
@@ -4086,7 +4087,7 @@ const newTabMatch = input.match(
       `^(?:set|start|create|add)\\s+(?:a\\s+)?timer\\s+(?:to|for)\\s+(.+?)\\s+in\\s+(${durationWords}\\s*${durationUnits})$`,
       'i'
     ));
-    if (!taskTimer && !taskDurationTimer && !/^(?:remind|notify|alert|set\s+(?:a\s+)?reminder|create\s+(?:a\s+)?reminder|add\s+(?:a\s+)?reminder|schedule\s+(?:a\s+)?reminder)\b/i.test(input)) {
+    if (!taskTimer && !taskDurationTimer && !/^(?:(?:daily|every\s+(?:day|morning|evening|night|weekday|week))\s+)?(?:remind|notify|alert|set\s+(?:a\s+)?reminder|create\s+(?:a\s+)?reminder|add\s+(?:a\s+)?reminder|schedule\s+(?:a\s+)?reminder)\b/i.test(input)) {
       return null;
     }
 
@@ -4123,10 +4124,13 @@ const newTabMatch = input.match(
     if (!entities.reminderText && correctedEntities.reminderText) {
       entities.reminderText = correctedEntities.reminderText;
     }
+    entities.recurrence = entities.recurrence || correctedEntities.recurrence || this._extractScheduleRecurrence(`${raw} ${input}`);
+    entities.timeExpression = this._stripScheduleRecurrenceFromTimeExpression(entities.timeExpression);
     if (!entities.reminderText) {
       const fallbackText = input
-        .replace(/^(?:(?:remind|notify|alert)(?:\s+me)?|set\s+(?:a\s+)?reminder|create\s+(?:a\s+)?reminder|add\s+(?:a\s+)?reminder)\s+(?:to\s+)?/i, '')
+        .replace(/^(?:(?:daily|every\s+(?:day|morning|evening|night|weekday|week))\s+)?(?:(?:remind|notify|alert)(?:\s+me)?|set\s+(?:a\s+)?reminder|create\s+(?:a\s+)?reminder|add\s+(?:a\s+)?reminder)\s+(?:to\s+)?/i, '')
         .replace(/^(?:at|for|in)\s+\d{1,2}(?:(?::|\s+)\d{2})?\s*(?:am|pm)?(?:\s+(?:today|tomorrow))?\s*/i, '')
+        .replace(/^(?:every\s+(?:day|morning|evening|night|weekday|week)|daily)\s*/i, '')
         .trim();
       if (fallbackText && !/^(?:me|myself|today|tomorrow|am|pm)$/i.test(fallbackText)) {
         entities.reminderText = fallbackText;
@@ -4206,6 +4210,9 @@ const newTabMatch = input.match(
     }
 
     const entities = this.entityExtractor.extract(intent, raw);
+    const correctedEntities = this.entityExtractor.extract(intent, corrected);
+    entities.recurrence = entities.recurrence || correctedEntities.recurrence || this._extractScheduleRecurrence(combined);
+    entities.timeExpression = this._stripScheduleRecurrenceFromTimeExpression(entities.timeExpression);
     if (entities.timeExpression) {
       return { intent, confidence: 1, entities };
     }
@@ -4215,11 +4222,40 @@ const newTabMatch = input.match(
       return {
         intent,
         confidence: 0.95,
-        entities: { timeExpression: timeExprMatch[1].replace(/\s+/g, ' ').trim() }
+        entities: {
+          timeExpression: timeExprMatch[1].replace(/\s+/g, ' ').trim(),
+          recurrence: this._extractScheduleRecurrence(combined) || undefined
+        }
       };
     }
 
     return null;
+  }
+
+  _extractScheduleRecurrence(value) {
+    const source = String(value || '').toLowerCase();
+    if (/\bevery\s+(?:one\s+)?hour\b|\bhourly\b/.test(source)) return 'hourly';
+    if (/\bevery\s+(?:two|2)\s+hours?\b/.test(source)) return 'every-2-hours';
+    if (/\bevery\s+weekday(?:\s+morning)?\b/.test(source)) return source.includes('morning') ? 'weekday-morning' : 'weekday';
+    if (/\bevery\s+(?:day|morning|evening|night)\b|\bdaily\b/.test(source)) {
+      if (source.includes('morning')) return 'daily-morning';
+      if (source.includes('evening')) return 'daily-evening';
+      if (source.includes('night')) return 'daily-night';
+      return 'daily';
+    }
+    if (/\bevery\s+week\b|\bweekly\b/.test(source)) return 'weekly';
+    return null;
+  }
+
+  _stripScheduleRecurrenceFromTimeExpression(value) {
+    const source = String(value || '').trim();
+    if (!source) return source;
+    const cleaned = source
+      .replace(/^(?:every\s+(?:day|morning|evening|night|weekday|week)|daily|weekly)\s+(?:at\s+)?/i, '')
+      .replace(/^at\s+/i, '')
+      .trim();
+    if (/^(?:every\s+(?:hour|two\s+hours?|2\s+hours?)|hourly)$/i.test(cleaned)) return '';
+    return cleaned;
   }
 
 _resolveExplicitTimerIntent(rawText, preparedInput) {
