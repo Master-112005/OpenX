@@ -1,33 +1,47 @@
 'use strict';
 
+const MetricsCollector = require('./MetricsCollector');
+const LatencyMonitor = require('./LatencyMonitor');
+
 /**
- * Purpose: Defines the future Voice metrics boundary.
- * Responsibility: Provide a no-op metric recorder interface.
- * Dependencies: None in Phase 1.
- * Future implementation notes: Timing, counters, and health metrics can be introduced without changing callers.
+ * Purpose: Records local Voice metrics.
+ * Responsibility: Provide counter and timing APIs for voice components without changing behavior.
+ * Dependencies: MetricsCollector and LatencyMonitor.
+ * Lifecycle: Injected into voice components by VoiceSessionManager or DiagnosticsManager.
+ * Future implementation notes: Keep this local and metadata-only.
  */
 class VoiceMetrics {
+  constructor(options = {}) {
+    this.collector = options.collector || new MetricsCollector(options);
+    this.latency = options.latency || new LatencyMonitor(options);
+  }
+
   /**
-   * Placeholder counter increment.
+   * Increment a counter.
    * @param {string} name Metric name.
    * @param {number} value Increment value.
    * @returns {{recorded: boolean, name: string, value: number}}
    */
   increment(name, value = 1) {
-    return { recorded: false, name: String(name || ''), value: Number(value) || 0 };
+    const metric = this.collector.record(name, value);
+    return { recorded: true, name: metric.name, value: metric.value };
   }
 
   /**
-   * Placeholder duration recording.
+   * Record a duration.
    * @param {string} name Metric name.
    * @param {number} milliseconds Duration in milliseconds.
    * @returns {{recorded: boolean, name: string, milliseconds: number}}
    */
   timing(name, milliseconds) {
+    const entry = this.latency.record(name, milliseconds);
+    return { recorded: true, name: entry.stage, milliseconds: entry.milliseconds };
+  }
+
+  getSnapshot() {
     return {
-      recorded: false,
-      name: String(name || ''),
-      milliseconds: Math.max(0, Number(milliseconds) || 0)
+      metrics: this.collector.summarize(),
+      latency: this.latency.summary()
     };
   }
 }

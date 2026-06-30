@@ -52,6 +52,11 @@ const {
   VoiceOverlay,
   VoiceWindowController
 } = require('./ui');
+const {
+  AssistantInputAdapter,
+  VoiceAssistantBridge
+} = require('./integration');
+const { DiagnosticsManager } = require('./diagnostics');
 const VoiceSettings = require('./config/VoiceSettings');
 const VoiceLogger = require('./diagnostics/VoiceLogger');
 const VoiceMetrics = require('./diagnostics/VoiceMetrics');
@@ -93,6 +98,9 @@ module.exports = {
   ...NormalizationErrors,
   VoiceOverlay,
   VoiceWindowController,
+  AssistantInputAdapter,
+  VoiceAssistantBridge,
+  DiagnosticsManager,
   VoiceSettings,
   VoiceLogger,
   VoiceMetrics

@@ -6,12 +6,19 @@ describe('Electron Chat Shortcut', function() {
   const mainPath = path.join(__dirname, '..', '..', 'apps', 'desktop', 'electron', 'main.js');
   const script = fs.readFileSync(mainPath, 'utf8');
 
-  it('should keep the hidden activation shortcut functional', function() {
+  it('should route the hidden activation shortcut to voice listening', function() {
     assert.match(script, /function getChatShortcuts\(\)/);
     assert.match(script, /runtimeConfig\?\.chat\?\.activationShortcut/);
+    assert.match(script, /function startVoiceListeningFromShortcut\(shortcut = ''\)/);
     assert.match(script, /globalShortcut\.register\(shortcut/);
-    assert.match(script, /createChatWindow\(\)/);
+    assert.match(script, /startVoiceListeningFromShortcut\(shortcut\)/);
+    assert.match(script, /voiceSessionManager\.startSession/);
     assert.doesNotMatch(script, /global chat shortcuts are disabled/i);
+  });
+
+  it('should open chat from tray double click instead of the voice hotkey', function() {
+    assert.match(script, /tray\.setIgnoreDoubleClickEvents\(false\)/);
+    assert.match(script, /tray\.on\('double-click', \(\) => createChatWindow\(\)\)/);
   });
 
   it('should not show stale stopwatch widgets during startup restore', function() {

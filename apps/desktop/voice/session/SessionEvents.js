@@ -17,6 +17,7 @@ const SESSION_EVENTS = Object.freeze({
   VOICE_STATE_CHANGED: 'voice.state.changed',
   VOICE_PARTIAL_TRANSCRIPT: 'voice.transcript.partial',
   VOICE_FINAL_TRANSCRIPT: 'voice.transcript.final',
+  VOICE_NORMALIZED_TRANSCRIPT: 'voice.transcript.normalized',
   VOICE_TIMEOUT: 'voice.timeout',
   VOICE_ERROR: 'voice.error'
 });

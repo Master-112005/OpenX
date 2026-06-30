@@ -74,6 +74,9 @@ describe('Voice Subsystem Architecture', function() {
       'ConfigurationError',
       'VoiceOverlay',
       'VoiceWindowController',
+      'AssistantInputAdapter',
+      'VoiceAssistantBridge',
+      'DiagnosticsManager',
       'VoiceSettings',
       'VoiceLogger',
       'VoiceMetrics'
@@ -153,6 +156,29 @@ describe('Voice Subsystem Architecture', function() {
       'ui/VoiceOverlayIPC.js',
       'ui/VoiceAccessibility.js',
       'ui/index.js',
+      'integration/AssistantInputAdapter.js',
+      'integration/VoiceAssistantBridge.js',
+      'integration/AssistantDispatcher.js',
+      'integration/VoiceExecutionCoordinator.js',
+      'integration/VoiceResponseHandler.js',
+      'integration/VoiceIntegrationEvents.js',
+      'integration/VoiceIntegrationErrors.js',
+      'integration/VoiceIntegrationConfiguration.js',
+      'integration/index.js',
+      'diagnostics/DiagnosticsManager.js',
+      'diagnostics/PerformanceMonitor.js',
+      'diagnostics/LatencyMonitor.js',
+      'diagnostics/ResourceMonitor.js',
+      'diagnostics/SessionStatistics.js',
+      'diagnostics/ErrorTracker.js',
+      'diagnostics/HealthMonitor.js',
+      'diagnostics/MetricsCollector.js',
+      'diagnostics/EventTimeline.js',
+      'diagnostics/DiagnosticsConfiguration.js',
+      'diagnostics/DiagnosticsEvents.js',
+      'diagnostics/DiagnosticsErrors.js',
+      'diagnostics/DiagnosticsReport.js',
+      'diagnostics/index.js',
       'config/VoiceSettings.js',
       'diagnostics/VoiceLogger.js',
       'diagnostics/VoiceMetrics.js'
@@ -1091,15 +1117,183 @@ describe('Voice Subsystem Architecture', function() {
     assert.equal(overlay.getMetrics().transcriptUpdates >= 2, true);
   });
 
-  it('should keep NLP, routing, and assistant integration out of Phase 7', function() {
+  it('should dispatch normalized voice text through the same assistant text boundary', async function() {
+    const { AssistantInputAdapter, NormalizedTranscript } = require('../../apps/desktop/voice');
+    const calls = [];
+    const assistant = {
+      processCommand: async (...args) => {
+        calls.push(args);
+        return {
+          success: true,
+          intent: 'app.open',
+          entities: { appName: 'VS Code' },
+          response: `handled ${args[0]}`
+        };
+      }
+    };
+    const adapter = new AssistantInputAdapter({ assistant });
+    const direct = await assistant.processCommand('Open VS Code');
+    calls.length = 0;
+    const spoken = await adapter.handle(new NormalizedTranscript({
+      normalizedTranscript: 'Open VS Code',
+      validation: { valid: true }
+    }));
+
+    assert.deepEqual(spoken, direct);
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].length, 1);
+    assert.equal(calls[0][0], 'Open VS Code');
+  });
+
+  it('should prove typed and spoken command corpus results stay identical', async function() {
+    const { AssistantInputAdapter, NormalizedTranscript } = require('../../apps/desktop/voice');
+    const commands = Array.from({ length: 100 }, (_item, index) => `Open VS Code ${index + 1}`);
+    const assistant = {
+      processCommand: async (input) => ({
+        success: true,
+        nlp: { text: input.toLowerCase() },
+        nlu: { intent: 'app.open', confidence: 0.99 },
+        intent: 'app.open',
+        entities: { appName: input.replace(/^Open\s+/i, '') },
+        data: { action: 'open-app', target: input },
+        response: `Opened ${input}`
+      })
+    };
+    const adapter = new AssistantInputAdapter({ assistant });
+
+    for (const command of commands) {
+      const typed = await assistant.processCommand(command);
+      const spoken = await adapter.handle(new NormalizedTranscript({
+        normalizedTranscript: command,
+        validation: { valid: true }
+      }));
+      assert.deepEqual(spoken, typed);
+    }
+  });
+
+  it('should reject empty voice transcripts without calling the assistant', async function() {
+    const { AssistantInputAdapter } = require('../../apps/desktop/voice');
+    const { EmptyVoiceCommandError } = require('../../apps/desktop/voice/integration/VoiceIntegrationErrors');
+    let called = false;
+    const adapter = new AssistantInputAdapter({
+      assistant: {
+        processCommand: async () => {
+          called = true;
+          return { success: true };
+        }
+      }
+    });
+
+    await assert.rejects(() => adapter.handle({ normalizedTranscript: '   ' }), EmptyVoiceCommandError);
+    assert.equal(called, false);
+  });
+
+  it('should bridge VoiceSessionManager normalized transcripts to assistant input only', async function() {
+    const { VoiceAssistantBridge, VoiceSessionManager, TranscriptResult, SESSION_EVENTS } = require('../../apps/desktop/voice');
+    const calls = [];
+    const assistant = {
+      processCommand: async (...args) => {
+        calls.push(args);
+        return { success: true, intent: 'app.open', response: 'done' };
+      }
+    };
+    const manager = new VoiceSessionManager({
+      setTimeout: () => ({ unref() {} }),
+      clearTimeout: () => {}
+    });
+    const bridge = new VoiceAssistantBridge({
+      manager,
+      assistant,
+      configuration: { autoTransitionSession: false }
+    });
+    const normalizedEvents = [];
+    manager.on(SESSION_EVENTS.VOICE_NORMALIZED_TRANSCRIPT, event => normalizedEvents.push(event));
+
+    manager.startSession({ id: 'assistant-bridge-session' });
+    manager.processTranscript(new TranscriptResult({
+      finalTranscript: 'open visual studio code',
+      confidence: 0.9,
+      partial: false
+    }));
+    await new Promise(resolve => setImmediate(resolve));
+
+    assert.equal(normalizedEvents.length, 1);
+    assert.equal(calls.length, 1);
+    assert.deepEqual(calls[0], ['Open VS Code']);
+    bridge.detach();
+  });
+
+  it('should collect passive local diagnostics without storing private transcript text', function() {
+    const fs = require('fs');
+    const os = require('os');
+    const path = require('path');
+    const { DiagnosticsManager, VoiceSessionManager, TranscriptResult } = require('../../apps/desktop/voice');
+    const storageRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'openx-voice-diagnostics-'));
+    const manager = new VoiceSessionManager({
+      setTimeout: () => ({ unref() {} }),
+      clearTimeout: () => {}
+    });
+    const diagnostics = new DiagnosticsManager({
+      configuration: { storageRoot, maximumLogSizeBytes: 4096 },
+      clock: () => new Date('2026-06-30T10:00:00.000Z')
+    });
+
+    diagnostics.start({ sessionManager: manager, resources: { sessionManager: manager } });
+    diagnostics.recordMetric('audio.queue.depth', 3, { transcript: 'open secret file' });
+    diagnostics.recordLatency('assistant.dispatch', 42);
+    manager.startSession({ id: 'diagnostics-session' });
+    manager.processTranscript(new TranscriptResult({
+      finalTranscript: 'open visual studio code',
+      confidence: 0.9,
+      partial: false
+    }));
+    manager.beginProcessing();
+    manager.beginExecution();
+    manager.finishSession();
+    const report = diagnostics.generateReport('summary');
+    const snapshot = diagnostics.getSnapshot();
+
+    assert.equal(snapshot.metrics.totals['audio.queue.depth'], 3);
+    assert.equal(snapshot.latency['assistant.dispatch'].p95, 42);
+    assert.equal(snapshot.sessions.sessionsStarted, 1);
+    assert.equal(snapshot.health.status, 'healthy');
+    assert.equal(fs.existsSync(report.path), true);
+    assert.equal(JSON.stringify(snapshot).includes('open secret file'), false);
+    diagnostics.stop();
+  });
+
+  it('should track errors and health status without interrupting voice execution', function() {
+    const fs = require('fs');
+    const os = require('os');
+    const path = require('path');
+    const { DiagnosticsManager } = require('../../apps/desktop/voice');
+    const diagnostics = new DiagnosticsManager({
+      configuration: { storageRoot: fs.mkdtempSync(path.join(os.tmpdir(), 'openx-voice-health-')) }
+    });
+
+    diagnostics.recordError(new Error('Microphone unavailable'), { component: 'audio', severity: 'error' });
+    diagnostics.recordLatency('recognition', 6000);
+    const health = diagnostics.getHealth();
+
+    assert.equal(diagnostics.getSnapshot().errors.count, 1);
+    assert.ok(['warning', 'degraded'].includes(health.status));
+  });
+
+  it('should keep NLP, routing, automation, and assistant behavior out of Phase 9 diagnostics', function() {
     const {
       AudioDeviceManager,
-      TranscriptNormalizer
+      TranscriptNormalizer,
+      AssistantInputAdapter,
+      VoiceAssistantBridge,
+      DiagnosticsManager
     } = require('../../apps/desktop/voice');
     const { TranscriptPublisher } = require('../../apps/desktop/voice/ui');
 
     assert.deepEqual(new AudioDeviceManager().listInputDevices(), []);
     assert.equal(new TranscriptNormalizer().normalize('Hello'), 'Hello');
     assert.deepEqual(new TranscriptPublisher().publish('Hello'), { published: true, transcript: 'Hello', partial: false });
+    assert.equal(typeof AssistantInputAdapter, 'function');
+    assert.equal(typeof VoiceAssistantBridge, 'function');
+    assert.equal(typeof DiagnosticsManager, 'function');
   });
 });

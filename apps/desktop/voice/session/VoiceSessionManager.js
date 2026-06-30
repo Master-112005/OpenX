@@ -860,6 +860,14 @@ class VoiceSessionManager {
     if (this.currentSession && typeof this.currentSession.receiveNormalizedTranscript === 'function') {
       this.currentSession.receiveNormalizedTranscript(normalizedTranscript);
     }
+    if (!this.currentSession) return;
+    const payload = normalizedTranscript && typeof normalizedTranscript.toJSON === 'function'
+      ? normalizedTranscript.toJSON()
+      : { ...(normalizedTranscript || {}) };
+    this._publish(
+      SESSION_EVENTS.VOICE_NORMALIZED_TRANSCRIPT,
+      this._buildEventPayload(this.currentSession, { normalizedTranscript: payload })
+    );
   }
 
   /**

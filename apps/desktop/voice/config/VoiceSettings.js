@@ -93,8 +93,15 @@ const VoiceSettings = Object.freeze({
     })
   }),
   diagnostics: Object.freeze({
-    loggingEnabled: false,
-    metricsEnabled: false
+    loggingEnabled: true,
+    metricsEnabled: true,
+    performanceMonitoring: true,
+    memoryMonitoring: true,
+    latencyMonitoring: true,
+    timelineRecording: true,
+    healthChecks: true,
+    retentionDays: 14,
+    debugMode: false
   })
 });
 

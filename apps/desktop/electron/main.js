@@ -6,6 +6,7 @@ const os = require('os');
 const BASE_CONFIG = require('../../../config');
 const Assistant = require('../../../core/assistant/index');
 const TextToSpeech = require('../voice/tts');
+const { VoiceSessionManager, VoiceAssistantBridge, DiagnosticsManager } = require('../voice');
 const { SettingsService } = require('../settings');
 const { AssistantEventBus, EVENTS, Logger } = require('../../../core/assistant/Data');
 const { ensureDataRoot, migrateLegacyData } = require('../../../core/assistant/Data');
@@ -139,6 +140,9 @@ let timerWidgetMode = null;
 let plannerWindow = null;
 let tray = null;
 let assistant = null;
+let voiceSessionManager = null;
+let voiceAssistantBridge = null;
+let diagnosticsManager = null;
 let textToSpeech = null;
 let settingsService = null;
 let runtimeConfig = null;
@@ -749,7 +753,8 @@ function createTray() {
   ]);
 
   tray.setContextMenu(contextMenu);
-  tray.setIgnoreDoubleClickEvents(true);
+  tray.setIgnoreDoubleClickEvents(false);
+  tray.on('double-click', () => createChatWindow());
 }
 
 function registerIpcHandler(channel, handler) {
@@ -999,6 +1004,24 @@ function stopStatusPolling() {
 }
 
 async function destroyAssistantInstance() {
+  if (diagnosticsManager) {
+    try {
+      diagnosticsManager.stop();
+    } catch (error) {
+      mainLogger.warn('Failed to stop voice diagnostics', { error: error.message });
+    }
+    diagnosticsManager = null;
+  }
+  if (voiceAssistantBridge) {
+    try {
+      voiceAssistantBridge.detach();
+    } catch (error) {
+      mainLogger.warn('Failed to detach voice assistant bridge', { error: error.message });
+    }
+    voiceAssistantBridge = null;
+  }
+  voiceSessionManager = null;
+
   if (!assistant) {
     return;
   }
@@ -1100,14 +1123,47 @@ function getChatShortcuts() {
   return [...new Set([primary, ...fallbacks].filter(Boolean))];
 }
 
+function startVoiceListeningFromShortcut(shortcut = '') {
+  if (!voiceSessionManager) {
+    mainLogger.warn('Voice shortcut ignored because voice session manager is unavailable', { shortcut });
+    return { success: false, error: 'Voice unavailable' };
+  }
+
+  try {
+    if (voiceSessionManager.isActive()) {
+      const cancelled = voiceSessionManager.cancelSession('Voice shortcut pressed while listening.');
+      mainLogger.info('Voice shortcut cancelled active listening session', { shortcut });
+      return { success: true, cancelled: true, state: cancelled.state };
+    }
+
+    const started = voiceSessionManager.startSession({ id: `voice-shortcut-${Date.now()}` });
+    try {
+      voiceSessionManager.startAudioCapture();
+      voiceSessionManager.startSpeechToText();
+    } catch (captureError) {
+      mainLogger.warn('Voice shortcut started session but capture could not start', {
+        shortcut,
+        error: captureError.message
+      });
+      voiceSessionManager.failSession(captureError);
+      return { success: false, state: voiceSessionManager.getCurrentState(), error: captureError.message };
+    }
+    mainLogger.info('Voice shortcut started listening', { shortcut });
+    return { success: true, state: started.state };
+  } catch (error) {
+    mainLogger.error('Voice shortcut failed', { shortcut, error: error.message });
+    return { success: false, error: error.message };
+  }
+}
+
 function registerChatShortcut() {
   unregisterChatShortcut();
 
   for (const shortcut of getChatShortcuts()) {
     try {
       const registered = globalShortcut.register(shortcut, () => {
-        mainLogger.info('Chat shortcut pressed', { shortcut });
-        createChatWindow();
+        mainLogger.info('Voice shortcut pressed', { shortcut });
+        startVoiceListeningFromShortcut(shortcut);
       });
 
       if (!registered) {
@@ -1137,6 +1193,26 @@ async function initializeAssistant() {
   } catch (err) {
     mainLogger.warn('TTS initialization failed (non-fatal)', { error: err.message });
   }
+
+  voiceSessionManager = new VoiceSessionManager({
+    logger: mainLogger
+  });
+  voiceAssistantBridge = new VoiceAssistantBridge({
+    manager: voiceSessionManager,
+    assistant,
+    logger: mainLogger
+  });
+  diagnosticsManager = new DiagnosticsManager({
+    logger: mainLogger,
+    configuration: {
+      ...(runtimeConfig?.voice?.diagnostics || {}),
+      storageRoot: path.join(runtimeConfig.app.dataPaths.root, 'voice', 'diagnostics')
+    }
+  });
+  diagnosticsManager.start({
+    sessionManager: voiceSessionManager,
+    resources: { sessionManager: voiceSessionManager }
+  });
 
   registerChatShortcut();
   mainLogger.info('Assistant initialized', {
