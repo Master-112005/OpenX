@@ -199,6 +199,8 @@ describe('Voice Subsystem Architecture', function() {
     assert.equal(stateMachine.canTransition(states.READY, states.LISTENING).allowed, true);
     assert.equal(stateMachine.canTransition(states.LISTENING, states.PROCESSING).allowed, true);
     assert.equal(stateMachine.canTransition(states.PROCESSING, states.EXECUTING).allowed, true);
+    assert.equal(stateMachine.canTransition(states.PROCESSING, states.LISTENING).allowed, true);
+    assert.equal(stateMachine.canTransition(states.EXECUTING, states.LISTENING).allowed, true);
     assert.equal(stateMachine.canTransition(states.EXECUTING, states.FINISHED).allowed, true);
     assert.equal(stateMachine.canTransition(states.FINISHED, states.CLOSING).allowed, true);
     assert.equal(stateMachine.canTransition(states.CLOSING, states.IDLE).allowed, true);
@@ -326,12 +328,12 @@ describe('Voice Subsystem Architecture', function() {
     manager.cancelSession('done');
 
     assert.ok(scheduled.some(token => token.ms === 10000));
-    assert.ok(scheduled.some(token => token.ms === 30000));
-    assert.ok(scheduled.some(token => token.ms === 60000));
-    assert.ok(cleared.length >= 3);
+    assert.equal(scheduled.some(token => token.ms === 30000), false);
+    assert.equal(scheduled.some(token => token.ms === 60000), false);
+    assert.ok(cleared.length >= 1);
   });
 
-  it('should close a silent listening session without showing a voice error', function() {
+  it('should keep a silent listening session alive until explicit cancellation', function() {
     const { VoiceSessionManager, VoiceStateMachine, SESSION_EVENTS } = require('../../apps/desktop/voice');
     const scheduled = [];
     const errors = [];
@@ -348,14 +350,19 @@ describe('Voice Subsystem Architecture', function() {
     manager.on(SESSION_EVENTS.VOICE_ERROR, event => errors.push(event));
     manager.on(SESSION_EVENTS.VOICE_SESSION_CANCELLED, event => cancelled.push(event));
     manager.startSession({ id: 'silent-listening-session' });
+
     const listeningTimer = scheduled.find(token => token.ms === 30000);
 
-    listeningTimer.callback();
+    assert.equal(listeningTimer, undefined);
+    assert.equal(manager.getCurrentState(), VoiceStateMachine.STATES.LISTENING);
+    assert.equal(errors.length, 0);
+    assert.equal(cancelled.length, 0);
+
+    manager.cancelSession('explicit cancellation');
 
     assert.equal(manager.getCurrentState(), VoiceStateMachine.STATES.IDLE);
-    assert.equal(errors.length, 0);
     assert.equal(cancelled.length, 1);
-    assert.equal(cancelled[0].session.cancellationReason, 'No speech detected.');
+    assert.equal(cancelled[0].session.cancellationReason, 'explicit cancellation');
   });
 
   it('should load audio configuration and expose standard PCM metadata', function() {
@@ -1195,6 +1202,109 @@ describe('Voice Subsystem Architecture', function() {
     assert.equal(partialEvents[0].transcriptResult.transcript, 'open calendar');
   });
 
+  it('should suppress duplicate partial transcripts before UI and normalization', function() {
+    const { VoiceSessionManager, STTEngine, TranscriptResult, STT_EVENTS, SESSION_EVENTS } = require('../../apps/desktop/voice');
+    const sttEngine = new STTEngine();
+    const manager = new VoiceSessionManager({
+      resources: { sttEngine },
+      setTimeout: () => ({ unref() {} }),
+      clearTimeout: () => {}
+    });
+    const partialEvents = [];
+
+    manager.on(SESSION_EVENTS.VOICE_PARTIAL_TRANSCRIPT, event => partialEvents.push(event));
+    manager.startSession({ id: 'duplicate-partial-session' });
+    sttEngine.events.emit(STT_EVENTS.PARTIAL_RESULT, {
+      result: new TranscriptResult({ transcript: 'hello', confidence: 0.9, partial: true })
+    });
+    sttEngine.events.emit(STT_EVENTS.PARTIAL_RESULT, {
+      result: new TranscriptResult({ transcript: 'hello', confidence: 0.91, partial: true })
+    });
+    sttEngine.events.emit(STT_EVENTS.PARTIAL_RESULT, {
+      result: new TranscriptResult({ transcript: 'hello there', confidence: 0.92, partial: true })
+    });
+
+    assert.equal(partialEvents.length, 2);
+    assert.equal(partialEvents[0].transcriptResult.transcript, 'hello');
+    assert.equal(partialEvents[1].transcriptResult.transcript, 'hello there');
+    assert.equal(manager.getTranscriptProcessingStatus().metrics.transcriptsProcessed, 0);
+  });
+
+  it('should recover empty final transcripts without closing the voice session', function() {
+    const EventEmitter = require('events');
+    const { VoiceSessionManager, TranscriptResult, STT_EVENTS, SESSION_EVENTS, VoiceStateMachine } = require('../../apps/desktop/voice');
+    let running = false;
+    let starts = 0;
+    let resets = 0;
+    const sttEngine = new EventEmitter();
+    sttEngine.start = () => {
+      running = true;
+      starts += 1;
+      return { started: true, state: 'DECODING' };
+    };
+    sttEngine.isRunning = () => running;
+    sttEngine.cancel = () => {
+      running = false;
+      return { cancelled: true };
+    };
+    sttEngine.getStatus = () => ({ running, decoder: { state: running ? 'DECODING' : 'STOPPED' } });
+    const manager = new VoiceSessionManager({
+      resources: {
+        sttEngine,
+        audioProcessor: {
+          on() {},
+          reset: () => {
+            resets += 1;
+            return { reset: true };
+          },
+          getStatus: () => ({ initialized: true })
+        }
+      },
+      setTimeout: () => ({ unref() {} }),
+      clearTimeout: () => {}
+    });
+    const cancelled = [];
+
+    manager.on(SESSION_EVENTS.VOICE_SESSION_CANCELLED, event => cancelled.push(event));
+    manager.startSession({ id: 'empty-final-recovery' });
+    manager.startSpeechToText();
+    running = false;
+    sttEngine.emit(STT_EVENTS.FINAL_RESULT, {
+      result: new TranscriptResult({ finalTranscript: '', confidence: 0, partial: false })
+    });
+
+    assert.equal(manager.getCurrentState(), VoiceStateMachine.STATES.LISTENING);
+    assert.equal(manager.isActive(), true);
+    assert.equal(cancelled.length, 0);
+    assert.equal(starts, 2);
+    assert.equal(resets, 1);
+    assert.equal(manager.getMetrics().runtimePipeline.emptyFinals, 1);
+  });
+
+  it('should emit exactly one final transcript per recognition cycle', function() {
+    const { VoiceSessionManager, STTEngine, TranscriptResult, STT_EVENTS, SESSION_EVENTS } = require('../../apps/desktop/voice');
+    const sttEngine = new STTEngine();
+    const manager = new VoiceSessionManager({
+      resources: { sttEngine },
+      setTimeout: () => ({ unref() {} }),
+      clearTimeout: () => {}
+    });
+    const finalEvents = [];
+
+    manager.on(SESSION_EVENTS.VOICE_FINAL_TRANSCRIPT, event => finalEvents.push(event));
+    manager.startSession({ id: 'single-final-session' });
+    sttEngine.events.emit(STT_EVENTS.FINAL_RESULT, {
+      result: new TranscriptResult({ finalTranscript: 'open chrome', confidence: 0.9, partial: false })
+    });
+    sttEngine.events.emit(STT_EVENTS.FINAL_RESULT, {
+      result: new TranscriptResult({ finalTranscript: 'open calendar', confidence: 0.9, partial: false })
+    });
+
+    assert.equal(finalEvents.length, 1);
+    assert.equal(finalEvents[0].transcriptResult.finalTranscript, 'open chrome');
+    assert.equal(manager.getMetrics().runtimePipeline.duplicateFinals, 1);
+  });
+
   it('should create, position, show, update, and hide the Voice overlay window through minimal IPC', function() {
     const { VoiceWindowController } = require('../../apps/desktop/voice');
     const sent = [];
@@ -1380,11 +1490,73 @@ describe('Voice Subsystem Architecture', function() {
     bridge.detach();
   });
 
+  it('should resume the same voice session after assistant execution', async function() {
+    const { VoiceAssistantBridge, VoiceSessionManager, VoiceStateMachine, TranscriptResult } = require('../../apps/desktop/voice');
+    let sttRunning = false;
+    let sttStarts = 0;
+    let audioResets = 0;
+    const sttEngine = {
+      on() {},
+      initialize: () => ({ initialized: true }),
+      start: () => {
+        sttRunning = true;
+        sttStarts += 1;
+        return { started: true, state: 'DECODING' };
+      },
+      isRunning: () => sttRunning,
+      cancel: () => {
+        sttRunning = false;
+        return { cancelled: true, state: 'STOPPED' };
+      },
+      getStatus: () => ({ running: sttRunning })
+    };
+    const manager = new VoiceSessionManager({
+      resources: {
+        sttEngine,
+        audioProcessor: {
+          on() {},
+          reset: () => {
+            audioResets += 1;
+            return { reset: true };
+          },
+          getStatus: () => ({ initialized: true })
+        }
+      },
+      setTimeout: () => ({ unref() {} }),
+      clearTimeout: () => {}
+    });
+    const bridge = new VoiceAssistantBridge({
+      manager,
+      assistant: {
+        processCommand: async () => ({ success: true, response: 'done' })
+      }
+    });
+
+    manager.startSession({ id: 'continuous-session' });
+    manager.startSpeechToText();
+    sttRunning = false;
+    manager.processTranscript(new TranscriptResult({
+      finalTranscript: 'hello assistant',
+      confidence: 0.9,
+      partial: false
+    }));
+    await new Promise(resolve => setImmediate(resolve));
+
+    assert.equal(manager.getCurrentState(), VoiceStateMachine.STATES.LISTENING);
+    assert.equal(manager.isActive(), true);
+    assert.equal(manager.getSession().context.recognition.finalTranscript, '');
+    assert.equal(manager.getSession().context.recognition.partialTranscript, '');
+    assert.equal(sttRunning, true);
+    assert.equal(sttStarts, 2);
+    assert.equal(audioResets, 1);
+    bridge.detach();
+  });
+
   it('should collect passive local diagnostics without storing private transcript text', function() {
     const fs = require('fs');
     const os = require('os');
     const path = require('path');
-    const { DiagnosticsManager, VoiceSessionManager, TranscriptResult } = require('../../apps/desktop/voice');
+    const { DiagnosticsManager, VoiceSessionManager, TranscriptResult, SESSION_EVENTS } = require('../../apps/desktop/voice');
     const storageRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'openx-voice-diagnostics-'));
     const manager = new VoiceSessionManager({
       setTimeout: () => ({ unref() {} }),
@@ -1398,6 +1570,10 @@ describe('Voice Subsystem Architecture', function() {
     diagnostics.start({ sessionManager: manager, resources: { sessionManager: manager } });
     diagnostics.recordMetric('audio.queue.depth', 3, { transcript: 'open secret file' });
     diagnostics.recordLatency('assistant.dispatch', 42);
+    diagnostics.observeEvent(SESSION_EVENTS.VOICE_RECOGNITION_CYCLE, {
+      phase: 'started',
+      session: { sessionId: 'diagnostics-session' }
+    });
     manager.startSession({ id: 'diagnostics-session' });
     manager.processTranscript(new TranscriptResult({
       finalTranscript: 'open visual studio code',
@@ -1413,6 +1589,7 @@ describe('Voice Subsystem Architecture', function() {
     assert.equal(snapshot.metrics.totals['audio.queue.depth'], 3);
     assert.equal(snapshot.latency['assistant.dispatch'].p95, 42);
     assert.equal(snapshot.sessions.sessionsStarted, 1);
+    assert.equal(snapshot.sessions.recognitionCycles.started, 1);
     assert.equal(snapshot.health.status, 'healthy');
     assert.equal(fs.existsSync(report.path), true);
     assert.equal(JSON.stringify(snapshot).includes('open secret file'), false);

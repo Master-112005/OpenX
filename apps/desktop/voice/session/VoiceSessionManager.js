@@ -55,12 +55,24 @@ class VoiceSessionManager {
     this.activeTimers = new Map();
     this.transitionLog = [];
     this.sessionHistory = [];
+    this.recognitionCycleSequence = 0;
+    this.recognitionCycle = this._createRecognitionCycle('manager-created');
     this.runtimePipelineStats = {
       audioFrames: 0,
       processedFrames: 0,
       sttFrames: 0,
       partialTranscripts: 0,
       finalTranscripts: 0,
+      duplicatePartials: 0,
+      suppressedPartials: 0,
+      staleTranscripts: 0,
+      duplicateFinals: 0,
+      emptyFinals: 0,
+      endpointDetections: 0,
+      finalizationRequests: 0,
+      audioFramesWhileBusy: 0,
+      listeningCycles: 0,
+      lastPartialTranscript: '',
       lastLogAt: 0
     };
     this._audioFrameListener = event => this._processAudioFrameForSession(event.frame);
@@ -294,7 +306,13 @@ class VoiceSessionManager {
    */
   startSpeechToText() {
     this._assertSession();
-    return this._getSTTEngine().start();
+    const sttEngine = this._getSTTEngine();
+    if (typeof sttEngine.isRunning === 'function' && sttEngine.isRunning()) {
+      return { started: false, alreadyRunning: true, state: this.getSpeechToTextStatus().decoder?.state || 'DECODING' };
+    }
+    const result = sttEngine.start();
+    this._startRecognitionCycle('speech-to-text-started');
+    return result;
   }
 
   /**
@@ -313,6 +331,9 @@ class VoiceSessionManager {
    */
   finalizeSpeechToText() {
     this._assertSession();
+    if (!this._markRecognitionFinalizing('manual-finalize')) {
+      return { skipped: true, reason: 'recognition-cycle-already-finalizing' };
+    }
     return this._getSTTEngine().final();
   }
 
@@ -321,6 +342,7 @@ class VoiceSessionManager {
    * @returns {{stopped: boolean, state: string}}
    */
   stopSpeechToText() {
+    this._stopRecognitionCycle('speech-to-text-stopped');
     return this._getSTTEngine().stop();
   }
 
@@ -329,6 +351,7 @@ class VoiceSessionManager {
    * @returns {{cancelled: boolean, state: string}}
    */
   cancelSpeechToText() {
+    this._stopRecognitionCycle('speech-to-text-cancelled');
     return this._getSTTEngine().cancel();
   }
 
@@ -337,6 +360,7 @@ class VoiceSessionManager {
    * @returns {{reset: boolean, state: string}}
    */
   resetSpeechToText() {
+    this._stopRecognitionCycle('speech-to-text-reset');
     return this._getSTTEngine().reset();
   }
 
@@ -386,6 +410,69 @@ class VoiceSessionManager {
     this._transitionTo(VoiceStateMachine.STATES.EXECUTING, { reason: 'begin-execution' });
     this._scheduleLifecycleTimeout('execution', this.timeouts.executionMs);
     return this._result();
+  }
+
+  /**
+   * Resume the same Voice session for another utterance after one assistant turn.
+   * @param {string} reason Resume reason for logs and state metadata.
+   * @returns {{success: boolean, resumed: boolean, state: string, session: object|null, sttRestarted?: boolean, audioProcessingReset?: boolean}}
+   */
+  resumeListeningCycle(reason = 'resume-listening-cycle') {
+    this._assertSession();
+    const states = VoiceStateMachine.STATES;
+    this._clearSessionRecognitionTurn();
+    if ([states.PROCESSING, states.EXECUTING].includes(this.currentState)) {
+      this._transitionTo(states.LISTENING, { reason });
+    } else if (this.currentState !== states.LISTENING) {
+      return {
+        success: true,
+        resumed: false,
+        state: this.currentState,
+        session: this.getSession()
+      };
+    }
+
+    let audioProcessingReset = false;
+    let sttRestarted = false;
+    this.runtimePipelineStats.listeningCycles += 1;
+    this.runtimePipelineStats.lastPartialTranscript = '';
+
+    try {
+      this.resetAudioProcessing();
+      audioProcessingReset = true;
+    } catch (error) {
+      this._publish(SESSION_EVENTS.VOICE_ERROR, this._buildEventPayload(null, {
+        error: this._normalizeError(error)
+      }));
+    }
+
+    try {
+      const sttEngine = this._getSTTEngine();
+      if (!sttEngine.isRunning || !sttEngine.isRunning()) {
+        this.startSpeechToText();
+        sttRestarted = true;
+      }
+    } catch (error) {
+      this._publish(SESSION_EVENTS.VOICE_ERROR, this._buildEventPayload(null, {
+        error: this._normalizeError(error)
+      }));
+    }
+
+    this._scheduleLifecycleTimeout('listening', this.timeouts.listeningMs);
+    this._log('Listening Cycle Resumed', {
+      reason,
+      listeningCycles: this.runtimePipelineStats.listeningCycles,
+      sttRestarted,
+      audioProcessingReset
+    });
+    return {
+      success: true,
+      resumed: true,
+      state: this.currentState,
+      session: this.getSession(),
+      sttRestarted,
+      audioProcessingReset
+    };
   }
 
   /**
@@ -458,6 +545,7 @@ class VoiceSessionManager {
       this._transitionTo(VoiceStateMachine.STATES.CLOSING, { reason });
     }
 
+    this._stopRecognitionCycle(`session-${reason}`);
     const snapshot = this.currentSession ? this.currentSession.toJSON() : null;
     this._clearAllTimeouts();
     this._releaseSessionResources();
@@ -481,6 +569,7 @@ class VoiceSessionManager {
       this.sessionHistory.push(this.currentSession.toJSON());
     }
     this.currentSession = null;
+    this.recognitionCycle = this._createRecognitionCycle('manager-reset');
     this.currentState = this.stateMachine.getInitialState();
     this._log('Reset', { state: this.currentState });
     return { success: true, state: this.currentState };
@@ -530,6 +619,8 @@ class VoiceSessionManager {
       transitionCount: this.transitionLog.length,
       sessionCount: this.sessionHistory.length + (this.currentSession ? 1 : 0),
       currentSession: this.getSession(),
+      recognitionCycle: { ...this.recognitionCycle },
+      runtimePipeline: { ...this.runtimePipelineStats },
       transitions: this.transitionLog.map(transition => ({ ...transition }))
     };
   }
@@ -814,6 +905,14 @@ class VoiceSessionManager {
     if (!this.currentSession) return;
     try {
       this.runtimePipelineStats.audioFrames += 1;
+      if (this.currentState !== VoiceStateMachine.STATES.LISTENING) {
+        this.runtimePipelineStats.audioFramesWhileBusy += 1;
+        this._logRuntimePipeline('Audio frame ignored while recognition is paused', {
+          state: this.currentState,
+          audioFramesWhileBusy: this.runtimePipelineStats.audioFramesWhileBusy
+        });
+        return;
+      }
       this._logRuntimePipeline('AudioCapture frame received', {
         audioFrames: this.runtimePipelineStats.audioFrames,
         frame: typeof frame?.toMetadata === 'function' ? frame.toMetadata() : undefined
@@ -833,7 +932,17 @@ class VoiceSessionManager {
    * @private
    */
   _deliverAudioFrameToSession(frame) {
+    if (this.currentState !== VoiceStateMachine.STATES.LISTENING) {
+      this.runtimePipelineStats.audioFramesWhileBusy += 1;
+      this._logRuntimePipeline('Processed audio frame ignored while recognition is paused', {
+        state: this.currentState,
+        frameIndex: frame?.originalFrame?.frameIndex,
+        audioFramesWhileBusy: this.runtimePipelineStats.audioFramesWhileBusy
+      });
+      return;
+    }
     this.runtimePipelineStats.processedFrames += 1;
+    this._recordRecognitionFrame(frame);
     this._logRuntimePipeline('Processed audio frame ready for STT', {
       processedFrames: this.runtimePipelineStats.processedFrames,
       frame: typeof frame?.toMetadata === 'function' ? frame.toMetadata() : undefined
@@ -850,7 +959,9 @@ class VoiceSessionManager {
           frameIndex: frame?.originalFrame?.frameIndex
         });
         if (frame?.endpointCandidate && typeof this.resources.sttEngine.final === 'function') {
+          if (!this._markRecognitionFinalizing('vad-endpoint', frame)) return;
           this._logRuntimePipeline('VAD endpoint detected; finalizing STT stream', {
+            recognitionCycleId: this.recognitionCycle.id,
             frameIndex: frame?.originalFrame?.frameIndex,
             speechActivityState: frame?.speechActivityState
           }, true);
@@ -884,18 +995,51 @@ class VoiceSessionManager {
       this._logRuntimePipeline(payload.partial ? 'Empty partial transcript ignored' : 'Empty final transcript ignored', {
         partialTranscripts: this.runtimePipelineStats.partialTranscripts,
         finalTranscripts: this.runtimePipelineStats.finalTranscripts,
+        recognitionCycleId: this.recognitionCycle.id,
         confidence: payload.confidence
       }, !payload.partial);
       if (!payload.partial && this.currentSession) {
-        this.cancelSession('No speech detected.');
+        this._handleEmptyFinalTranscript();
       }
       return;
+    }
+
+    if (payload.partial) {
+      const partialDecision = this._shouldPublishPartialTranscript(transcriptText, payload);
+      if (!partialDecision.publish) {
+        this._logRuntimePipeline(partialDecision.message, {
+          recognitionCycleId: this.recognitionCycle.id,
+          duplicatePartials: this.runtimePipelineStats.duplicatePartials,
+          suppressedPartials: this.runtimePipelineStats.suppressedPartials,
+          transcriptLength: transcriptText.length,
+          confidence: payload.confidence
+        });
+        return;
+      }
+      this.runtimePipelineStats.lastPartialTranscript = transcriptText;
+    } else {
+      if (this.recognitionCycle.finalDelivered) {
+        this.runtimePipelineStats.duplicateFinals += 1;
+        this._logRuntimePipeline('Duplicate final transcript suppressed', {
+          recognitionCycleId: this.recognitionCycle.id,
+          duplicateFinals: this.runtimePipelineStats.duplicateFinals,
+          transcriptLength: transcriptText.length,
+          confidence: payload.confidence
+        }, true);
+        return;
+      }
+      this._completeRecognitionCycle(payload);
+      this.runtimePipelineStats.lastPartialTranscript = '';
+      if (this.currentState === VoiceStateMachine.STATES.LISTENING) {
+        this.beginProcessing();
+      }
     }
 
     if (typeof this.currentSession.receiveTranscriptResult === 'function') {
       this.currentSession.receiveTranscriptResult(result);
     }
     this._logRuntimePipeline(payload.partial ? 'Partial transcript produced' : 'Final transcript produced', {
+      recognitionCycleId: this.recognitionCycle.id,
       partialTranscripts: this.runtimePipelineStats.partialTranscripts,
       finalTranscripts: this.runtimePipelineStats.finalTranscripts,
       transcriptLength: transcriptText.length,
@@ -905,6 +1049,7 @@ class VoiceSessionManager {
       payload.partial ? SESSION_EVENTS.VOICE_PARTIAL_TRANSCRIPT : SESSION_EVENTS.VOICE_FINAL_TRANSCRIPT,
       this._buildEventPayload(this.currentSession, { transcriptResult: payload })
     );
+    if (payload.partial) return;
     try {
       this._getTranscriptProcessor().process(result);
     } catch (error) {
@@ -932,6 +1077,242 @@ class VoiceSessionManager {
       SESSION_EVENTS.VOICE_NORMALIZED_TRANSCRIPT,
       this._buildEventPayload(this.currentSession, { normalizedTranscript: payload })
     );
+  }
+
+  /**
+   * Create metadata for one recognition stream inside the active voice session.
+   * @param {string} reason Creation reason.
+   * @returns {object}
+   * @private
+   */
+  _createRecognitionCycle(reason = '') {
+    return {
+      id: this.recognitionCycleSequence,
+      active: false,
+      finalizing: false,
+      finalDelivered: false,
+      startedAt: null,
+      endedAt: null,
+      reason,
+      speechFrames: 0,
+      silenceFrames: 0,
+      endpointFrameIndex: null,
+      lastFrameIndex: -1,
+      lastPublishedPartial: '',
+      lastPartialCandidate: '',
+      partialCandidateRepeats: 0,
+      lastPartialPublishedAt: 0,
+      finalTranscriptLength: 0,
+      confidence: 0
+    };
+  }
+
+  /**
+   * Start a new recognition stream without replacing the voice session.
+   * @param {string} reason Start reason.
+   * @returns {object}
+   * @private
+   */
+  _startRecognitionCycle(reason = 'recognition-started') {
+    this.recognitionCycleSequence += 1;
+    this.recognitionCycle = this._createRecognitionCycle(reason);
+    this.recognitionCycle.id = this.recognitionCycleSequence;
+    this.recognitionCycle.active = true;
+    this.recognitionCycle.startedAt = this.clock().toISOString();
+    this.runtimePipelineStats.lastPartialTranscript = '';
+    this._publishRecognitionCycle('started', { reason });
+    this._log('Recognition Cycle Started', {
+      recognitionCycleId: this.recognitionCycle.id,
+      reason
+    });
+    return this.recognitionCycle;
+  }
+
+  /**
+   * Stop the current recognition stream metadata without ending the voice session.
+   * @param {string} reason Stop reason.
+   * @returns {object}
+   * @private
+   */
+  _stopRecognitionCycle(reason = 'recognition-stopped') {
+    if (!this.recognitionCycle.active && !this.recognitionCycle.finalizing) return this.recognitionCycle;
+    this.recognitionCycle.active = false;
+    this.recognitionCycle.finalizing = false;
+    this.recognitionCycle.endedAt = this.clock().toISOString();
+    this.recognitionCycle.reason = reason;
+    this._publishRecognitionCycle('stopped', { reason });
+    return this.recognitionCycle;
+  }
+
+  /**
+   * Mark the active recognition stream as finalizing exactly once.
+   * @param {string} reason Finalization reason.
+   * @param {object} frame Endpoint frame.
+   * @returns {boolean}
+   * @private
+   */
+  _markRecognitionFinalizing(reason = 'recognition-finalizing', frame = null) {
+    if (this.recognitionCycle.finalizing || this.recognitionCycle.finalDelivered) {
+      this.runtimePipelineStats.finalizationRequests += 1;
+      this._logRuntimePipeline('Duplicate finalization request suppressed', {
+        recognitionCycleId: this.recognitionCycle.id,
+        reason,
+        finalizing: this.recognitionCycle.finalizing,
+        finalDelivered: this.recognitionCycle.finalDelivered
+      }, true);
+      return false;
+    }
+    this.runtimePipelineStats.finalizationRequests += 1;
+    this.recognitionCycle.active = false;
+    this.recognitionCycle.finalizing = true;
+    this.recognitionCycle.reason = reason;
+    if (frame?.originalFrame) this.recognitionCycle.endpointFrameIndex = frame.originalFrame.frameIndex;
+    this._publishRecognitionCycle('finalizing', {
+      reason,
+      endpointFrameIndex: this.recognitionCycle.endpointFrameIndex
+    });
+    return true;
+  }
+
+  /**
+   * Complete a recognition stream after a non-empty final transcript.
+   * @param {object} payload Final transcript payload.
+   * @returns {object}
+   * @private
+   */
+  _completeRecognitionCycle(payload = {}) {
+    const finalText = String(payload.finalTranscript || payload.transcript || payload.text || '').trim();
+    this.recognitionCycle.active = false;
+    this.recognitionCycle.finalizing = false;
+    this.recognitionCycle.finalDelivered = true;
+    this.recognitionCycle.endedAt = this.clock().toISOString();
+    this.recognitionCycle.finalTranscriptLength = finalText.length;
+    this.recognitionCycle.confidence = Number(payload.confidence) || 0;
+    this._publishRecognitionCycle('completed', {
+      transcriptLength: finalText.length,
+      confidence: this.recognitionCycle.confidence
+    });
+    return this.recognitionCycle;
+  }
+
+  /**
+   * Record audio/VAD information for the current recognition stream.
+   * @param {object} frame Processed audio frame.
+   * @returns {void}
+   * @private
+   */
+  _recordRecognitionFrame(frame) {
+    if (!frame) return;
+    const state = String(frame.speechActivityState || '').toUpperCase();
+    this.recognitionCycle.lastFrameIndex = Number.isInteger(frame?.originalFrame?.frameIndex)
+      ? frame.originalFrame.frameIndex
+      : this.recognitionCycle.lastFrameIndex;
+    if (state.includes('SPEECH')) this.recognitionCycle.speechFrames += 1;
+    if (state.includes('SILENCE') || state.includes('END')) this.recognitionCycle.silenceFrames += 1;
+    if (frame.endpointCandidate) {
+      this.runtimePipelineStats.endpointDetections += 1;
+      this.recognitionCycle.endpointFrameIndex = this.recognitionCycle.lastFrameIndex;
+      this._publishRecognitionCycle('endpoint', {
+        endpointFrameIndex: this.recognitionCycle.endpointFrameIndex,
+        speechFrames: this.recognitionCycle.speechFrames,
+        silenceFrames: this.recognitionCycle.silenceFrames
+      });
+    }
+  }
+
+  /**
+   * Decide whether a partial transcript is stable enough for UI publication.
+   * @param {string} transcriptText Partial transcript text.
+   * @param {object} payload Transcript payload.
+   * @returns {{publish: boolean, message: string}}
+   * @private
+   */
+  _shouldPublishPartialTranscript(transcriptText, payload = {}) {
+    if (this.recognitionCycle.finalizing || this.recognitionCycle.finalDelivered) {
+      this.runtimePipelineStats.staleTranscripts += 1;
+      return { publish: false, message: 'Stale partial transcript suppressed' };
+    }
+    if (transcriptText === this.recognitionCycle.lastPublishedPartial) {
+      this.runtimePipelineStats.duplicatePartials += 1;
+      return { publish: false, message: 'Duplicate partial transcript suppressed' };
+    }
+
+    if (transcriptText === this.recognitionCycle.lastPartialCandidate) {
+      this.recognitionCycle.partialCandidateRepeats += 1;
+    } else {
+      this.recognitionCycle.lastPartialCandidate = transcriptText;
+      this.recognitionCycle.partialCandidateRepeats = 1;
+    }
+
+    const previous = this.recognitionCycle.lastPublishedPartial;
+    const now = this.clock().getTime();
+    const progressive = !previous || transcriptText.toLowerCase().startsWith(previous.toLowerCase());
+    const stableRepeat = this.recognitionCycle.partialCandidateRepeats >= 2;
+    const oldEnough = now - this.recognitionCycle.lastPartialPublishedAt >= 700;
+    if (!progressive && !stableRepeat && !oldEnough) {
+      this.runtimePipelineStats.suppressedPartials += 1;
+      return { publish: false, message: 'Unstable partial transcript suppressed' };
+    }
+
+    this.recognitionCycle.lastPublishedPartial = transcriptText;
+    this.recognitionCycle.lastPartialPublishedAt = now;
+    this.recognitionCycle.confidence = Number(payload.confidence) || this.recognitionCycle.confidence;
+    return { publish: true, message: 'Partial transcript accepted' };
+  }
+
+  /**
+   * Recover from an empty final transcript without closing the long-running session.
+   * @returns {void}
+   * @private
+   */
+  _handleEmptyFinalTranscript() {
+    this.runtimePipelineStats.emptyFinals += 1;
+    this._stopRecognitionCycle('empty-final-transcript');
+    try {
+      this.resetAudioProcessing();
+      const sttEngine = this._getSTTEngine();
+      if (!sttEngine.isRunning || !sttEngine.isRunning()) {
+        this.startSpeechToText();
+      }
+      this._publishRecognitionCycle('empty-final-recovered', {
+        emptyFinals: this.runtimePipelineStats.emptyFinals
+      });
+    } catch (error) {
+      this._publish(SESSION_EVENTS.VOICE_ERROR, this._buildEventPayload(null, {
+        error: this._normalizeError(error)
+      }));
+    }
+  }
+
+  /**
+   * Clear per-turn transcript display state while preserving session history.
+   * @returns {void}
+   * @private
+   */
+  _clearSessionRecognitionTurn() {
+    const recognition = this.currentSession?.context?.recognition;
+    if (!recognition) return;
+    recognition.partialTranscript = '';
+    recognition.finalTranscript = '';
+    recognition.normalizedTranscript = '';
+    recognition.normalizedResult = null;
+    recognition.latestResult = null;
+  }
+
+  /**
+   * Publish recognition-cycle diagnostics metadata.
+   * @param {string} phase Cycle phase.
+   * @param {object} extra Extra metadata.
+   * @returns {void}
+   * @private
+   */
+  _publishRecognitionCycle(phase, extra = {}) {
+    if (!this.currentSession) return;
+    this._publish(SESSION_EVENTS.VOICE_RECOGNITION_CYCLE, this._buildEventPayload(this.currentSession, {
+      phase,
+      recognitionCycle: { ...this.recognitionCycle },
+      ...extra
+    }));
   }
 
   /**
@@ -1014,6 +1395,16 @@ class VoiceSessionManager {
       sttFrames: 0,
       partialTranscripts: 0,
       finalTranscripts: 0,
+      duplicatePartials: 0,
+      suppressedPartials: 0,
+      staleTranscripts: 0,
+      duplicateFinals: 0,
+      emptyFinals: 0,
+      endpointDetections: 0,
+      finalizationRequests: 0,
+      audioFramesWhileBusy: 0,
+      listeningCycles: 0,
+      lastPartialTranscript: '',
       lastLogAt: 0
     };
   }

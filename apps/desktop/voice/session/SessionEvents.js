@@ -15,6 +15,7 @@ const SESSION_EVENTS = Object.freeze({
   VOICE_SESSION_CANCELLED: 'voice.session.cancelled',
   VOICE_SESSION_CLOSED: 'voice.session.closed',
   VOICE_STATE_CHANGED: 'voice.state.changed',
+  VOICE_RECOGNITION_CYCLE: 'voice.recognition.cycle',
   VOICE_PARTIAL_TRANSCRIPT: 'voice.transcript.partial',
   VOICE_FINAL_TRANSCRIPT: 'voice.transcript.final',
   VOICE_NORMALIZED_TRANSCRIPT: 'voice.transcript.normalized',

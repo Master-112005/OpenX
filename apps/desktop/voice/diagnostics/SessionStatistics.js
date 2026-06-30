@@ -17,6 +17,13 @@ class SessionStatistics {
     this.transcriptLengths = [];
     this.cancellationReasons = {};
     this.failureReasons = {};
+    this.recognitionCycles = {
+      started: 0,
+      endpoints: 0,
+      completed: 0,
+      stopped: 0,
+      emptyFinalRecoveries: 0
+    };
   }
 
   recordEvent(eventName, payload = {}) {
@@ -31,6 +38,14 @@ class SessionStatistics {
       this.failed += 1;
       const reason = payload.error?.message || payload.error?.type || 'unknown';
       this.failureReasons[reason] = (this.failureReasons[reason] || 0) + 1;
+    }
+    if (eventName === 'voice.recognition.cycle') {
+      const phase = String(payload.phase || '');
+      if (phase === 'started') this.recognitionCycles.started += 1;
+      if (phase === 'endpoint') this.recognitionCycles.endpoints += 1;
+      if (phase === 'completed') this.recognitionCycles.completed += 1;
+      if (phase === 'stopped') this.recognitionCycles.stopped += 1;
+      if (phase === 'empty-final-recovered') this.recognitionCycles.emptyFinalRecoveries += 1;
     }
     const duration = Number(payload.session?.durationMs);
     if (Number.isFinite(duration)) this.durations.push(duration);
@@ -50,7 +65,8 @@ class SessionStatistics {
       shortestSessionMs: this.durations.length ? Math.min(...this.durations) : 0,
       averageTranscriptLength: avg(this.transcriptLengths),
       cancellationReasons: { ...this.cancellationReasons },
-      failureReasons: { ...this.failureReasons }
+      failureReasons: { ...this.failureReasons },
+      recognitionCycles: { ...this.recognitionCycles }
     };
   }
 }

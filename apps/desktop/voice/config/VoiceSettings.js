@@ -61,9 +61,9 @@ const VoiceSettings = Object.freeze({
     vadEnabled: true,
     speechThreshold: 0.08,
     silenceThreshold: 0.025,
-    minimumSpeechDurationMs: 120,
-    maximumSilenceDurationMs: 500,
-    endpointSilenceDurationMs: 800,
+    minimumSpeechDurationMs: 500,
+    maximumSilenceDurationMs: 800,
+    endpointSilenceDurationMs: 1200,
     frameSizeMs: 20,
     frameSize: 320,
     sttCompatibilityMode: 'processed-pcm'
@@ -71,10 +71,10 @@ const VoiceSettings = Object.freeze({
   session: Object.freeze({
     timeouts: Object.freeze({
       initializationMs: 10000,
-      listeningMs: 30000,
+      listeningMs: 0,
       processingMs: 15000,
       executionMs: 30000,
-      overallMs: 60000
+      overallMs: 0
     })
   }),
   ui: Object.freeze({

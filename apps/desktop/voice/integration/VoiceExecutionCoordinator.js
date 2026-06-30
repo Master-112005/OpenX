@@ -53,15 +53,26 @@ class VoiceExecutionCoordinator extends EventEmitter {
    */
   finishExecution(result) {
     this.metrics.completedExecutions += 1;
-    if (this.configuration.autoTransitionSession && this.manager && typeof this.manager.finishSession === 'function') {
+    let sessionTransition = null;
+    if (this.configuration.autoTransitionSession && this.manager && typeof this.manager.resumeListeningCycle === 'function') {
       try {
-        this.manager.finishSession();
+        sessionTransition = this.manager.resumeListeningCycle('assistant-execution-complete');
+      } catch (_) {
+        // Session lifecycle is best-effort presentation coordination here.
+      }
+    } else if (this.configuration.autoTransitionSession && this.manager && typeof this.manager.finishSession === 'function') {
+      try {
+        sessionTransition = this.manager.finishSession();
       } catch (_) {
         // Session lifecycle is best-effort presentation coordination here.
       }
     }
     this.emit(EVENTS.VOICE_EXECUTION_FINISHED, Object.freeze({ result }));
-    this._log('Execution Finished', { success: Boolean(result?.success) });
+    this._log('Execution Finished', {
+      success: Boolean(result?.success),
+      sessionState: sessionTransition?.state,
+      resumedListening: Boolean(sessionTransition?.resumed)
+    });
     return { finished: true, result };
   }
 
