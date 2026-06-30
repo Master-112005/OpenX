@@ -15,8 +15,10 @@ describe('Electron Chat Shortcut', function() {
   });
 
   it('should not show stale stopwatch widgets during startup restore', function() {
-    assert.match(script, /includeStopwatch = options\.includeStopwatch === true/);
+    assert.match(script, /let timerWidgetMode = null/);
+    assert.match(script, /includeStopwatch = options\.includeStopwatch === true \|\| timerWidgetMode === 'stopwatch'/);
     assert.match(script, /if \(!includeStopwatch && state\?\.mode === 'stopwatch'\) return \{ visible: false \}/);
+    assert.match(script, /timerWidgetMode = nextState\?\.visible \? nextState\.mode : null/);
     assert.match(script, /showTimerWidget\(preferredId, \{ includeStopwatch: intent\.startsWith\('stopwatch\.'\) \}\)/);
   });
 

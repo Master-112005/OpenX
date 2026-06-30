@@ -667,12 +667,11 @@ class SchedulerController {
     return { success: true, data: { ...item, remainingMs, remainingMinutes: Math.max(0, Math.ceil(remainingMs / 60000)) } };
   }
 
-  getTimerWidgetState(preferredId = null) {
+  getTimerWidgetState(preferredId = null, options = {}) {
+    const includeStopwatch = options.includeStopwatch === true;
     const timer = this._activeTimerForWidget(preferredId);
-    const stopwatch = this._activeStopwatchForWidget(preferredId);
-    const active = [timer, stopwatch]
-      .filter(Boolean)
-      .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())[0] || null;
+    const stopwatch = includeStopwatch ? this._activeStopwatchForWidget(preferredId) : null;
+    const active = timer || stopwatch;
     if (!active) {
       return { visible: false };
     }

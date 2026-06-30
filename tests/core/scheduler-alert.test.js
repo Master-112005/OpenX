@@ -153,17 +153,41 @@ describe('Scheduler Alert Delivery', function() {
 
     const stopwatch = scheduler.startStopwatch();
     assert.equal(stopwatch.success, true);
-    const stopwatchState = scheduler.getTimerWidgetState(stopwatch.data.taskName);
+    assert.equal(scheduler.getTimerWidgetState(stopwatch.data.taskName).visible, false);
+    const stopwatchState = scheduler.getTimerWidgetState(stopwatch.data.taskName, { includeStopwatch: true });
     assert.equal(stopwatchState.visible, true);
     assert.equal(stopwatchState.mode, 'stopwatch');
     assert.equal(stopwatchState.status, 'running');
     assert.ok(stopwatchState.elapsedMs >= 0);
     assert.equal(scheduler.pauseStopwatch().success, true);
     assert.equal(scheduler.resetStopwatch().data.status, 'paused');
-    assert.equal(scheduler.getTimerWidgetState(stopwatch.data.taskName).elapsedMs, 0);
+    assert.equal(scheduler.getTimerWidgetState(stopwatch.data.taskName, { includeStopwatch: true }).elapsedMs, 0);
     assert.equal(scheduler.resumeStopwatch().data.status, 'running');
     assert.equal(scheduler.stopStopwatch().success, true);
     assert.equal(scheduler.getTimerWidgetState().visible, false);
+
+    scheduler.destroy();
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  });
+
+  it('should not let an active stopwatch appear from timer or alarm widget polling', function() {
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openx-stopwatch-isolation-'));
+    const scheduler = new SchedulerController({ app: { dataDir, cleanupLegacySchedules: false } });
+
+    const stopwatch = scheduler.startStopwatch();
+    assert.equal(stopwatch.success, true);
+    assert.equal(scheduler.getTimerWidgetState().visible, false);
+    assert.equal(scheduler.getTimerWidgetState(null, { includeStopwatch: true }).mode, 'stopwatch');
+
+    const timer = scheduler.setTimer(5);
+    assert.equal(timer.success, true);
+    assert.equal(scheduler.getTimerWidgetState().mode, 'timer');
+    scheduler.complete(timer.data.id);
+    assert.equal(scheduler.getTimerWidgetState().visible, false);
+
+    const alarm = scheduler.setAlarm('noon', 'Lunch');
+    assert.equal(alarm.success, true);
+    assert.equal(scheduler.getTimerWidgetState(alarm.data.id).visible, false);
 
     scheduler.destroy();
     fs.rmSync(dataDir, { recursive: true, force: true });

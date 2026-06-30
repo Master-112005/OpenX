@@ -135,6 +135,7 @@ const crashRecoveryPolicy = new CrashRecoveryPolicy({
 let chatWindow = null;
 let alertWindow = null;
 let timerWidgetWindow = null;
+let timerWidgetMode = null;
 let plannerWindow = null;
 let tray = null;
 let assistant = null;
@@ -621,10 +622,8 @@ function presentScheduleAlert(schedule) {
 }
 
 function getTimerWidgetState(preferredId = null, options = {}) {
-  const includeStopwatch = options.includeStopwatch === true ||
-    Boolean(preferredId) ||
-    Boolean(timerWidgetWindow && !timerWidgetWindow.isDestroyed());
-  const state = assistant?.automation?.scheduler?.getTimerWidgetState?.(preferredId);
+  const includeStopwatch = options.includeStopwatch === true || timerWidgetMode === 'stopwatch';
+  const state = assistant?.automation?.scheduler?.getTimerWidgetState?.(preferredId, { includeStopwatch });
   if (!includeStopwatch && state?.mode === 'stopwatch') return { visible: false };
   return state || { visible: false };
 }
@@ -644,13 +643,16 @@ function positionTimerWidget() {
 
 function sendTimerWidgetState(state = null) {
   if (!timerWidgetWindow || timerWidgetWindow.isDestroyed()) return;
-  timerWidgetWindow.webContents.send('timerWidget:state', state || getTimerWidgetState());
+  const nextState = state || getTimerWidgetState(null, { includeStopwatch: timerWidgetMode === 'stopwatch' });
+  timerWidgetMode = nextState?.visible ? nextState.mode : null;
+  timerWidgetWindow.webContents.send('timerWidget:state', nextState);
 }
 
 function hideTimerWidget() {
   if (timerWidgetWindow && !timerWidgetWindow.isDestroyed()) {
     timerWidgetWindow.close();
   }
+  timerWidgetMode = null;
 }
 
 function showTimerWidget(preferredId = null, options = {}) {
@@ -659,6 +661,7 @@ function showTimerWidget(preferredId = null, options = {}) {
     hideTimerWidget();
     return;
   }
+  timerWidgetMode = state.mode;
 
   if (timerWidgetWindow && !timerWidgetWindow.isDestroyed()) {
     positionTimerWidget();
@@ -698,6 +701,7 @@ function showTimerWidget(preferredId = null, options = {}) {
   });
   timerWidgetWindow.on('closed', () => {
     timerWidgetWindow = null;
+    timerWidgetMode = null;
   });
 }
 
@@ -715,7 +719,7 @@ function handleTimerWidgetCommand(payload) {
     return;
   }
   if (timerWidgetWindow && !timerWidgetWindow.isDestroyed()) {
-    sendTimerWidgetState(getTimerWidgetState(preferredId));
+    sendTimerWidgetState(getTimerWidgetState(preferredId, { includeStopwatch: timerWidgetMode === 'stopwatch' }));
   }
 }
 
@@ -904,7 +908,7 @@ function setupIPC() {
   });
 
   registerIpcHandler('timerWidget:getState', async () => {
-    return getTimerWidgetState();
+    return getTimerWidgetState(null, { includeStopwatch: timerWidgetMode === 'stopwatch' });
   });
 
   registerIpcHandler('timerWidget:close', async () => {
@@ -914,7 +918,7 @@ function setupIPC() {
 
   registerIpcHandler('timerWidget:stopStopwatch', async () => {
     const result = assistant?.automation?.scheduler?.pauseStopwatch?.();
-    if (result?.success) sendTimerWidgetState(getTimerWidgetState(result.data?.id || result.data?.taskName));
+    if (result?.success) sendTimerWidgetState(getTimerWidgetState(result.data?.id || result.data?.taskName, { includeStopwatch: true }));
     return result || { success: false, error: 'Scheduler unavailable' };
   });
 
