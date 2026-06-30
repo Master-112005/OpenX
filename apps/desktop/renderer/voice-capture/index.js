@@ -140,7 +140,7 @@
     const now = performance.now();
     if (framesSent > 0 && (framesSent === 1 || framesSent % 50 === 0 || now - lastStatsAt >= 2500)) {
       lastStatsAt = now;
-      report('frames', { framesSent, bytesSent, rms: encoded.rms });
+      report('frames', { framesSent, bytesSent, rms: encoded.rms, runId: activeRunId });
     }
   }
 

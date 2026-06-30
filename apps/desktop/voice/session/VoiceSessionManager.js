@@ -71,6 +71,9 @@ class VoiceSessionManager {
       endpointDetections: 0,
       finalizationRequests: 0,
       audioFramesWhileBusy: 0,
+      staleAudioFrames: 0,
+      capturePauses: 0,
+      captureResumes: 0,
       listeningCycles: 0,
       lastPartialTranscript: '',
       lastLogAt: 0
@@ -397,6 +400,7 @@ class VoiceSessionManager {
   beginProcessing() {
     this._assertSession();
     this._transitionTo(VoiceStateMachine.STATES.PROCESSING, { reason: 'begin-processing' });
+    this._pauseAudioCaptureForRecognitionTurn('begin-processing');
     this._scheduleLifecycleTimeout('processing', this.timeouts.processingMs);
     return this._result();
   }
@@ -433,6 +437,7 @@ class VoiceSessionManager {
     }
 
     let audioProcessingReset = false;
+    let audioCaptureResumed = false;
     let sttRestarted = false;
     this.runtimePipelineStats.listeningCycles += 1;
     this.runtimePipelineStats.lastPartialTranscript = '';
@@ -447,6 +452,7 @@ class VoiceSessionManager {
     }
 
     try {
+      audioCaptureResumed = this._resumeAudioCaptureForRecognitionTurn(reason);
       const sttEngine = this._getSTTEngine();
       if (!sttEngine.isRunning || !sttEngine.isRunning()) {
         this.startSpeechToText();
@@ -463,7 +469,8 @@ class VoiceSessionManager {
       reason,
       listeningCycles: this.runtimePipelineStats.listeningCycles,
       sttRestarted,
-      audioProcessingReset
+      audioProcessingReset,
+      audioCaptureResumed
     });
     return {
       success: true,
@@ -471,7 +478,8 @@ class VoiceSessionManager {
       state: this.currentState,
       session: this.getSession(),
       sttRestarted,
-      audioProcessingReset
+      audioProcessingReset,
+      audioCaptureResumed
     };
   }
 
@@ -913,6 +921,17 @@ class VoiceSessionManager {
         });
         return;
       }
+      if (!this._isFrameFreshForRecognitionCycle(frame)) {
+        this.runtimePipelineStats.staleAudioFrames += 1;
+        this._logRuntimePipeline('Stale audio frame ignored before recognition cycle boundary', {
+          recognitionCycleId: this.recognitionCycle.id,
+          frameIndex: frame?.frameIndex,
+          frameTimestamp: frame?.timestamp,
+          recognitionStartedAt: this.recognitionCycle.startedAt,
+          staleAudioFrames: this.runtimePipelineStats.staleAudioFrames
+        });
+        return;
+      }
       this._logRuntimePipeline('AudioCapture frame received', {
         audioFrames: this.runtimePipelineStats.audioFrames,
         frame: typeof frame?.toMetadata === 'function' ? frame.toMetadata() : undefined
@@ -1092,6 +1111,7 @@ class VoiceSessionManager {
       finalizing: false,
       finalDelivered: false,
       startedAt: null,
+      startedAtMs: 0,
       endedAt: null,
       reason,
       speechFrames: 0,
@@ -1119,6 +1139,7 @@ class VoiceSessionManager {
     this.recognitionCycle.id = this.recognitionCycleSequence;
     this.recognitionCycle.active = true;
     this.recognitionCycle.startedAt = this.clock().toISOString();
+    this.recognitionCycle.startedAtMs = Date.parse(this.recognitionCycle.startedAt);
     this.runtimePipelineStats.lastPartialTranscript = '';
     this._publishRecognitionCycle('started', { reason });
     this._log('Recognition Cycle Started', {
@@ -1285,6 +1306,88 @@ class VoiceSessionManager {
   }
 
   /**
+   * Pause microphone capture during assistant processing/execution.
+   * @param {string} reason Pause reason.
+   * @returns {boolean}
+   * @private
+   */
+  _pauseAudioCaptureForRecognitionTurn(reason = 'recognition-turn-processing') {
+    const audioCapture = this.resources.audioCapture;
+    if (!audioCapture || typeof audioCapture.getStatus !== 'function' || typeof audioCapture.pause !== 'function') {
+      return false;
+    }
+    try {
+      const status = audioCapture.getStatus();
+      if (!status.capturing) return false;
+      audioCapture.pause();
+      this.runtimePipelineStats.capturePauses += 1;
+      this._log('Audio Capture Paused For Turn', {
+        reason,
+        recognitionCycleId: this.recognitionCycle.id
+      });
+      return true;
+    } catch (error) {
+      this._log('Audio Capture Pause Skipped', {
+        reason,
+        error: error.message
+      });
+      return false;
+    }
+  }
+
+  /**
+   * Resume microphone capture for a fresh recognition cycle.
+   * @param {string} reason Resume reason.
+   * @returns {boolean}
+   * @private
+   */
+  _resumeAudioCaptureForRecognitionTurn(reason = 'recognition-turn-resume') {
+    const audioCapture = this.resources.audioCapture;
+    if (!audioCapture || typeof audioCapture.getStatus !== 'function') return false;
+    try {
+      const status = audioCapture.getStatus();
+      if (status.paused && typeof audioCapture.resume === 'function') {
+        audioCapture.resume();
+        this.runtimePipelineStats.captureResumes += 1;
+        this._log('Audio Capture Resumed For Turn', {
+          reason,
+          recognitionCycleId: this.recognitionCycle.id
+        });
+        return true;
+      }
+      if (!status.capturing && status.available && typeof audioCapture.start === 'function') {
+        audioCapture.start();
+        this.runtimePipelineStats.captureResumes += 1;
+        this._log('Audio Capture Restarted For Turn', {
+          reason,
+          recognitionCycleId: this.recognitionCycle.id
+        });
+        return true;
+      }
+    } catch (error) {
+      this._log('Audio Capture Resume Skipped', {
+        reason,
+        error: error.message
+      });
+    }
+    return false;
+  }
+
+  /**
+   * Reject frames captured before the active recognition cycle started.
+   * @param {object} frame AudioFrame-like object.
+   * @returns {boolean}
+   * @private
+   */
+  _isFrameFreshForRecognitionCycle(frame) {
+    if (!this.recognitionCycle.active || !this.recognitionCycle.startedAt) return true;
+    const startedAtMs = Number(this.recognitionCycle.startedAtMs) || Date.parse(this.recognitionCycle.startedAt);
+    const frameTimestampMs = Date.parse(frame?.timestamp || '');
+    if (!Number.isFinite(startedAtMs) || !Number.isFinite(frameTimestampMs)) return true;
+    return frameTimestampMs >= startedAtMs - 120;
+  }
+
+  /**
    * Clear per-turn transcript display state while preserving session history.
    * @returns {void}
    * @private
@@ -1403,6 +1506,9 @@ class VoiceSessionManager {
       endpointDetections: 0,
       finalizationRequests: 0,
       audioFramesWhileBusy: 0,
+      staleAudioFrames: 0,
+      capturePauses: 0,
+      captureResumes: 0,
       listeningCycles: 0,
       lastPartialTranscript: '',
       lastLogAt: 0

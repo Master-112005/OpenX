@@ -27,16 +27,21 @@ class VoiceTheme {
    */
   resolve(override = {}) {
     try {
-      const chat = this.settings.chat || {};
-      const system = this.settings.system || {};
+      const settingsRoot = this.settings.settings || this.settings || {};
+      const chat = settingsRoot.chat || {};
+      const system = settingsRoot.system || {};
+      const selectedThemeId = override.mode || system.theme || chat.themeId || this.defaults.mode || 'graphite';
+      const availableThemes = Array.isArray(this.settings.availableThemes) ? this.settings.availableThemes : [];
+      const assistantTheme = availableThemes.find(item => item.id === selectedThemeId) || null;
+      const colors = assistantTheme?.colors || {};
       const theme = {
-        mode: override.mode || system.theme || chat.themeId || this.defaults.mode || 'dark',
+        mode: selectedThemeId,
         glass: override.glass !== undefined ? override.glass : this.defaults.glass !== false,
-        accentColor: override.accentColor || chat.accentColor || this.defaults.accentColor || '#4488ff',
-        backgroundColor: override.backgroundColor || this.defaults.backgroundColor || 'rgba(17, 22, 36, 0.82)',
-        textColor: override.textColor || this.defaults.textColor || '#f4f7ff',
-        mutedColor: override.mutedColor || this.defaults.mutedColor || 'rgba(244, 247, 255, 0.68)',
-        borderColor: override.borderColor || this.defaults.borderColor || 'rgba(255, 255, 255, 0.16)',
+        accentColor: override.accentColor || colors.accent || chat.accentColor || this.defaults.accentColor || '#4488ff',
+        backgroundColor: override.backgroundColor || colors.panel || this.defaults.backgroundColor || 'rgba(17, 22, 36, 0.82)',
+        textColor: override.textColor || colors.text || this.defaults.textColor || '#f4f7ff',
+        mutedColor: override.mutedColor || colors.muted || this.defaults.mutedColor || 'rgba(244, 247, 255, 0.68)',
+        borderColor: override.borderColor || colors.border || this.defaults.borderColor || 'rgba(255, 255, 255, 0.16)',
         blur: Number.isFinite(override.blur) ? override.blur : Number(this.defaults.blur || 34)
       };
       return Object.freeze(theme);
@@ -55,6 +60,17 @@ class VoiceTheme {
   switchTheme(theme = {}) {
     this.currentTheme = this.resolve(theme);
     return this.currentTheme;
+  }
+
+  /**
+   * Replace settings and resolve the active assistant theme.
+   * @param {object} settings Settings snapshot.
+   * @param {object} override Theme override.
+   * @returns {object}
+   */
+  updateSettings(settings = {}, override = {}) {
+    this.settings = settings || {};
+    return this.switchTheme(override);
   }
 
   /**

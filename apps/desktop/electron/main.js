@@ -6,6 +6,7 @@ const os = require('os');
 const BASE_CONFIG = require('../../../config');
 const Assistant = require('../../../core/assistant/index');
 const TextToSpeech = require('../voice/tts');
+const { VoiceTheme } = require('../voice/ui');
 const {
   VoiceSessionManager,
   VoiceAssistantBridge,
@@ -518,6 +519,7 @@ function stopVoiceCaptureStream(reason = 'stop') {
   voiceCaptureRunId += 1;
   voiceCaptureShouldRun = false;
   voiceCaptureStartOptions = null;
+  voiceCaptureFrameReceiver = null;
   const sent = sendVoiceCaptureCommand('voiceCapture:stop', { reason, runId: voiceCaptureRunId });
   mainLogger.info('Voice microphone capture stop requested', { sent, reason, runId: voiceCaptureRunId });
 }
@@ -591,7 +593,7 @@ function receiveVoiceCaptureFrame(payload = {}) {
 
   if (!voiceCaptureShouldRun || frame.runId !== voiceCaptureRunId) {
     voiceCaptureFrameStats.dropped += 1;
-    if (voiceCaptureFrameStats.dropped <= 3 || voiceCaptureFrameStats.dropped % 25 === 0) {
+    if (voiceCaptureFrameStats.dropped <= 3 || voiceCaptureFrameStats.dropped % 250 === 0) {
       mainLogger.warn('Voice PCM frame dropped because capture run is stale', {
         frameIndex: frame.frameIndex,
         frameRunId: frame.runId,
@@ -726,6 +728,8 @@ function createDesktopMicrophoneBackend() {
     },
     resume: () => {
       captureBackend.capturing = true;
+      voiceCaptureFrameReceiver = captureBackend.onFrame;
+      resetVoiceCaptureFrameStats();
       startVoiceCaptureStream({
         sampleRate: captureBackend.configuration?.sampleRate || 16000,
         channels: captureBackend.configuration?.channels || 1
@@ -799,6 +803,7 @@ function createVoiceOverlayForManager(manager) {
   });
   const overlay = new VoiceOverlay({
     windowController,
+    theme: new VoiceTheme({ settings: settingsService?.getSnapshot?.() || {} }),
     logger: mainLogger
   });
   overlay.attachToSessionManager(manager);
@@ -1164,6 +1169,10 @@ function setupVoiceCaptureIPC() {
       throw new Error('Invalid or unauthorized IPC request');
     }
     const report = sanitizeVoiceCaptureReport(payload);
+    const reportRunId = Number(report.data?.runId) || 0;
+    if (report.event === 'frames' && (!voiceCaptureShouldRun || (reportRunId && reportRunId !== voiceCaptureRunId))) {
+      return { ok: true, ignored: true };
+    }
     if (report.event === 'error') {
       mainLogger.warn('Voice microphone capture failed', report.data);
     } else {

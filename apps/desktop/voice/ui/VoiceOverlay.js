@@ -186,6 +186,22 @@ class VoiceOverlay extends EventEmitter {
   }
 
   /**
+   * Refresh overlay theme tokens from assistant settings.
+   * @param {object} settings Settings snapshot.
+   * @returns {object}
+   */
+  updateTheme(settings = {}) {
+    if (this.theme && typeof this.theme.updateSettings === 'function') {
+      this.theme.updateSettings(settings);
+    }
+    if (this.visible && this.windowController && typeof this.windowController.updateState === 'function') {
+      this.windowController.updateState(this._composeView(this.currentView.state, this.currentView));
+    }
+    this.emit(VOICE_UI_EVENTS.THEME_CHANGED, Object.freeze({ theme: this.theme.currentTheme }));
+    return this.theme.currentTheme;
+  }
+
+  /**
    * Request cancellation through the injected manager or cancellation handler.
    * @param {string} reason Cancellation reason.
    * @returns {{requested: boolean, reason: string}}

@@ -1176,6 +1176,30 @@ describe('Voice Subsystem Architecture', function() {
     assert.equal(updates.length, 2);
   });
 
+  it('should resolve Voice UI colors from the active assistant theme', function() {
+    const { VoiceTheme } = require('../../apps/desktop/voice/ui');
+    const theme = new VoiceTheme({
+      settings: {
+        settings: { chat: { themeId: 'white-glass' } },
+        availableThemes: [{
+          id: 'white-glass',
+          colors: {
+            panel: 'rgba(255, 255, 255, 0.34)',
+            text: '#171719',
+            muted: 'rgba(20, 20, 22, 0.66)',
+            border: 'rgba(255, 255, 255, 0.48)',
+            accent: 'rgba(255, 255, 255, 0.94)'
+          }
+        }]
+      }
+    });
+
+    assert.equal(theme.currentTheme.mode, 'white-glass');
+    assert.equal(theme.currentTheme.backgroundColor, 'rgba(255, 255, 255, 0.34)');
+    assert.equal(theme.currentTheme.textColor, '#171719');
+    assert.equal(theme.toCssVariables()['--voice-border'], 'rgba(255, 255, 255, 0.48)');
+  });
+
   it('should ignore empty streaming partials before UI and normalization', function() {
     const { VoiceSessionManager, STTEngine, TranscriptResult, STT_EVENTS, SESSION_EVENTS } = require('../../apps/desktop/voice');
     const sttEngine = new STTEngine();
@@ -1279,6 +1303,124 @@ describe('Voice Subsystem Architecture', function() {
     assert.equal(starts, 2);
     assert.equal(resets, 1);
     assert.equal(manager.getMetrics().runtimePipeline.emptyFinals, 1);
+  });
+
+  it('should reject queued audio captured before the active recognition cycle', function() {
+    const { VoiceSessionManager, AudioFrame } = require('../../apps/desktop/voice');
+    let now = new Date('2026-06-30T10:00:00.000Z');
+    let processed = 0;
+    let running = false;
+    const manager = new VoiceSessionManager({
+      clock: () => now,
+      resources: {
+        sttEngine: {
+          on() {},
+          start: () => {
+            running = true;
+            return { started: true, state: 'DECODING' };
+          },
+          isRunning: () => running,
+          cancel: () => {
+            running = false;
+            return { cancelled: true };
+          },
+          getStatus: () => ({ running, decoder: { state: running ? 'DECODING' : 'STOPPED' } })
+        },
+        audioProcessor: {
+          on() {},
+          processFrame: () => {
+            processed += 1;
+          },
+          reset: () => ({ reset: true }),
+          getStatus: () => ({ initialized: true })
+        }
+      },
+      setTimeout: () => ({ unref() {} }),
+      clearTimeout: () => {}
+    });
+
+    manager.startSession({ id: 'fresh-audio-boundary' });
+    manager.startSpeechToText();
+    manager._processAudioFrameForSession(new AudioFrame({
+      timestamp: '2026-06-30T09:59:59.000Z',
+      pcm: [0, 0],
+      frameIndex: 1
+    }));
+    now = new Date('2026-06-30T10:00:00.200Z');
+    manager._processAudioFrameForSession(new AudioFrame({
+      timestamp: '2026-06-30T10:00:00.120Z',
+      pcm: [0, 0],
+      frameIndex: 2
+    }));
+
+    assert.equal(processed, 1);
+    assert.equal(manager.getMetrics().runtimePipeline.staleAudioFrames, 1);
+  });
+
+  it('should pause capture during assistant execution and resume with the next cycle', function() {
+    const { VoiceSessionManager, VoiceStateMachine } = require('../../apps/desktop/voice');
+    let captureState = 'CAPTURING';
+    let sttRunning = true;
+    let pauses = 0;
+    let resumes = 0;
+    let sttStarts = 0;
+    const manager = new VoiceSessionManager({
+      resources: {
+        audioCapture: {
+          on() {},
+          getStatus: () => ({
+            capturing: captureState === 'CAPTURING',
+            paused: captureState === 'PAUSED',
+            available: true
+          }),
+          pause: () => {
+            captureState = 'PAUSED';
+            pauses += 1;
+            return { paused: true };
+          },
+          resume: () => {
+            captureState = 'CAPTURING';
+            resumes += 1;
+            return { resumed: true };
+          },
+          close: () => ({ closed: true })
+        },
+        audioProcessor: {
+          on() {},
+          reset: () => ({ reset: true }),
+          getStatus: () => ({ initialized: true })
+        },
+        sttEngine: {
+          on() {},
+          start: () => {
+            sttRunning = true;
+            sttStarts += 1;
+            return { started: true };
+          },
+          isRunning: () => sttRunning,
+          cancel: () => {
+            sttRunning = false;
+            return { cancelled: true };
+          },
+          getStatus: () => ({ running: sttRunning, decoder: { state: sttRunning ? 'DECODING' : 'STOPPED' } })
+        }
+      },
+      setTimeout: () => ({ unref() {} }),
+      clearTimeout: () => {}
+    });
+
+    manager.startSession({ id: 'capture-half-duplex' });
+    manager.beginProcessing();
+    manager.beginExecution();
+    sttRunning = false;
+    manager.resumeListeningCycle('assistant-complete');
+
+    assert.equal(manager.getCurrentState(), VoiceStateMachine.STATES.LISTENING);
+    assert.equal(pauses, 1);
+    assert.equal(resumes, 1);
+    assert.equal(sttStarts, 1);
+    assert.equal(manager.getMetrics().runtimePipeline.capturePauses, 1);
+    assert.equal(manager.getMetrics().runtimePipeline.captureResumes, 1);
   });
 
   it('should emit exactly one final transcript per recognition cycle', function() {

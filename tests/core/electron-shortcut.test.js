@@ -32,6 +32,7 @@ describe('Electron Chat Shortcut', function() {
     assert.match(script, /new VoiceOverlay/);
     assert.match(script, /overlay\.attachToSessionManager\(manager\)/);
     assert.match(script, /voiceOverlay = createVoiceOverlayForManager\(voiceSessionManager\)/);
+    assert.match(script, /new VoiceTheme\(\{ settings: settingsService\?\.getSnapshot\?\.\(\) \|\| \{\} \}\)/);
   });
 
   it('should use local desktop voice providers instead of empty audio placeholders', function() {
@@ -55,6 +56,7 @@ describe('Electron Chat Shortcut', function() {
     assert.match(script, /voiceCaptureFrameReceiver\(frame\)/);
     assert.match(script, /let voiceCaptureRunId = 0/);
     assert.match(script, /frame\.runId !== voiceCaptureRunId/);
+    assert.match(script, /voiceCaptureFrameStats\.dropped % 250 === 0/);
     assert.match(preloadScript, /contextBridge\.exposeInMainWorld\('openxVoiceCapture'/);
     assert.match(preloadScript, /sendFrame: \(frame\) =>/);
     assert.match(captureHtml, /Content-Security-Policy/);
@@ -64,6 +66,7 @@ describe('Electron Chat Shortcut', function() {
     assert.match(captureScript, /currentRunId !== requestedRunId/);
     assert.match(captureScript, /stale-start-ignored/);
     assert.match(captureScript, /runId: activeRunId/);
+    assert.match(captureScript, /framesSent, bytesSent, rms: encoded\.rms, runId: activeRunId/);
     assert.match(captureScript, /downsample/);
     assert.match(captureScript, /pcmFromSamples/);
     assert.match(captureScript, /sendFrame\(\{/);
