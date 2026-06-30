@@ -1,5 +1,43 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
+function updateVoiceOverlayDom(message) {
+  const operation = message?.operation;
+  const view = message?.payload?.view || message?.payload || {};
+  const root = document.getElementById('voice-overlay');
+  if (!root) return;
+  const title = document.getElementById('title');
+  const status = document.getElementById('status');
+  const transcript = document.getElementById('transcript');
+  const icon = document.getElementById('icon');
+  const state = String(view.state || '').toLowerCase();
+  root.className = state;
+  root.setAttribute('aria-label', view.accessibility?.label || view.ariaLabel || view.statusText || 'Voice status');
+  root.setAttribute('aria-live', view.accessibility?.live || 'polite');
+  if (title) title.textContent = view.title || 'Voice';
+  if (status) status.textContent = view.statusText || '';
+  if (transcript) {
+    const transcriptText = message?.payload?.transcript || view.transcript || view.partialTranscript || view.finalTranscript || '';
+    transcript.textContent = transcriptText;
+  }
+  if (icon) icon.textContent = String(view.icon || 'JA').slice(0, 2).toUpperCase();
+  if (operation === 'hideOverlay') {
+    root.style.opacity = '0';
+  } else {
+    root.style.opacity = '1';
+  }
+  for (const [name, value] of Object.entries(view.cssVariables || {})) {
+    document.documentElement.style.setProperty(name, value);
+  }
+}
+
+ipcRenderer.on('voiceOverlay:event', (_event, message) => {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => updateVoiceOverlayDom(message), { once: true });
+    return;
+  }
+  updateVoiceOverlayDom(message);
+});
+
 contextBridge.exposeInMainWorld('jarvis', {
   processCommand: (input, source) =>
     ipcRenderer.invoke('command:process', { input, source }),

@@ -7,6 +7,10 @@ const { SESSION_EVENTS, VOICE_ERROR_TYPES } = require('./SessionEvents');
 const VoiceSettings = require('../config/VoiceSettings');
 const VoiceLogger = require('../diagnostics/VoiceLogger');
 const VoiceMetrics = require('../diagnostics/VoiceMetrics');
+const { AudioCapture, AUDIO_EVENTS } = require('../audio');
+const { AudioProcessor, AUDIO_PROCESSING_EVENTS } = require('../preprocessing');
+const { STTEngine, STT_EVENTS } = require('../stt');
+const { TranscriptProcessor, NORMALIZATION_EVENTS } = require('../normalization');
 
 /**
  * Purpose: Central lifecycle controller for every future OpenX Voice interaction.
@@ -18,10 +22,14 @@ const VoiceMetrics = require('../diagnostics/VoiceMetrics');
 class VoiceSessionManager {
   /**
    * Create the Voice session manager.
-   * @param {{SessionClass?: typeof VoiceSession, stateMachine?: VoiceStateMachine, logger?: VoiceLogger, metrics?: VoiceMetrics, clock?: () => Date, setTimeout?: Function, clearTimeout?: Function, timeouts?: object, resources?: object}} dependencies Replaceable dependencies.
+   * @param {{SessionClass?: typeof VoiceSession, AudioCaptureClass?: typeof AudioCapture, AudioProcessorClass?: typeof AudioProcessor, STTEngineClass?: typeof STTEngine, TranscriptProcessorClass?: typeof TranscriptProcessor, stateMachine?: VoiceStateMachine, logger?: VoiceLogger, metrics?: VoiceMetrics, clock?: () => Date, setTimeout?: Function, clearTimeout?: Function, timeouts?: object, resources?: object}} dependencies Replaceable dependencies.
    */
   constructor(dependencies = {}) {
     this.SessionClass = dependencies.SessionClass || VoiceSession;
+    this.AudioCaptureClass = dependencies.AudioCaptureClass || AudioCapture;
+    this.AudioProcessorClass = dependencies.AudioProcessorClass || AudioProcessor;
+    this.STTEngineClass = dependencies.STTEngineClass || STTEngine;
+    this.TranscriptProcessorClass = dependencies.TranscriptProcessorClass || TranscriptProcessor;
     this.stateMachine = dependencies.stateMachine || new VoiceStateMachine();
     this.logger = dependencies.logger || new VoiceLogger();
     this.metricsRecorder = dependencies.metrics || new VoiceMetrics();
@@ -33,9 +41,10 @@ class VoiceSessionManager {
       ...(dependencies.timeouts || {})
     };
     this.resources = {
-      audioCapture: null,
-      sttEngine: null,
-      preprocessingPipeline: null,
+      audioCapture: dependencies.resources?.audioCapture || null,
+      audioProcessor: dependencies.resources?.audioProcessor || null,
+      sttEngine: dependencies.resources?.sttEngine || null,
+      transcriptProcessor: dependencies.resources?.transcriptProcessor || null,
       ui: null,
       diagnostics: null,
       ...(dependencies.resources || {})
@@ -46,6 +55,23 @@ class VoiceSessionManager {
     this.activeTimers = new Map();
     this.transitionLog = [];
     this.sessionHistory = [];
+    this._audioFrameListener = event => this._processAudioFrameForSession(event.frame);
+    this._processedFrameListener = event => this._deliverAudioFrameToSession(event.frame);
+    this._partialTranscriptListener = event => this._deliverTranscriptResultToSession(event.result);
+    this._finalTranscriptListener = event => this._deliverTranscriptResultToSession(event.result);
+    this._normalizedTranscriptListener = event => this._deliverNormalizedTranscriptToSession(event.normalizedTranscript);
+    if (this.resources.audioCapture) {
+      this._attachAudioCapture(this.resources.audioCapture);
+    }
+    if (this.resources.audioProcessor) {
+      this._attachAudioProcessor(this.resources.audioProcessor);
+    }
+    if (this.resources.sttEngine) {
+      this._attachSTTEngine(this.resources.sttEngine);
+    }
+    if (this.resources.transcriptProcessor) {
+      this._attachTranscriptProcessor(this.resources.transcriptProcessor);
+    }
   }
 
   /**
@@ -139,6 +165,196 @@ class VoiceSessionManager {
     this._scheduleLifecycleTimeout('listening', this.timeouts.listeningMs);
     this._publish(SESSION_EVENTS.VOICE_SESSION_STARTED, this._buildEventPayload());
     return this._result();
+  }
+
+  /**
+   * Configure the manager-owned AudioCapture instance.
+   * @param {object} settings Audio configuration settings.
+   * @returns {{ready: boolean, settings: object}}
+   */
+  configureAudio(settings = {}) {
+    return this._getAudioCapture().configure(settings);
+  }
+
+  /**
+   * Initialize manager-owned audio capture for the active Voice session.
+   * @param {{deviceId?: string}} options Audio initialization options.
+   * @returns {{initialized: boolean, device: object, configuration: object}}
+   */
+  initializeAudio(options = {}) {
+    this._assertSession();
+    return this._getAudioCapture().initialize(options);
+  }
+
+  /**
+   * Start manager-owned raw PCM capture for the active Voice session.
+   * @param {{deviceId?: string}} options Audio start options.
+   * @returns {{started: boolean, device: object, state: string}}
+   */
+  startAudioCapture(options = {}) {
+    this._assertSession();
+    return this._getAudioCapture().start(options);
+  }
+
+  /**
+   * Stop manager-owned audio capture.
+   * @returns {{stopped: boolean, state: string}}
+   */
+  stopAudioCapture() {
+    return this._getAudioCapture().stop();
+  }
+
+  /**
+   * Pause manager-owned audio capture.
+   * @returns {{paused: boolean, state: string}}
+   */
+  pauseAudioCapture() {
+    return this._getAudioCapture().pause();
+  }
+
+  /**
+   * Resume manager-owned audio capture.
+   * @returns {{resumed: boolean, state: string}}
+   */
+  resumeAudioCapture() {
+    return this._getAudioCapture().resume();
+  }
+
+  /**
+   * Close manager-owned audio capture and release device resources.
+   * @returns {{closed: boolean, state: string}}
+   */
+  closeAudioCapture() {
+    return this._getAudioCapture().close();
+  }
+
+  /**
+   * Return manager-owned audio capture status.
+   * @returns {object}
+   */
+  getAudioStatus() {
+    return this._getAudioCapture().getStatus();
+  }
+
+  /**
+   * Initialize manager-owned audio preprocessing.
+   * @returns {{initialized: boolean, stages: string[]}}
+   */
+  initializeAudioProcessing() {
+    return this._getAudioProcessor().initialize();
+  }
+
+  /**
+   * Process one AudioFrame through the manager-owned preprocessing pipeline.
+   * @param {object} audioFrame Raw AudioFrame.
+   * @returns {object}
+   */
+  processAudioFrame(audioFrame) {
+    this._assertSession();
+    return this._getAudioProcessor().processFrame(audioFrame);
+  }
+
+  /**
+   * Reset manager-owned preprocessing state.
+   * @returns {{reset: boolean}}
+   */
+  resetAudioProcessing() {
+    return this._getAudioProcessor().reset();
+  }
+
+  /**
+   * Return manager-owned preprocessing status.
+   * @returns {object}
+   */
+  getAudioProcessingStatus() {
+    return this._getAudioProcessor().getStatus();
+  }
+
+  /**
+   * Initialize manager-owned streaming STT.
+   * @returns {{initialized: boolean, engine: string, model: object}}
+   */
+  initializeSpeechToText() {
+    this._assertSession();
+    return this._getSTTEngine().initialize();
+  }
+
+  /**
+   * Start manager-owned streaming STT.
+   * @returns {{started: boolean, state: string}}
+   */
+  startSpeechToText() {
+    this._assertSession();
+    return this._getSTTEngine().start();
+  }
+
+  /**
+   * Feed one ProcessedAudioFrame to manager-owned STT.
+   * @param {object} processedFrame Processed frame.
+   * @returns {object}
+   */
+  recognizeProcessedFrame(processedFrame) {
+    this._assertSession();
+    return this._getSTTEngine().partial(processedFrame);
+  }
+
+  /**
+   * Finalize manager-owned STT and record final transcript metadata.
+   * @returns {object}
+   */
+  finalizeSpeechToText() {
+    this._assertSession();
+    return this._getSTTEngine().final();
+  }
+
+  /**
+   * Stop manager-owned streaming STT.
+   * @returns {{stopped: boolean, state: string}}
+   */
+  stopSpeechToText() {
+    return this._getSTTEngine().stop();
+  }
+
+  /**
+   * Cancel manager-owned streaming STT.
+   * @returns {{cancelled: boolean, state: string}}
+   */
+  cancelSpeechToText() {
+    return this._getSTTEngine().cancel();
+  }
+
+  /**
+   * Reset manager-owned STT state.
+   * @returns {{reset: boolean, state: string}}
+   */
+  resetSpeechToText() {
+    return this._getSTTEngine().reset();
+  }
+
+  /**
+   * Return manager-owned STT status.
+   * @returns {object}
+   */
+  getSpeechToTextStatus() {
+    return this._getSTTEngine().getStatus();
+  }
+
+  /**
+   * Process one TranscriptResult through manager-owned normalization.
+   * @param {object|string} transcriptResult STT transcript result or text.
+   * @returns {object}
+   */
+  processTranscript(transcriptResult) {
+    this._assertSession();
+    return this._getTranscriptProcessor().process(transcriptResult);
+  }
+
+  /**
+   * Return manager-owned transcript processing status.
+   * @returns {object}
+   */
+  getTranscriptProcessingStatus() {
+    return this._getTranscriptProcessor().getStatus();
   }
 
   /**
@@ -440,7 +656,209 @@ class VoiceSessionManager {
    */
   _releaseResourcePlaceholders() {
     for (const key of Object.keys(this.resources)) {
+      const resource = this.resources[key];
+      if (resource && (typeof resource.close === 'function' || typeof resource.destroy === 'function')) {
+        try {
+          if (typeof resource.close === 'function') {
+            resource.close();
+          } else {
+            resource.destroy();
+          }
+        } catch (error) {
+          if (this.logger && typeof this.logger.warn === 'function') {
+            this.logger.warn(`[Voice] Resource cleanup failed: ${key}`, { error: error.message });
+          } else {
+            this._log(`Resource cleanup failed: ${key}`, { error: error.message });
+          }
+        }
+      }
       this.resources[key] = null;
+    }
+  }
+
+  /**
+   * Return or create the manager-owned AudioCapture instance.
+   * @returns {AudioCapture}
+   * @private
+   */
+  _getAudioCapture() {
+    if (!this.resources.audioCapture) {
+      this.resources.audioCapture = new this.AudioCaptureClass({
+        logger: this.logger,
+        metrics: this.metricsRecorder
+      });
+      this._attachAudioCapture(this.resources.audioCapture);
+    }
+    return this.resources.audioCapture;
+  }
+
+  /**
+   * Attach manager delivery hooks to an AudioCapture instance.
+   * @param {AudioCapture} audioCapture Capture instance.
+   * @returns {void}
+   * @private
+   */
+  _attachAudioCapture(audioCapture) {
+    if (!audioCapture || typeof audioCapture.on !== 'function') return;
+    audioCapture.on(AUDIO_EVENTS.AUDIO_FRAME, this._audioFrameListener);
+  }
+
+  /**
+   * Return or create the manager-owned AudioProcessor instance.
+   * @returns {AudioProcessor}
+   * @private
+   */
+  _getAudioProcessor() {
+    if (!this.resources.audioProcessor) {
+      this.resources.audioProcessor = new this.AudioProcessorClass({
+        logger: this.logger,
+        metrics: this.metricsRecorder
+      });
+      this._attachAudioProcessor(this.resources.audioProcessor);
+    }
+    return this.resources.audioProcessor;
+  }
+
+  /**
+   * Attach manager delivery hooks to an AudioProcessor instance.
+   * @param {AudioProcessor} audioProcessor Processing instance.
+   * @returns {void}
+   * @private
+   */
+  _attachAudioProcessor(audioProcessor) {
+    if (!audioProcessor || typeof audioProcessor.on !== 'function') return;
+    audioProcessor.on(AUDIO_PROCESSING_EVENTS.FRAME_PROCESSED, this._processedFrameListener);
+  }
+
+  /**
+   * Return or create the manager-owned STTEngine facade.
+   * @returns {STTEngine}
+   * @private
+   */
+  _getSTTEngine() {
+    if (!this.resources.sttEngine) {
+      this.resources.sttEngine = new this.STTEngineClass({
+        logger: this.logger,
+        metrics: this.metricsRecorder,
+        clock: this.clock
+      });
+      this._attachSTTEngine(this.resources.sttEngine);
+    }
+    return this.resources.sttEngine;
+  }
+
+  /**
+   * Attach transcript delivery hooks to an STTEngine instance.
+   * @param {STTEngine} sttEngine STT facade.
+   * @returns {void}
+   * @private
+   */
+  _attachSTTEngine(sttEngine) {
+    if (!sttEngine || typeof sttEngine.on !== 'function') return;
+    sttEngine.on(STT_EVENTS.PARTIAL_RESULT, this._partialTranscriptListener);
+    sttEngine.on(STT_EVENTS.FINAL_RESULT, this._finalTranscriptListener);
+  }
+
+  /**
+   * Return or create manager-owned TranscriptProcessor.
+   * @returns {TranscriptProcessor}
+   * @private
+   */
+  _getTranscriptProcessor() {
+    if (!this.resources.transcriptProcessor) {
+      this.resources.transcriptProcessor = new this.TranscriptProcessorClass({
+        logger: this.logger,
+        metrics: this.metricsRecorder,
+        clock: this.clock
+      });
+      this._attachTranscriptProcessor(this.resources.transcriptProcessor);
+    }
+    return this.resources.transcriptProcessor;
+  }
+
+  /**
+   * Attach normalized transcript delivery hooks.
+   * @param {TranscriptProcessor} transcriptProcessor Transcript processor.
+   * @returns {void}
+   * @private
+   */
+  _attachTranscriptProcessor(transcriptProcessor) {
+    if (!transcriptProcessor || typeof transcriptProcessor.on !== 'function') return;
+    transcriptProcessor.on(NORMALIZATION_EVENTS.NORMALIZED_TRANSCRIPT_READY, this._normalizedTranscriptListener);
+  }
+
+  /**
+   * Process a captured frame before delivering metadata to the active VoiceSession.
+   * @param {object} frame Raw AudioFrame.
+   * @returns {void}
+   * @private
+   */
+  _processAudioFrameForSession(frame) {
+    if (!this.currentSession) return;
+    try {
+      this._getAudioProcessor().processFrame(frame);
+    } catch (error) {
+      this._publish(SESSION_EVENTS.VOICE_ERROR, this._buildEventPayload(null, {
+        error: this._normalizeError(error)
+      }));
+    }
+  }
+
+  /**
+   * Deliver captured AudioFrame metadata to the active VoiceSession.
+   * @param {object} frame AudioFrame object.
+   * @returns {void}
+   * @private
+   */
+  _deliverAudioFrameToSession(frame) {
+    if (this.currentSession && typeof this.currentSession.receiveAudioFrame === 'function') {
+      this.currentSession.receiveAudioFrame(frame);
+    }
+    if (this.resources.sttEngine && typeof this.resources.sttEngine.isRunning === 'function' && this.resources.sttEngine.isRunning()) {
+      try {
+        this.resources.sttEngine.partial(frame);
+      } catch (error) {
+        this._publish(SESSION_EVENTS.VOICE_ERROR, this._buildEventPayload(null, {
+          error: this._normalizeError(error)
+        }));
+      }
+    }
+  }
+
+  /**
+   * Deliver TranscriptResult metadata to the active VoiceSession.
+   * @param {object} result TranscriptResult object.
+   * @returns {void}
+   * @private
+   */
+  _deliverTranscriptResultToSession(result) {
+    if (this.currentSession && typeof this.currentSession.receiveTranscriptResult === 'function') {
+      this.currentSession.receiveTranscriptResult(result);
+    }
+    if (!this.currentSession) return;
+    const payload = result && typeof result.toJSON === 'function' ? result.toJSON() : { ...(result || {}) };
+    this._publish(
+      payload.partial ? SESSION_EVENTS.VOICE_PARTIAL_TRANSCRIPT : SESSION_EVENTS.VOICE_FINAL_TRANSCRIPT,
+      this._buildEventPayload(this.currentSession, { transcriptResult: payload })
+    );
+    try {
+      this._getTranscriptProcessor().process(result);
+    } catch (error) {
+      this._publish(SESSION_EVENTS.VOICE_ERROR, this._buildEventPayload(null, {
+        error: this._normalizeError(error)
+      }));
+    }
+  }
+
+  /**
+   * Deliver NormalizedTranscript metadata to the active VoiceSession.
+   * @param {object} normalizedTranscript Normalized transcript.
+   * @returns {void}
+   * @private
+   */
+  _deliverNormalizedTranscriptToSession(normalizedTranscript) {
+    if (this.currentSession && typeof this.currentSession.receiveNormalizedTranscript === 'function') {
+      this.currentSession.receiveNormalizedTranscript(normalizedTranscript);
     }
   }
 

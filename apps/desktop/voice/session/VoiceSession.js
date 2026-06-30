@@ -4,7 +4,7 @@ const VoiceStateMachine = require('./VoiceStateMachine');
 
 /**
  * Purpose: Represents metadata for one complete Voice interaction.
- * Responsibility: Store lifecycle timestamps, current state, transcript placeholder, cancellation/error metadata, and future context shells.
+ * Responsibility: Store lifecycle timestamps, current state, transcript placeholder, cancellation/error metadata, audio frame metadata, and future context shells.
  * Lifecycle: Created by VoiceSessionManager, advanced only by VoiceSessionManager, and converted to snapshots before external use.
  * Dependencies: VoiceStateMachine for the initial state vocabulary.
  * Future integration notes: Audio buffers, recognizer handles, and assistant execution objects must stay outside this metadata object.
@@ -27,8 +27,18 @@ class VoiceSession {
     this.cancellationReason = null;
     this.error = null;
     this.context = {
-      audio: {},
-      recognition: {},
+      audio: {
+        framesReceived: 0,
+        latestFrame: null
+      },
+      recognition: {
+        partialTranscript: '',
+        finalTranscript: '',
+        normalizedTranscript: '',
+        normalizedResult: null,
+        latestResult: null,
+        resultCount: 0
+      },
       execution: {},
       diagnostics: {}
     };
@@ -79,6 +89,57 @@ class VoiceSession {
    */
   setTranscriptPlaceholder(transcript) {
     this.transcript = String(transcript || '');
+    return this;
+  }
+
+  /**
+   * Record AudioFrame metadata delivered by VoiceSessionManager without storing PCM bytes.
+   * @param {{toMetadata?: Function}|object} frame Audio frame or metadata.
+   * @returns {VoiceSession}
+   */
+  receiveAudioFrame(frame) {
+    const metadata = frame && typeof frame.toMetadata === 'function'
+      ? frame.toMetadata()
+      : { ...(frame || {}) };
+    this.context.audio.framesReceived += 1;
+    this.context.audio.latestFrame = metadata;
+    return this;
+  }
+
+  /**
+   * Record TranscriptResult metadata delivered by VoiceSessionManager.
+   * @param {{toJSON?: Function}|object} result Transcript result.
+   * @returns {VoiceSession}
+   */
+  receiveTranscriptResult(result) {
+    const metadata = result && typeof result.toJSON === 'function'
+      ? result.toJSON()
+      : { ...(result || {}) };
+    this.context.recognition.resultCount += 1;
+    this.context.recognition.latestResult = metadata;
+    if (metadata.partial) {
+      this.context.recognition.partialTranscript = metadata.transcript || '';
+    } else {
+      this.context.recognition.finalTranscript = metadata.finalTranscript || metadata.transcript || '';
+      this.transcript = this.context.recognition.finalTranscript;
+    }
+    return this;
+  }
+
+  /**
+   * Record NormalizedTranscript metadata delivered by VoiceSessionManager.
+   * @param {{toJSON?: Function}|object} normalizedTranscript Normalized transcript.
+   * @returns {VoiceSession}
+   */
+  receiveNormalizedTranscript(normalizedTranscript) {
+    const metadata = normalizedTranscript && typeof normalizedTranscript.toJSON === 'function'
+      ? normalizedTranscript.toJSON()
+      : { ...(normalizedTranscript || {}) };
+    this.context.recognition.normalizedResult = metadata;
+    this.context.recognition.normalizedTranscript = metadata.normalizedTranscript || '';
+    if (!metadata.metadata?.partial) {
+      this.transcript = this.context.recognition.normalizedTranscript;
+    }
     return this;
   }
 

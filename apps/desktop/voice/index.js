@@ -2,7 +2,7 @@
 
 /**
  * Purpose: Public entry point for the OpenX Voice subsystem.
- * Responsibility: Export Phase 1 architecture surfaces while keeping internal file paths encapsulated.
+ * Responsibility: Export Voice architecture surfaces while keeping internal file paths encapsulated.
  * Dependencies: Voice subsystem modules only.
  * Future implementation notes: Production code should import Voice types from this file instead of deep internal paths.
  */
@@ -16,19 +16,42 @@ const AudioCapture = require('./audio/AudioCapture');
 const AudioDeviceManager = require('./audio/AudioDeviceManager');
 const AudioBuffer = require('./audio/AudioBuffer');
 const AudioPermissions = require('./audio/AudioPermissions');
+const AudioConfiguration = require('./audio/AudioConfiguration');
+const AudioFrame = require('./audio/AudioFrame');
+const AUDIO_EVENTS = require('./audio/AudioEvents');
+const AudioErrors = require('./audio/AudioErrors');
 
+const AudioProcessor = require('./preprocessing/AudioProcessor');
 const AudioPipeline = require('./preprocessing/AudioPipeline');
+const AudioFrameProcessor = require('./preprocessing/AudioFrameProcessor');
 const VoiceActivityDetector = require('./preprocessing/VoiceActivityDetector');
 const RNNoiseProcessor = require('./preprocessing/RNNoiseProcessor');
+const ProcessedAudioFrame = require('./preprocessing/ProcessedAudioFrame');
+const ProcessingConfiguration = require('./preprocessing/ProcessingConfiguration');
+const AUDIO_PROCESSING_EVENTS = require('./preprocessing/AudioProcessingEvents');
+const AudioProcessingErrors = require('./preprocessing/AudioProcessingErrors');
 
-const STTEngine = require('./stt/STTEngine');
-const ParakeetEngine = require('./stt/ParakeetEngine');
-const SherpaRuntime = require('./stt/SherpaRuntime');
-const TranscriptAssembler = require('./stt/TranscriptAssembler');
+const {
+  STTEngine,
+  STTConfiguration,
+  TranscriptSegment,
+  TranscriptResult,
+  STT_EVENTS,
+  ...STTErrors
+} = require('./stt');
 
-const TranscriptNormalizer = require('./normalization/TranscriptNormalizer');
-const VoiceOverlay = require('./ui/VoiceOverlay');
-const TranscriptPublisher = require('./ui/TranscriptPublisher');
+const {
+  TranscriptProcessor,
+  TranscriptNormalizer,
+  NormalizedTranscript,
+  NormalizationConfiguration,
+  NORMALIZATION_EVENTS,
+  ...NormalizationErrors
+} = require('./normalization');
+const {
+  VoiceOverlay,
+  VoiceWindowController
+} = require('./ui');
 const VoiceSettings = require('./config/VoiceSettings');
 const VoiceLogger = require('./diagnostics/VoiceLogger');
 const VoiceMetrics = require('./diagnostics/VoiceMetrics');
@@ -43,16 +66,33 @@ module.exports = {
   AudioDeviceManager,
   AudioBuffer,
   AudioPermissions,
+  AudioConfiguration,
+  AudioFrame,
+  AUDIO_EVENTS,
+  ...AudioErrors,
+  AudioProcessor,
   AudioPipeline,
+  AudioFrameProcessor,
   VoiceActivityDetector,
   RNNoiseProcessor,
+  ProcessedAudioFrame,
+  ProcessingConfiguration,
+  AUDIO_PROCESSING_EVENTS,
+  ...AudioProcessingErrors,
   STTEngine,
-  ParakeetEngine,
-  SherpaRuntime,
-  TranscriptAssembler,
+  STTConfiguration,
+  TranscriptSegment,
+  TranscriptResult,
+  STT_EVENTS,
+  ...STTErrors,
+  TranscriptProcessor,
   TranscriptNormalizer,
+  NormalizedTranscript,
+  NormalizationConfiguration,
+  NORMALIZATION_EVENTS,
+  ...NormalizationErrors,
   VoiceOverlay,
-  TranscriptPublisher,
+  VoiceWindowController,
   VoiceSettings,
   VoiceLogger,
   VoiceMetrics
