@@ -4,16 +4,70 @@ const path = require('path');
 
 describe('Electron Chat Shortcut', function() {
   const mainPath = path.join(__dirname, '..', '..', 'apps', 'desktop', 'electron', 'main.js');
+  const captureHtmlPath = path.join(__dirname, '..', '..', 'apps', 'desktop', 'renderer', 'voice-capture', 'index.html');
+  const captureScriptPath = path.join(__dirname, '..', '..', 'apps', 'desktop', 'renderer', 'voice-capture', 'index.js');
+  const preloadPath = path.join(__dirname, '..', '..', 'apps', 'desktop', 'preload.js');
   const script = fs.readFileSync(mainPath, 'utf8');
+  const captureHtml = fs.readFileSync(captureHtmlPath, 'utf8');
+  const captureScript = fs.readFileSync(captureScriptPath, 'utf8');
+  const preloadScript = fs.readFileSync(preloadPath, 'utf8');
 
   it('should route the hidden activation shortcut to voice listening', function() {
     assert.match(script, /function getChatShortcuts\(\)/);
     assert.match(script, /runtimeConfig\?\.chat\?\.activationShortcut/);
     assert.match(script, /function startVoiceListeningFromShortcut\(shortcut = ''\)/);
+    assert.match(script, /function createDesktopVoiceResources\(\)/);
     assert.match(script, /globalShortcut\.register\(shortcut/);
     assert.match(script, /startVoiceListeningFromShortcut\(shortcut\)/);
     assert.match(script, /voiceSessionManager\.startSession/);
+    assert.match(script, /voiceSessionManager\.startAudioCapture\(\)/);
+    assert.match(script, /voiceSessionManager\.startSpeechToText\(\)/);
+    assert.match(script, /Registered voice shortcut/);
     assert.doesNotMatch(script, /global chat shortcuts are disabled/i);
+  });
+
+  it('should attach the voice orb overlay to the voice session manager', function() {
+    assert.match(script, /function createVoiceOverlayForManager\(manager\)/);
+    assert.match(script, /new VoiceWindowController/);
+    assert.match(script, /new VoiceOverlay/);
+    assert.match(script, /overlay\.attachToSessionManager\(manager\)/);
+    assert.match(script, /voiceOverlay = createVoiceOverlayForManager\(voiceSessionManager\)/);
+  });
+
+  it('should use local desktop voice providers instead of empty audio placeholders', function() {
+    assert.match(script, /new AudioPermissions\(\{ provider: permissionProvider/);
+    assert.match(script, /new AudioDeviceManager\(\{ provider: deviceProvider/);
+    assert.match(script, /new AudioCapture\(/);
+    assert.match(script, /new STTEngine\(/);
+    assert.match(script, /path\.resolve\(process\.cwd\(\), 'models', 'parakeet'\)/);
+  });
+
+  it('should open a real microphone stream for the OS privacy indicator only from the trusted capture renderer', function() {
+    assert.match(script, /const VOICE_CAPTURE_FILE = path\.join\(RENDERER_ROOT, 'voice-capture', 'index\.html'\)/);
+    assert.match(script, /function isVoiceCaptureRendererUrl\(url\)/);
+    assert.match(script, /canGrantVoiceCapturePermission\(webContents, permission, requestingUrl\)/);
+    assert.match(script, /function createVoiceCaptureWindow\(\)/);
+    assert.match(script, /function createDesktopMicrophoneBackend\(\)/);
+    assert.match(script, /voiceCapture:start/);
+    assert.match(script, /voiceCapture:stop/);
+    assert.match(script, /ipcMain\.on\('voiceCapture:frame'/);
+    assert.match(script, /receiveVoiceCaptureFrame\(payload\)/);
+    assert.match(script, /voiceCaptureFrameReceiver\(frame\)/);
+    assert.match(script, /let voiceCaptureRunId = 0/);
+    assert.match(script, /frame\.runId !== voiceCaptureRunId/);
+    assert.match(preloadScript, /contextBridge\.exposeInMainWorld\('openxVoiceCapture'/);
+    assert.match(preloadScript, /sendFrame: \(frame\) =>/);
+    assert.match(captureHtml, /Content-Security-Policy/);
+    assert.match(captureScript, /navigator\.mediaDevices\.getUserMedia/);
+    assert.match(captureScript, /createAnalyser/);
+    assert.match(captureScript, /setInterval\(sendCurrentFrame, FRAME_DURATION_MS\)/);
+    assert.match(captureScript, /currentRunId !== requestedRunId/);
+    assert.match(captureScript, /stale-start-ignored/);
+    assert.match(captureScript, /runId: activeRunId/);
+    assert.match(captureScript, /downsample/);
+    assert.match(captureScript, /pcmFromSamples/);
+    assert.match(captureScript, /sendFrame\(\{/);
+    assert.match(captureScript, /track\.stop\(\)/);
   });
 
   it('should open chat from tray double click instead of the voice hotkey', function() {

@@ -55,6 +55,14 @@ class VoiceSessionManager {
     this.activeTimers = new Map();
     this.transitionLog = [];
     this.sessionHistory = [];
+    this.runtimePipelineStats = {
+      audioFrames: 0,
+      processedFrames: 0,
+      sttFrames: 0,
+      partialTranscripts: 0,
+      finalTranscripts: 0,
+      lastLogAt: 0
+    };
     this._audioFrameListener = event => this._processAudioFrameForSession(event.frame);
     this._processedFrameListener = event => this._deliverAudioFrameToSession(event.frame);
     this._partialTranscriptListener = event => this._deliverTranscriptResultToSession(event.result);
@@ -146,6 +154,7 @@ class VoiceSessionManager {
       throw new Error(`Cannot prepare Voice session from ${this.currentState}.`);
     }
 
+    this._resetRuntimePipelineStats();
     this.currentSession = new this.SessionClass(options);
     this.currentSession.setState(this.currentState, { at: this.clock(), reason: 'prepared' });
     this._scheduleLifecycleTimeout('overall', this.timeouts.overallMs);
@@ -451,7 +460,7 @@ class VoiceSessionManager {
 
     const snapshot = this.currentSession ? this.currentSession.toJSON() : null;
     this._clearAllTimeouts();
-    this._releaseResourcePlaceholders();
+    this._releaseSessionResources();
     if (snapshot) {
       this.sessionHistory.push(snapshot);
     }
@@ -467,7 +476,7 @@ class VoiceSessionManager {
    */
   reset() {
     this._clearAllTimeouts();
-    this._releaseResourcePlaceholders();
+    this._releaseSessionResources();
     if (this.currentSession) {
       this.sessionHistory.push(this.currentSession.toJSON());
     }
@@ -568,6 +577,10 @@ class VoiceSessionManager {
     const timer = this.setTimer(() => {
       this._publish(SESSION_EVENTS.VOICE_TIMEOUT, this._buildEventPayload(null, { timeout: name }));
       if (this.currentState !== VoiceStateMachine.STATES.IDLE) {
+        if (name === 'listening') {
+          this.cancelSession('No speech detected.');
+          return;
+        }
         this.failSession({
           name: VOICE_ERROR_TYPES.TIMEOUT,
           message: `Voice ${name} timeout expired.`,
@@ -650,29 +663,33 @@ class VoiceSessionManager {
   }
 
   /**
-   * Release future resource ownership placeholders.
+   * Release active session resource handles without discarding injected desktop resources.
    * @returns {void}
    * @private
    */
-  _releaseResourcePlaceholders() {
+  _releaseSessionResources() {
     for (const key of Object.keys(this.resources)) {
       const resource = this.resources[key];
-      if (resource && (typeof resource.close === 'function' || typeof resource.destroy === 'function')) {
-        try {
-          if (typeof resource.close === 'function') {
-            resource.close();
-          } else {
-            resource.destroy();
-          }
-        } catch (error) {
-          if (this.logger && typeof this.logger.warn === 'function') {
-            this.logger.warn(`[Voice] Resource cleanup failed: ${key}`, { error: error.message });
-          } else {
-            this._log(`Resource cleanup failed: ${key}`, { error: error.message });
-          }
+      if (!resource) continue;
+      try {
+        if (key === 'audioCapture' && typeof resource.close === 'function') {
+          resource.close();
+        } else if (key === 'audioProcessor' && typeof resource.reset === 'function') {
+          resource.reset();
+        } else if (key === 'sttEngine' && typeof resource.cancel === 'function') {
+          resource.cancel();
+        } else if (key === 'transcriptProcessor' && typeof resource.reset === 'function') {
+          resource.reset();
+        } else if (typeof resource.close === 'function') {
+          resource.close();
+        }
+      } catch (error) {
+        if (this.logger && typeof this.logger.warn === 'function') {
+          this.logger.warn(`[Voice] Resource cleanup failed: ${key}`, { error: error.message });
+        } else {
+          this._log(`Resource cleanup failed: ${key}`, { error: error.message });
         }
       }
-      this.resources[key] = null;
     }
   }
 
@@ -796,6 +813,11 @@ class VoiceSessionManager {
   _processAudioFrameForSession(frame) {
     if (!this.currentSession) return;
     try {
+      this.runtimePipelineStats.audioFrames += 1;
+      this._logRuntimePipeline('AudioCapture frame received', {
+        audioFrames: this.runtimePipelineStats.audioFrames,
+        frame: typeof frame?.toMetadata === 'function' ? frame.toMetadata() : undefined
+      });
       this._getAudioProcessor().processFrame(frame);
     } catch (error) {
       this._publish(SESSION_EVENTS.VOICE_ERROR, this._buildEventPayload(null, {
@@ -811,12 +833,29 @@ class VoiceSessionManager {
    * @private
    */
   _deliverAudioFrameToSession(frame) {
+    this.runtimePipelineStats.processedFrames += 1;
+    this._logRuntimePipeline('Processed audio frame ready for STT', {
+      processedFrames: this.runtimePipelineStats.processedFrames,
+      frame: typeof frame?.toMetadata === 'function' ? frame.toMetadata() : undefined
+    });
     if (this.currentSession && typeof this.currentSession.receiveAudioFrame === 'function') {
       this.currentSession.receiveAudioFrame(frame);
     }
     if (this.resources.sttEngine && typeof this.resources.sttEngine.isRunning === 'function' && this.resources.sttEngine.isRunning()) {
       try {
+        this.runtimePipelineStats.sttFrames += 1;
         this.resources.sttEngine.partial(frame);
+        this._logRuntimePipeline('Processed audio frame delivered to STT', {
+          sttFrames: this.runtimePipelineStats.sttFrames,
+          frameIndex: frame?.originalFrame?.frameIndex
+        });
+        if (frame?.endpointCandidate && typeof this.resources.sttEngine.final === 'function') {
+          this._logRuntimePipeline('VAD endpoint detected; finalizing STT stream', {
+            frameIndex: frame?.originalFrame?.frameIndex,
+            speechActivityState: frame?.speechActivityState
+          }, true);
+          this.resources.sttEngine.final();
+        }
       } catch (error) {
         this._publish(SESSION_EVENTS.VOICE_ERROR, this._buildEventPayload(null, {
           error: this._normalizeError(error)
@@ -832,11 +871,36 @@ class VoiceSessionManager {
    * @private
    */
   _deliverTranscriptResultToSession(result) {
-    if (this.currentSession && typeof this.currentSession.receiveTranscriptResult === 'function') {
-      this.currentSession.receiveTranscriptResult(result);
-    }
     if (!this.currentSession) return;
     const payload = result && typeof result.toJSON === 'function' ? result.toJSON() : { ...(result || {}) };
+    const transcriptText = String(payload.transcript || payload.finalTranscript || payload.text || '').trim();
+    if (payload.partial) {
+      this.runtimePipelineStats.partialTranscripts += 1;
+    } else {
+      this.runtimePipelineStats.finalTranscripts += 1;
+    }
+
+    if (!transcriptText) {
+      this._logRuntimePipeline(payload.partial ? 'Empty partial transcript ignored' : 'Empty final transcript ignored', {
+        partialTranscripts: this.runtimePipelineStats.partialTranscripts,
+        finalTranscripts: this.runtimePipelineStats.finalTranscripts,
+        confidence: payload.confidence
+      }, !payload.partial);
+      if (!payload.partial && this.currentSession) {
+        this.cancelSession('No speech detected.');
+      }
+      return;
+    }
+
+    if (typeof this.currentSession.receiveTranscriptResult === 'function') {
+      this.currentSession.receiveTranscriptResult(result);
+    }
+    this._logRuntimePipeline(payload.partial ? 'Partial transcript produced' : 'Final transcript produced', {
+      partialTranscripts: this.runtimePipelineStats.partialTranscripts,
+      finalTranscripts: this.runtimePipelineStats.finalTranscripts,
+      transcriptLength: transcriptText.length,
+      confidence: payload.confidence
+    }, !payload.partial);
     this._publish(
       payload.partial ? SESSION_EVENTS.VOICE_PARTIAL_TRANSCRIPT : SESSION_EVENTS.VOICE_FINAL_TRANSCRIPT,
       this._buildEventPayload(this.currentSession, { transcriptResult: payload })
@@ -936,6 +1000,49 @@ class VoiceSessionManager {
       message: String(error || 'Voice session failed.'),
       type: 'VoiceSessionError'
     };
+  }
+
+  /**
+   * Reset per-session runtime audio pipeline counters.
+   * @returns {void}
+   * @private
+   */
+  _resetRuntimePipelineStats() {
+    this.runtimePipelineStats = {
+      audioFrames: 0,
+      processedFrames: 0,
+      sttFrames: 0,
+      partialTranscripts: 0,
+      finalTranscripts: 0,
+      lastLogAt: 0
+    };
+  }
+
+  /**
+   * Log runtime audio pipeline progress without flooding logs.
+   * @param {string} message Log message.
+   * @param {object} metadata Progress metadata.
+   * @param {boolean} force Whether to log immediately.
+   * @returns {void}
+   * @private
+   */
+  _logRuntimePipeline(message, metadata = {}, force = false) {
+    const count = Math.max(
+      this.runtimePipelineStats.audioFrames,
+      this.runtimePipelineStats.processedFrames,
+      this.runtimePipelineStats.sttFrames,
+      this.runtimePipelineStats.partialTranscripts,
+      this.runtimePipelineStats.finalTranscripts
+    );
+    const now = Date.now();
+    if (!force && count > 1 && count % 50 !== 0 && now - this.runtimePipelineStats.lastLogAt < 2500) {
+      return;
+    }
+    this.runtimePipelineStats.lastLogAt = now;
+    this._log(`Runtime pipeline: ${message}`, {
+      ...metadata,
+      counters: { ...this.runtimePipelineStats }
+    });
   }
 
   /**

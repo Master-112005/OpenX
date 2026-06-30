@@ -33,7 +33,7 @@ const VoiceSettings = Object.freeze({
     language: 'en-US',
     partialResults: false,
     activeEngine: 'parakeet',
-    modelPath: 'models/stt/parakeet-tdt-v3',
+    modelPath: 'models/parakeet',
     modelName: 'nvidia-parakeet-tdt-v3',
     beamWidth: 4,
     decodingStrategy: 'streaming-greedy',

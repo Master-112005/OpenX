@@ -24,7 +24,10 @@ class PhoneCommandRouter {
     if (options.phoneContext && typeof options.phoneContext === 'object') {
       commandOptions.phoneContext = options.phoneContext;
     }
-    return assistant.processCommand(command.trim(), 'phone', commandOptions);
+    if (Object.keys(commandOptions).length > 0) {
+      return assistant.processCommand(command.trim(), 'phone', commandOptions);
+    }
+    return assistant.processCommand(command.trim(), 'phone');
   }
 }
 

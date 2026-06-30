@@ -139,7 +139,7 @@ class FileTransferManager {
     await fs.promises.mkdir(this.tempDirectory, { recursive: true });
     const baseName = this.protocol.validateFileName(path.basename(resolvedFolder));
     const zipPath = path.join(this.tempDirectory, `${baseName}-${crypto.randomUUID()}.zip`);
-    const { ZipArchive } = await import('archiver');
+    const { ZipArchive } = require('archiver');
 
     await new Promise((resolve, reject) => {
       const output = fs.createWriteStream(zipPath, { flags: 'wx', mode: 0o600 });

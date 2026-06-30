@@ -3874,13 +3874,36 @@ const newTabMatch = input.match(
 
   _resolveSystemSettingsIntent(rawText, preparedInput) {
     const input = this._normalizeSystemCommandText(preparedInput?.correctedText || rawText);
-    if (!/\b(?:wifi|wi\s*fi|bluetooth|hotspot|mobile\s+hotspot)\b/.test(input)) {
+    const raw = this._normalizeSystemCommandText(rawText);
+    const combined = `${input} ${raw}`.replace(/\s+/g, ' ').trim();
+    if (!/\b(?:wifi|wi\s*fi|bluetooth|hotspot|mobile\s+hotspot)\b/.test(combined)) {
       return null;
     }
 
-    const wifiStateChange = /\b(?:wifi|wi\s*fi)\b/.test(input) &&
-      /\b(?:connect|connected|disconnect|forget|enable|disable|turn\s+on|turn\s+off|switch\s+on|switch\s+off)\b/.test(input);
+    const wifiStateChange = /\b(?:wifi|wi\s*fi)\b/.test(combined) &&
+      /\b(?:connect|connected|disconnect|forget|enable|disable|turn\s+on|turn\s+off|switch\s+on|switch\s+off)\b/.test(combined);
     if (wifiStateChange) {
+      const explicitRawWifiChange = /\b(?:connect|disconnect|forget|enable|disable|turn\s+on|turn\s+off|switch\s+on|switch\s+off)\b/.test(raw);
+      const asksWifiStatus = !explicitRawWifiChange && (
+        /\b(?:check|see|show|tell|what|is|are|status)\b.*\b(?:connected|signal|wifi|wi\s*fi)\b/.test(combined) ||
+        /\bconnected\s+to\s+(?:wifi|wi\s*fi)\b/.test(combined)
+      );
+      const changesWifiState = !asksWifiStatus &&
+        /\b(?:connect|disconnect|forget|enable|disable|turn\s+on|turn\s+off|switch\s+on|switch\s+off)\b/.test(combined);
+      const capabilityIntent = this.intentRegistry.get('assistant.capability');
+      if (changesWifiState && capabilityIntent && this.config?.permissions?.levels?.medium) {
+        const operationMatch = combined.match(/\b(connect|disconnect|forget|enable|disable|turn\s+on|turn\s+off|switch\s+on|switch\s+off)\b/);
+        return {
+          intent: capabilityIntent,
+          confidence: 1,
+          entities: {
+            capability: 'network',
+            operation: operationMatch ? operationMatch[1].replace(/\s+/g, ' ') : 'change',
+            target: 'wifi',
+            rawCommand: rawText
+          }
+        };
+      }
       const intent = this.intentRegistry.get('app.open');
       return intent
         ? { intent, confidence: 1, entities: { appName: 'ms-settings:network-wifi' } }
@@ -4087,7 +4110,7 @@ const newTabMatch = input.match(
       `^(?:set|start|create|add)\\s+(?:a\\s+)?timer\\s+(?:to|for)\\s+(.+?)\\s+in\\s+(${durationWords}\\s*${durationUnits})$`,
       'i'
     ));
-    if (!taskTimer && !taskDurationTimer && !/^(?:(?:daily|every\s+(?:day|morning|evening|night|weekday|week))\s+)?(?:remind|notify|alert|set\s+(?:a\s+)?reminder|create\s+(?:a\s+)?reminder|add\s+(?:a\s+)?reminder|schedule\s+(?:a\s+)?reminder)\b/i.test(input)) {
+    if (!taskTimer && !taskDurationTimer && !/^(?:(?:daily|every\s+(?:day|morning|evening|night|weekday|week))\s+)?(?:remind|notify|alert|set\s+(?:a\s+)?(?:recurring\s+)?reminder|create\s+(?:a\s+)?(?:recurring\s+)?reminder|add\s+(?:a\s+)?(?:recurring\s+)?reminder|schedule\s+(?:a\s+)?(?:recurring\s+)?reminder)\b/i.test(input)) {
       return null;
     }
 
@@ -4128,7 +4151,8 @@ const newTabMatch = input.match(
     entities.timeExpression = this._stripScheduleRecurrenceFromTimeExpression(entities.timeExpression);
     if (!entities.reminderText) {
       const fallbackText = input
-        .replace(/^(?:(?:daily|every\s+(?:day|morning|evening|night|weekday|week))\s+)?(?:(?:remind|notify|alert)(?:\s+me)?|set\s+(?:a\s+)?reminder|create\s+(?:a\s+)?reminder|add\s+(?:a\s+)?reminder)\s+(?:to\s+)?/i, '')
+        .replace(/^(?:(?:daily|every\s+(?:day|morning|evening|night|weekday|week))\s+)?(?:(?:remind|notify|alert)(?:\s+me)?|set\s+(?:a\s+)?(?:recurring\s+)?reminder|create\s+(?:a\s+)?(?:recurring\s+)?reminder|add\s+(?:a\s+)?(?:recurring\s+)?reminder|schedule\s+(?:a\s+)?(?:recurring\s+)?reminder)\s+(?:to\s+)?/i, '')
+        .replace(/^(?:recurring\s+)?reminder\s*/i, '')
         .replace(/^(?:at|for|in)\s+\d{1,2}(?:(?::|\s+)\d{2})?\s*(?:am|pm)?(?:\s+(?:today|tomorrow))?\s*/i, '')
         .replace(/^(?:every\s+(?:day|morning|evening|night|weekday|week)|daily)\s*/i, '')
         .trim();
@@ -4137,7 +4161,7 @@ const newTabMatch = input.match(
       }
     }
 
-    if (entities.reminderText || entities.timeExpression || entities.duration) {
+    if (entities.reminderText || entities.timeExpression || entities.duration || entities.recurrence) {
       return { intent, confidence: 1, entities };
     }
 

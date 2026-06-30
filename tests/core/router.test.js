@@ -1806,6 +1806,7 @@ describe('Action Router', function() {
     const pomodoro = await router.process('start a Pomodoro timer', 'chat');
     const study = await router.process('start a one-hour study session', 'chat');
     const recurring = await router.process('remind me every hour to drink water', 'chat');
+    const bareWeekly = await router.process('remind me every week', 'chat');
 
     assert.equal(countdown.intent, 'timer.set');
     assert.equal(countdown.entities.duration, 30);
@@ -1814,6 +1815,9 @@ describe('Action Router', function() {
     assert.equal(recurring.intent, 'reminder.set');
     assert.equal(recurring.entities.recurrence, 'hourly');
     assert.equal(recurring.entities.reminderCategory, 'water');
+    assert.equal(bareWeekly.intent, 'reminder.set');
+    assert.equal(bareWeekly.entities.recurrence, 'weekly');
+    assert.equal(bareWeekly.needsClarification, true);
   });
 
   it('should route alarm commands to alarm.set instead of timer.set', async function() {

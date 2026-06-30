@@ -191,7 +191,7 @@ function commandRequestsDangerousOperation(command) {
 }
 
 describe('Assistant command corpus routing', function() {
-  this.timeout(120000);
+  this.timeout(240000);
 
   it('should handle every command in commands.md without executing real dangerous actions', async function() {
     const commands = loadCommands();

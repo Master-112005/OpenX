@@ -38,6 +38,35 @@ ipcRenderer.on('voiceOverlay:event', (_event, message) => {
   updateVoiceOverlayDom(message);
 });
 
+contextBridge.exposeInMainWorld('openxVoiceCapture', {
+  ready: () =>
+    ipcRenderer.invoke('voiceCapture:report', { event: 'ready', data: {} }),
+
+  report: (event, data = {}) =>
+    ipcRenderer.invoke('voiceCapture:report', { event, data }),
+
+  sendFrame: (frame) =>
+    ipcRenderer.send('voiceCapture:frame', frame),
+
+  onStart: (callback) => {
+    if (typeof callback !== 'function') {
+      throw new TypeError('Voice capture start listener must be a function');
+    }
+    const handler = (_event, payload) => callback(payload || {});
+    ipcRenderer.on('voiceCapture:start', handler);
+    return () => ipcRenderer.removeListener('voiceCapture:start', handler);
+  },
+
+  onStop: (callback) => {
+    if (typeof callback !== 'function') {
+      throw new TypeError('Voice capture stop listener must be a function');
+    }
+    const handler = (_event, payload) => callback(payload || {});
+    ipcRenderer.on('voiceCapture:stop', handler);
+    return () => ipcRenderer.removeListener('voiceCapture:stop', handler);
+  }
+});
+
 contextBridge.exposeInMainWorld('jarvis', {
   processCommand: (input, source) =>
     ipcRenderer.invoke('command:process', { input, source }),

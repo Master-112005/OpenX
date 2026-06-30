@@ -6,7 +6,18 @@ const os = require('os');
 const BASE_CONFIG = require('../../../config');
 const Assistant = require('../../../core/assistant/index');
 const TextToSpeech = require('../voice/tts');
-const { VoiceSessionManager, VoiceAssistantBridge, DiagnosticsManager } = require('../voice');
+const {
+  VoiceSessionManager,
+  VoiceAssistantBridge,
+  DiagnosticsManager,
+  VoiceOverlay,
+  VoiceWindowController,
+  AudioCapture,
+  AudioDeviceManager,
+  AudioPermissions,
+  STTEngine,
+  STTConfiguration
+} = require('../voice');
 const { SettingsService } = require('../settings');
 const { AssistantEventBus, EVENTS, Logger } = require('../../../core/assistant/Data');
 const { ensureDataRoot, migrateLegacyData } = require('../../../core/assistant/Data');
@@ -27,10 +38,12 @@ const {
   assertTrustedIpcSender,
   createSecureWebPreferences,
   getIpcSenderUrl,
+  isPlainObject,
   isTrustedRendererUrl
 } = require('./security');
 
 const RENDERER_ROOT = path.resolve(__dirname, '..', 'renderer');
+const VOICE_CAPTURE_FILE = path.join(RENDERER_ROOT, 'voice-capture', 'index.html');
 const PRELOAD_PATH = path.join(__dirname, '..', 'preload.js');
 const MAX_RENDERER_RESTARTS = 3;
 const RENDERER_RESTART_WINDOW_MS = 60 * 1000;
@@ -143,6 +156,20 @@ let assistant = null;
 let voiceSessionManager = null;
 let voiceAssistantBridge = null;
 let diagnosticsManager = null;
+let voiceOverlay = null;
+let voiceCaptureWindow = null;
+let voiceCaptureReady = false;
+let voiceCaptureShouldRun = false;
+let voiceCaptureRunId = 0;
+let voiceCaptureStartOptions = null;
+let voiceCaptureFrameReceiver = null;
+let voiceCaptureFrameStats = {
+  received: 0,
+  delivered: 0,
+  dropped: 0,
+  bytes: 0,
+  lastLogAt: 0
+};
 let textToSpeech = null;
 let settingsService = null;
 let runtimeConfig = null;
@@ -150,6 +177,7 @@ let eventBus = null;
 let registeredChatShortcuts = [];
 let statusIntervalHandle = null;
 let ipcRegistered = false;
+let voiceCaptureIpcRegistered = false;
 let cleanupFinished = false;
 let cleanupPromise = null;
 let fatalErrorHandling = false;
@@ -212,17 +240,42 @@ function disableSpellChecker() {
   }
 }
 
+function isVoiceCaptureRendererUrl(url) {
+  if (!isTrustedRendererUrl(url, RENDERER_ROOT)) return false;
+  try {
+    const { fileURLToPath } = require('url');
+    return path.resolve(fileURLToPath(url)) === path.resolve(VOICE_CAPTURE_FILE);
+  } catch (_) {
+    return false;
+  }
+}
+
+function canGrantVoiceCapturePermission(webContents, permission, candidateUrl = '') {
+  if (!['media', 'microphone'].includes(String(permission || ''))) return false;
+  const contentsUrl = webContents?.getURL?.() || '';
+  return isVoiceCaptureRendererUrl(candidateUrl) || isVoiceCaptureRendererUrl(contentsUrl);
+}
+
 function configureSessionSecurity() {
   try {
     const defaultSession = session.defaultSession;
     defaultSession?.setPermissionRequestHandler?.((webContents, permission, callback, details) => {
+      const requestingUrl = details?.requestingUrl || webContents?.getURL?.() || '';
+      if (canGrantVoiceCapturePermission(webContents, permission, requestingUrl)) {
+        mainLogger.info('Allowed voice capture microphone permission', { permission, requestingUrl });
+        callback(true);
+        return;
+      }
       mainLogger.warn('Blocked renderer permission request', {
         permission,
-        requestingUrl: details?.requestingUrl || webContents?.getURL?.() || ''
+        requestingUrl
       });
       callback(false);
     });
-    defaultSession?.setPermissionCheckHandler?.((_webContents, permission, requestingOrigin) => {
+    defaultSession?.setPermissionCheckHandler?.((webContents, permission, requestingOrigin) => {
+      if (canGrantVoiceCapturePermission(webContents, permission, requestingOrigin)) {
+        return true;
+      }
       mainLogger.warn('Blocked renderer permission check', { permission, requestingOrigin });
       return false;
     });
@@ -440,6 +493,316 @@ function createChatWindow() {
   if (process.argv.includes('--dev')) {
     chatWindow.webContents.openDevTools({ mode: 'detach' });
   }
+}
+
+function sendVoiceCaptureCommand(channel, payload = {}) {
+  if (!voiceCaptureWindow || voiceCaptureWindow.isDestroyed() || !voiceCaptureReady) return false;
+  voiceCaptureWindow.webContents.send(channel, payload);
+  return true;
+}
+
+function startVoiceCaptureStream(options = {}) {
+  voiceCaptureRunId += 1;
+  voiceCaptureShouldRun = true;
+  voiceCaptureStartOptions = {
+    sampleRate: options.sampleRate || 16000,
+    channels: options.channels || 1,
+    runId: voiceCaptureRunId
+  };
+  createVoiceCaptureWindow();
+  const sent = sendVoiceCaptureCommand('voiceCapture:start', voiceCaptureStartOptions);
+  mainLogger.info('Voice microphone capture requested', { sent, runId: voiceCaptureRunId });
+}
+
+function stopVoiceCaptureStream(reason = 'stop') {
+  voiceCaptureRunId += 1;
+  voiceCaptureShouldRun = false;
+  voiceCaptureStartOptions = null;
+  const sent = sendVoiceCaptureCommand('voiceCapture:stop', { reason, runId: voiceCaptureRunId });
+  mainLogger.info('Voice microphone capture stop requested', { sent, reason, runId: voiceCaptureRunId });
+}
+
+function resetVoiceCaptureFrameStats() {
+  voiceCaptureFrameStats = {
+    received: 0,
+    delivered: 0,
+    dropped: 0,
+    bytes: 0,
+    lastLogAt: Date.now()
+  };
+}
+
+function shouldLogVoiceFrameProgress() {
+  const now = Date.now();
+  if (voiceCaptureFrameStats.delivered <= 1) return true;
+  if (voiceCaptureFrameStats.delivered % 50 === 0) return true;
+  if (now - voiceCaptureFrameStats.lastLogAt >= 2500) return true;
+  return false;
+}
+
+function normalizeVoiceCaptureFrame(payload = {}) {
+  if (!isPlainObject(payload)) throw new TypeError('voice frame must be an object');
+  const sampleRate = Math.max(8000, Math.min(48000, Number(payload.sampleRate) || 16000));
+  const channels = Math.max(1, Math.min(2, Number(payload.channels) || 1));
+  const bitDepth = Number(payload.bitDepth) === 16 ? 16 : 16;
+  const frameIndex = Math.max(0, Number(payload.frameIndex) || 0);
+  const sampleCount = Math.max(1, Math.min(4800, Number(payload.sampleCount) || 320));
+  const durationMs = Math.max(1, Math.min(250, Number(payload.durationMs) || ((sampleCount / sampleRate) * 1000)));
+  const pcmInput = payload.pcm;
+  let pcm = null;
+  if (Buffer.isBuffer(pcmInput)) {
+    pcm = Buffer.from(pcmInput);
+  } else if (pcmInput instanceof Uint8Array) {
+    pcm = Buffer.from(pcmInput);
+  } else if (Array.isArray(pcmInput)) {
+    pcm = Buffer.from(pcmInput);
+  } else if (pcmInput instanceof ArrayBuffer) {
+    pcm = Buffer.from(new Uint8Array(pcmInput));
+  }
+  if (!pcm || pcm.length === 0) throw new TypeError('voice frame pcm is empty');
+  if (pcm.length > 9600) throw new RangeError('voice frame pcm is too large');
+  return {
+    frameIndex,
+    timestamp: payload.timestamp || new Date().toISOString(),
+    pcm,
+    sampleRate,
+    channels,
+    bitDepth,
+    sampleCount,
+    durationMs,
+    deviceId: 'desktop-default-microphone',
+    runId: Math.max(0, Number(payload.runId) || 0),
+    rms: Math.max(0, Math.min(1, Number(payload.rms) || 0))
+  };
+}
+
+function receiveVoiceCaptureFrame(payload = {}) {
+  voiceCaptureFrameStats.received += 1;
+  let frame;
+  try {
+    frame = normalizeVoiceCaptureFrame(payload);
+  } catch (error) {
+    voiceCaptureFrameStats.dropped += 1;
+    if (voiceCaptureFrameStats.dropped <= 3 || voiceCaptureFrameStats.dropped % 25 === 0) {
+      mainLogger.warn('Voice PCM frame rejected', { error: error.message, dropped: voiceCaptureFrameStats.dropped });
+    }
+    return;
+  }
+
+  if (!voiceCaptureShouldRun || frame.runId !== voiceCaptureRunId) {
+    voiceCaptureFrameStats.dropped += 1;
+    if (voiceCaptureFrameStats.dropped <= 3 || voiceCaptureFrameStats.dropped % 25 === 0) {
+      mainLogger.warn('Voice PCM frame dropped because capture run is stale', {
+        frameIndex: frame.frameIndex,
+        frameRunId: frame.runId,
+        activeRunId: voiceCaptureRunId,
+        dropped: voiceCaptureFrameStats.dropped
+      });
+    }
+    return;
+  }
+
+  if (typeof voiceCaptureFrameReceiver !== 'function') {
+    voiceCaptureFrameStats.dropped += 1;
+    if (voiceCaptureFrameStats.dropped <= 3 || voiceCaptureFrameStats.dropped % 25 === 0) {
+      mainLogger.warn('Voice PCM frame dropped because AudioCapture is not ready', {
+        frameIndex: frame.frameIndex,
+        dropped: voiceCaptureFrameStats.dropped
+      });
+    }
+    return;
+  }
+
+  try {
+    voiceCaptureFrameReceiver(frame);
+    voiceCaptureFrameStats.delivered += 1;
+    voiceCaptureFrameStats.bytes += frame.pcm.length;
+    if (shouldLogVoiceFrameProgress()) {
+      voiceCaptureFrameStats.lastLogAt = Date.now();
+      mainLogger.info('Voice PCM frames delivered to AudioCapture', {
+        received: voiceCaptureFrameStats.received,
+        delivered: voiceCaptureFrameStats.delivered,
+        dropped: voiceCaptureFrameStats.dropped,
+        bytes: voiceCaptureFrameStats.bytes,
+        lastFrameIndex: frame.frameIndex,
+        sampleRate: frame.sampleRate,
+        durationMs: frame.durationMs,
+        rms: frame.rms
+      });
+    }
+  } catch (error) {
+    voiceCaptureFrameStats.dropped += 1;
+    mainLogger.warn('Voice PCM frame delivery failed', { error: error.message, frameIndex: frame.frameIndex });
+  }
+}
+
+function createVoiceCaptureWindow() {
+  if (voiceCaptureWindow && !voiceCaptureWindow.isDestroyed()) return voiceCaptureWindow;
+
+  voiceCaptureReady = false;
+  voiceCaptureWindow = new BrowserWindow({
+    width: 1,
+    height: 1,
+    show: false,
+    frame: false,
+    transparent: true,
+    resizable: false,
+    movable: false,
+    skipTaskbar: true,
+    focusable: false,
+    webPreferences: createSecureWebPreferences(PRELOAD_PATH)
+  });
+
+  secureWindow(voiceCaptureWindow, {
+    windowType: 'voice-capture',
+    expectedFile: VOICE_CAPTURE_FILE,
+    createWindow: createVoiceCaptureWindow
+  });
+
+  voiceCaptureWindow.webContents.once('did-finish-load', () => {
+    voiceCaptureReady = true;
+    if (voiceCaptureShouldRun) {
+      sendVoiceCaptureCommand('voiceCapture:start', voiceCaptureStartOptions || {
+        sampleRate: 16000,
+        channels: 1,
+        runId: voiceCaptureRunId
+      });
+    }
+  });
+
+  voiceCaptureWindow.on('closed', () => {
+    voiceCaptureWindow = null;
+    voiceCaptureReady = false;
+  });
+
+  voiceCaptureWindow.loadFile(VOICE_CAPTURE_FILE).catch(error => {
+    mainLogger.error('Failed to load voice capture renderer', { error: error.message });
+  });
+
+  return voiceCaptureWindow;
+}
+
+function destroyVoiceCaptureWindow() {
+  stopVoiceCaptureStream('runtime-cleanup');
+  if (voiceCaptureWindow && !voiceCaptureWindow.isDestroyed()) {
+    voiceCaptureWindow.destroy();
+  }
+  voiceCaptureWindow = null;
+  voiceCaptureReady = false;
+  voiceCaptureShouldRun = false;
+  voiceCaptureStartOptions = null;
+}
+
+function createDesktopMicrophoneBackend() {
+  const captureBackend = {
+    opened: false,
+    capturing: false,
+    configuration: null,
+    onFrame: null,
+    open: ({ configuration, onFrame } = {}) => {
+      captureBackend.opened = true;
+      captureBackend.configuration = configuration || null;
+      captureBackend.onFrame = typeof onFrame === 'function' ? onFrame : null;
+      voiceCaptureFrameReceiver = captureBackend.onFrame;
+      createVoiceCaptureWindow();
+    },
+    start: ({ configuration } = {}) => {
+      captureBackend.capturing = true;
+      captureBackend.configuration = configuration || captureBackend.configuration;
+      voiceCaptureFrameReceiver = captureBackend.onFrame;
+      resetVoiceCaptureFrameStats();
+      startVoiceCaptureStream({
+        sampleRate: captureBackend.configuration?.sampleRate || 16000,
+        channels: captureBackend.configuration?.channels || 1
+      });
+    },
+    stop: () => {
+      captureBackend.capturing = false;
+      stopVoiceCaptureStream('audio-stop');
+    },
+    pause: () => {
+      captureBackend.capturing = false;
+      stopVoiceCaptureStream('audio-pause');
+    },
+    resume: () => {
+      captureBackend.capturing = true;
+      startVoiceCaptureStream({
+        sampleRate: captureBackend.configuration?.sampleRate || 16000,
+        channels: captureBackend.configuration?.channels || 1
+      });
+    },
+    close: () => {
+      captureBackend.opened = false;
+      captureBackend.capturing = false;
+      if (voiceCaptureFrameReceiver === captureBackend.onFrame) {
+        voiceCaptureFrameReceiver = null;
+      }
+      captureBackend.onFrame = null;
+      stopVoiceCaptureStream('audio-close');
+    }
+  };
+  return captureBackend;
+}
+
+function createDesktopVoiceResources() {
+  const microphoneDevice = {
+    id: 'desktop-default-microphone',
+    displayName: 'Default microphone',
+    isDefault: true,
+    connected: true,
+    sampleRates: [16000],
+    channels: 1,
+    kind: 'audioinput'
+  };
+  const permissionProvider = {
+    getMicrophonePermissionStatus: () => ({
+      granted: true,
+      state: 'granted',
+      reason: 'Desktop voice capture is enabled.'
+    }),
+    requestMicrophonePermission: () => ({
+      granted: true,
+      state: 'granted',
+      reason: 'Desktop voice capture is enabled.'
+    })
+  };
+  const deviceProvider = {
+    listInputDevices: () => [microphoneDevice],
+    getDefaultInputDeviceId: () => microphoneDevice.id
+  };
+  const captureBackend = createDesktopMicrophoneBackend();
+  const audioCapture = new AudioCapture({
+    deviceManager: new AudioDeviceManager({ provider: deviceProvider, defaultDeviceId: microphoneDevice.id, logger: mainLogger }),
+    permissions: new AudioPermissions({ provider: permissionProvider, logger: mainLogger }),
+    backend: captureBackend,
+    logger: mainLogger
+  });
+  const sttEngine = new STTEngine({
+    configuration: new STTConfiguration({
+      modelPath: path.resolve(process.cwd(), 'models', 'parakeet')
+    }),
+    logger: mainLogger
+  });
+
+  return {
+    audioCapture,
+    sttEngine
+  };
+}
+
+function createVoiceOverlayForManager(manager) {
+  const windowController = new VoiceWindowController({
+    BrowserWindow,
+    screen,
+    preloadPath: PRELOAD_PATH,
+    logger: mainLogger
+  });
+  const overlay = new VoiceOverlay({
+    windowController,
+    logger: mainLogger
+  });
+  overlay.attachToSessionManager(manager);
+  return overlay;
 }
 
 function createSettingsWindow() {
@@ -777,10 +1140,52 @@ function registerIpcHandler(channel, handler) {
   });
 }
 
+function sanitizeVoiceCaptureReport(payload = {}) {
+  if (!isPlainObject(payload)) return { event: 'unknown', data: {} };
+  const event = String(payload.event || 'unknown').replace(/[^a-z0-9:_-]/gi, '').slice(0, 80) || 'unknown';
+  const data = isPlainObject(payload.data) ? payload.data : {};
+  return { event, data };
+}
+
+function setupVoiceCaptureIPC() {
+  if (voiceCaptureIpcRegistered) return;
+  ipcMain.on('voiceCapture:frame', (event, payload) => {
+    const sender = getIpcSenderUrl(event);
+    if (!isVoiceCaptureRendererUrl(sender)) {
+      mainLogger.warn('Rejected voice capture frame from untrusted sender', { sender });
+      return;
+    }
+    receiveVoiceCaptureFrame(payload);
+  });
+  ipcMain.handle('voiceCapture:report', async (event, payload) => {
+    const sender = getIpcSenderUrl(event);
+    if (!isVoiceCaptureRendererUrl(sender)) {
+      mainLogger.warn('Rejected voice capture report from untrusted sender', { sender });
+      throw new Error('Invalid or unauthorized IPC request');
+    }
+    const report = sanitizeVoiceCaptureReport(payload);
+    if (report.event === 'error') {
+      mainLogger.warn('Voice microphone capture failed', report.data);
+    } else {
+      mainLogger.info(`Voice microphone capture ${report.event}`, report.data);
+    }
+    return { ok: true };
+  });
+  voiceCaptureIpcRegistered = true;
+}
+
+function teardownVoiceCaptureIPC() {
+  if (!voiceCaptureIpcRegistered) return;
+  ipcMain.removeAllListeners('voiceCapture:frame');
+  ipcMain.removeHandler('voiceCapture:report');
+  voiceCaptureIpcRegistered = false;
+}
+
 function setupIPC() {
   if (ipcRegistered) {
     return;
   }
+  setupVoiceCaptureIPC();
 
   registerIpcHandler('command:process', async (_event, { input, source }) => {
     if (!assistant) return { success: false, response: 'Assistant not initialized' };
@@ -976,6 +1381,7 @@ function teardownIPC() {
       mainLogger.error('Failed to remove IPC handler', { channel, error: error.message });
     }
   }
+  teardownVoiceCaptureIPC();
   ipcRegistered = false;
 }
 
@@ -1020,6 +1426,16 @@ async function destroyAssistantInstance() {
     }
     voiceAssistantBridge = null;
   }
+  if (voiceOverlay) {
+    try {
+      voiceOverlay.detach();
+      voiceOverlay.windowController?.destroy?.();
+    } catch (error) {
+      mainLogger.warn('Failed to destroy voice overlay', { error: error.message });
+    }
+    voiceOverlay = null;
+  }
+  destroyVoiceCaptureWindow();
   voiceSessionManager = null;
 
   if (!assistant) {
@@ -1089,6 +1505,7 @@ async function cleanupRuntime() {
     if (alertWindow && !alertWindow.isDestroyed()) alertWindow.destroy();
     if (timerWidgetWindow && !timerWidgetWindow.isDestroyed()) timerWidgetWindow.destroy();
     if (plannerWindow && !plannerWindow.isDestroyed()) plannerWindow.destroy();
+    destroyVoiceCaptureWindow();
     if (tray) {
       tray.destroy();
       tray = null;
@@ -1172,7 +1589,7 @@ function registerChatShortcut() {
       }
 
       registeredChatShortcuts.push(shortcut);
-      mainLogger.info('Registered chat shortcut', { shortcut });
+      mainLogger.info('Registered voice shortcut', { shortcut });
     } catch (error) {
       mainLogger.error('Invalid chat shortcut', { shortcut, error: error.message });
     }
@@ -1194,9 +1611,12 @@ async function initializeAssistant() {
     mainLogger.warn('TTS initialization failed (non-fatal)', { error: err.message });
   }
 
+  const voiceResources = createDesktopVoiceResources();
   voiceSessionManager = new VoiceSessionManager({
-    logger: mainLogger
+    logger: mainLogger,
+    resources: voiceResources
   });
+  voiceOverlay = createVoiceOverlayForManager(voiceSessionManager);
   voiceAssistantBridge = new VoiceAssistantBridge({
     manager: voiceSessionManager,
     assistant,
@@ -1211,7 +1631,7 @@ async function initializeAssistant() {
   });
   diagnosticsManager.start({
     sessionManager: voiceSessionManager,
-    resources: { sessionManager: voiceSessionManager }
+    resources: { sessionManager: voiceSessionManager, ...voiceResources }
   });
 
   registerChatShortcut();

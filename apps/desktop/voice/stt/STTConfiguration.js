@@ -4,7 +4,7 @@ const path = require('path');
 
 const DEFAULT_STT_CONFIGURATION = Object.freeze({
   activeEngine: 'parakeet',
-  modelPath: path.join('models', 'stt', 'parakeet-tdt-v3'),
+  modelPath: path.join('models', 'parakeet'),
   modelName: 'nvidia-parakeet-tdt-v3',
   language: 'en-US',
   beamWidth: 4,

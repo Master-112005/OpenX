@@ -331,6 +331,33 @@ describe('Voice Subsystem Architecture', function() {
     assert.ok(cleared.length >= 3);
   });
 
+  it('should close a silent listening session without showing a voice error', function() {
+    const { VoiceSessionManager, VoiceStateMachine, SESSION_EVENTS } = require('../../apps/desktop/voice');
+    const scheduled = [];
+    const errors = [];
+    const cancelled = [];
+    const manager = new VoiceSessionManager({
+      setTimeout: (callback, ms) => {
+        const token = { callback, ms, unref() {} };
+        scheduled.push(token);
+        return token;
+      },
+      clearTimeout: () => {}
+    });
+
+    manager.on(SESSION_EVENTS.VOICE_ERROR, event => errors.push(event));
+    manager.on(SESSION_EVENTS.VOICE_SESSION_CANCELLED, event => cancelled.push(event));
+    manager.startSession({ id: 'silent-listening-session' });
+    const listeningTimer = scheduled.find(token => token.ms === 30000);
+
+    listeningTimer.callback();
+
+    assert.equal(manager.getCurrentState(), VoiceStateMachine.STATES.IDLE);
+    assert.equal(errors.length, 0);
+    assert.equal(cancelled.length, 1);
+    assert.equal(cancelled[0].session.cancellationReason, 'No speech detected.');
+  });
+
   it('should load audio configuration and expose standard PCM metadata', function() {
     const { AudioConfiguration, UnsupportedSampleRateError } = require('../../apps/desktop/voice');
     const config = new AudioConfiguration({
@@ -518,6 +545,49 @@ describe('Voice Subsystem Architecture', function() {
     assert.equal(Object.prototype.hasOwnProperty.call(session.context.audio.latestFrame, 'pcm'), false);
   });
 
+  it('should keep injected desktop audio resources reusable after a session closes', function() {
+    const {
+      VoiceSessionManager,
+      AudioCapture,
+      AudioDeviceManager,
+      AudioPermissions
+    } = require('../../apps/desktop/voice');
+    const backendCalls = [];
+    const audioCapture = new AudioCapture({
+      deviceManager: new AudioDeviceManager({
+        provider: {
+          listInputDevices: () => [{ id: 'mic-1', displayName: 'Mock Microphone', sampleRates: [16000], channels: 1, isDefault: true }]
+        }
+      }),
+      permissions: new AudioPermissions({
+        provider: {
+          getMicrophonePermissionStatus: () => ({ granted: true, state: 'granted', reason: '' })
+        }
+      }),
+      backend: {
+        open: () => backendCalls.push('open'),
+        start: () => backendCalls.push('start'),
+        stop: () => backendCalls.push('stop'),
+        close: () => backendCalls.push('close')
+      }
+    });
+    const manager = new VoiceSessionManager({
+      resources: { audioCapture },
+      setTimeout: () => ({ unref() {} }),
+      clearTimeout: () => {}
+    });
+
+    manager.startSession({ id: 'first-audio-session' });
+    manager.startAudioCapture();
+    manager.cancelSession('done');
+    manager.startSession({ id: 'second-audio-session' });
+    const restarted = manager.startAudioCapture();
+
+    assert.equal(restarted.started, true);
+    assert.strictEqual(manager.resources.audioCapture, audioCapture);
+    assert.deepEqual(backendCalls, ['open', 'start', 'stop', 'close', 'open', 'start']);
+  });
+
   it('should load processing configuration and reject invalid sample rates', function() {
     const { ProcessingConfiguration, UnsupportedProcessingSampleRateError } = require('../../apps/desktop/voice');
     const config = new ProcessingConfiguration({
@@ -696,14 +766,18 @@ describe('Voice Subsystem Architecture', function() {
   it('should load STT configuration and validate decoder state transitions', function() {
     const { STTConfiguration } = require('../../apps/desktop/voice');
     const DecoderState = require('../../apps/desktop/voice/stt/DecoderState');
+    const VoiceSettings = require('../../apps/desktop/voice/config/VoiceSettings');
     const config = new STTConfiguration({
       modelPath: 'mock/parakeet',
       language: 'en-IN',
       beamWidth: 8
     });
+    const defaults = STTConfiguration.defaults();
     const decoder = new DecoderState();
 
     assert.equal(config.activeEngine, 'parakeet');
+    assert.equal(defaults.modelPath, path.join('models', 'parakeet'));
+    assert.equal(VoiceSettings.recognition.modelPath, 'models/parakeet');
     assert.equal(config.language, 'en-IN');
     assert.equal(config.merge({ beamWidth: 2 }).beamWidth, 2);
     assert.equal(decoder.transitionTo(DecoderState.STATES.LOADING), DecoderState.STATES.LOADING);
@@ -805,6 +879,63 @@ describe('Voice Subsystem Architecture', function() {
     assert.equal(events.length, 2);
     assert.equal(engine.getStatus().engine, 'parakeet');
     assert.equal(Object.prototype.hasOwnProperty.call(engine.getStatus(), 'runtime'), false);
+  });
+
+  it('should use native Sherpa recognizer text instead of placeholder transcripts', function() {
+    const {
+      AudioFrame,
+      ProcessedAudioFrame
+    } = require('../../apps/desktop/voice');
+    const SherpaRuntime = require('../../apps/desktop/voice/stt/SherpaRuntime');
+    let acceptedSamples = 0;
+    const fakeSherpa = {
+      OfflineRecognizer: class {
+        constructor(config) {
+          this.config = config;
+        }
+        createStream() {
+          return {
+            acceptWaveform: ({ samples }) => {
+              acceptedSamples += samples.length;
+            }
+          };
+        }
+        decode() {}
+        getResult() {
+          return {
+            text: acceptedSamples ? 'open calendar' : '',
+            ys_log_probs: [-0.1, -0.2]
+          };
+        }
+      }
+    };
+    const runtime = new SherpaRuntime({ sherpa: fakeSherpa });
+    const processedFrame = new ProcessedAudioFrame({
+      originalFrame: new AudioFrame({
+        frameIndex: 0,
+        pcm: [0, 0, 32, 0, 64, 0, 96, 0],
+        sampleRate: 16000,
+        channels: 1
+      }),
+      speechActivityState: 'SPEECH',
+      speechConfidence: 0.8
+    });
+
+    runtime.initialize({
+      model: { path: 'models/parakeet' },
+      configuration: { modelPath: 'models/parakeet', partialResultIntervalMs: 0 }
+    });
+    runtime.createRecognizer();
+    runtime.startStream();
+    runtime.acceptFrame(processedFrame);
+    const partial = runtime.decode({ ...processedFrame, endpointCandidate: true });
+    const final = runtime.finalize();
+
+    assert.equal(partial.text, 'open calendar');
+    assert.equal(final.text, 'open calendar');
+    assert.doesNotMatch(partial.text, /^speech \d+$/);
+    assert.doesNotMatch(final.text, /^recognized speech \d+$/);
+    assert.equal(runtime.getStatus().mode, 'native-offline');
   });
 
   it('should support STT cancellation, reset, and runtime error wrapping', function() {
@@ -1036,6 +1167,32 @@ describe('Voice Subsystem Architecture', function() {
     assert.equal(publisher.getState().partialTranscript, '');
     assert.equal(publisher.getState().finalTranscript, 'open visual studio code');
     assert.equal(updates.length, 2);
+  });
+
+  it('should ignore empty streaming partials before UI and normalization', function() {
+    const { VoiceSessionManager, STTEngine, TranscriptResult, STT_EVENTS, SESSION_EVENTS } = require('../../apps/desktop/voice');
+    const sttEngine = new STTEngine();
+    const manager = new VoiceSessionManager({
+      resources: { sttEngine },
+      setTimeout: () => ({ unref() {} }),
+      clearTimeout: () => {}
+    });
+    const partialEvents = [];
+    const errorEvents = [];
+
+    manager.on(SESSION_EVENTS.VOICE_PARTIAL_TRANSCRIPT, event => partialEvents.push(event));
+    manager.on(SESSION_EVENTS.VOICE_ERROR, event => errorEvents.push(event));
+    manager.startSession({ id: 'empty-partial-session' });
+    sttEngine.events.emit(STT_EVENTS.PARTIAL_RESULT, {
+      result: new TranscriptResult({ transcript: '', confidence: 0, partial: true })
+    });
+    sttEngine.events.emit(STT_EVENTS.PARTIAL_RESULT, {
+      result: new TranscriptResult({ transcript: 'open calendar', confidence: 0.9, partial: true })
+    });
+
+    assert.equal(errorEvents.length, 0);
+    assert.equal(partialEvents.length, 1);
+    assert.equal(partialEvents[0].transcriptResult.transcript, 'open calendar');
   });
 
   it('should create, position, show, update, and hide the Voice overlay window through minimal IPC', function() {
