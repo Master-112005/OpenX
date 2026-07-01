@@ -386,7 +386,15 @@ class AudioCapture {
    * @private
    */
   _publish(eventName, payload = {}) {
-    this.events.emit(eventName, Object.freeze({ ...payload, eventName }));
+    const eventPayload = Object.freeze({ ...payload, eventName });
+    const listeners = this.events.rawListeners(eventName);
+    for (const listener of listeners) {
+      try {
+        listener.call(this.events, eventPayload);
+      } catch (error) {
+        this._log('Event listener failed', { eventName, error: error.message });
+      }
+    }
   }
 
   /**

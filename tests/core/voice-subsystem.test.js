@@ -247,6 +247,31 @@ describe('Voice Subsystem Architecture', function() {
     assert.ok(logs.some(entry => entry.message === '[Voice] State Changed'));
   });
 
+  it('should isolate failing voice event listeners from session lifecycle', function() {
+    const { VoiceSessionManager, VoiceStateMachine, SESSION_EVENTS } = require('../../apps/desktop/voice');
+    const observed = [];
+    const warnings = [];
+    const manager = new VoiceSessionManager({
+      logger: {
+        info() {},
+        warn: (message, metadata) => warnings.push({ message, metadata })
+      },
+      setTimeout: () => ({ unref() {} }),
+      clearTimeout: () => {}
+    });
+
+    manager.on(SESSION_EVENTS.VOICE_STATE_CHANGED, () => {
+      throw new Error('ui listener failed');
+    });
+    manager.on(SESSION_EVENTS.VOICE_STATE_CHANGED, event => observed.push(event.transition.toState));
+
+    const started = manager.startSession({ id: 'listener-isolation' });
+
+    assert.equal(started.state, VoiceStateMachine.STATES.LISTENING);
+    assert.ok(observed.includes(VoiceStateMachine.STATES.LISTENING));
+    assert.ok(warnings.some(entry => entry.message.includes('Event listener failed')));
+  });
+
   it('should reject a second simultaneous session', function() {
     const { VoiceSessionManager } = require('../../apps/desktop/voice');
     const manager = new VoiceSessionManager({
@@ -553,6 +578,39 @@ describe('Voice Subsystem Architecture', function() {
     assert.equal(capture.close().closed, true);
     assert.deepEqual(backendCalls, ['open', 'start', 'pause', 'resume', 'stop', 'close']);
     assert.equal(events.length, 1);
+  });
+
+  it('should isolate failing audio capture listeners from frame delivery', function() {
+    const { AudioCapture, AudioDeviceManager, AudioPermissions, AUDIO_EVENTS } = require('../../apps/desktop/voice');
+    const logs = [];
+    const capture = new AudioCapture({
+      deviceManager: new AudioDeviceManager({
+        provider: {
+          listInputDevices: () => [{ id: 'mic-1', displayName: 'Mock Microphone', sampleRates: [16000], channels: 1, isDefault: true }]
+        }
+      }),
+      permissions: new AudioPermissions({
+        provider: {
+          getMicrophonePermissionStatus: () => ({ granted: true, state: 'granted', reason: '' })
+        }
+      }),
+      logger: { info: (message, metadata) => logs.push({ message, metadata }) }
+    });
+    let delivered = false;
+
+    capture.on(AUDIO_EVENTS.AUDIO_FRAME, () => {
+      throw new Error('capture listener failed');
+    });
+    capture.on(AUDIO_EVENTS.AUDIO_FRAME, () => {
+      delivered = true;
+    });
+
+    capture.start();
+    const frame = capture.receiveFrame({ pcm: [1, 0, 2, 0] });
+
+    assert.equal(frame.frameIndex, 0);
+    assert.equal(delivered, true);
+    assert.ok(logs.some(entry => entry.message === '[Audio] Event listener failed'));
   });
 
   it('should route audio capture through VoiceSessionManager and store only frame metadata on the session', function() {

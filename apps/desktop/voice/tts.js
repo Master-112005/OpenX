@@ -3,6 +3,7 @@ const { execSync, spawn, spawnSync } = require('child_process');
 const Logger = require('../../../core/assistant/Data').Logger;
 
 const DEFAULT_TTS_VOLUME = 100;
+const DEFAULT_MAX_SPEECH_CHARS = 520;
 const DEFAULT_PREFERRED_VOICES = [
   'Microsoft Zira Desktop',
   'Microsoft Aria Online',
@@ -22,6 +23,7 @@ class TextToSpeech extends EventEmitter {
       ? config.voice.tts.preferredVoices.map(voice => String(voice || '').trim()).filter(Boolean)
       : DEFAULT_PREFERRED_VOICES;
     this.naturalize = config?.voice?.tts?.naturalize !== false;
+    this.maxSpeechChars = this._normalizeMaxSpeechChars(config?.voice?.tts?.maxSpeechChars);
     this.voiceName = this.configuredVoiceName || 'Microsoft Zira Desktop';
     this.availableVoices = [];
     this.activeProcess = null;
@@ -56,20 +58,21 @@ class TextToSpeech extends EventEmitter {
   }
 
   speak(text) {
-    if (!text || typeof text !== 'string' || text.trim().length === 0) return;
+    const speechText = this._prepareSpeechText(text);
+    if (!speechText) return;
 
     if (this.isSpeaking && this.activeProcess) {
       this.stop();
     }
 
     this.isSpeaking = true;
-    this.emit('speaking', text);
+    this.emit('speaking', speechText);
 
-    const safeText = this._escapePowerShellString(text.trim());
+    const safeText = this._escapePowerShellString(speechText);
     const desiredVoice = this._escapePowerShellString(this.voiceName.trim());
     const rate = this.rate;
     const useSsml = this.naturalize;
-    const ssmlText = this._escapePowerShellString(this._buildSsml(text.trim()));
+    const ssmlText = this._escapePowerShellString(this._buildSsml(speechText));
 
     try {
       const psScript = `
@@ -104,7 +107,7 @@ class TextToSpeech extends EventEmitter {
         if (signal === 'SIGTERM' || signal === 'SIGKILL' || signal === 'SIGINT') {
           this.emit('stopped');
         } else {
-          this.emit('completed', text);
+          this.emit('completed', speechText);
         }
       });
 
@@ -123,7 +126,8 @@ class TextToSpeech extends EventEmitter {
   }
 
   speakAsync(text) {
-    if (!text || typeof text !== 'string' || text.trim().length === 0) {
+    const speechText = this._prepareSpeechText(text);
+    if (!speechText) {
       return Promise.resolve();
     }
 
@@ -144,7 +148,7 @@ class TextToSpeech extends EventEmitter {
       this.once('completed', onCompleted);
       this.once('error', onError);
       this.once('stopped', onStopped);
-      this.speak(text);
+      this.speak(speechText);
     });
   }
 
@@ -201,6 +205,30 @@ class TextToSpeech extends EventEmitter {
       return -1;
     }
     return Math.max(-10, Math.min(10, Math.round(number)));
+  }
+
+  _normalizeMaxSpeechChars(value) {
+    const number = Number(value);
+    if (!Number.isFinite(number)) return DEFAULT_MAX_SPEECH_CHARS;
+    return Math.max(160, Math.min(1200, Math.round(number)));
+  }
+
+  _prepareSpeechText(text) {
+    const normalized = String(text || '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!normalized) return '';
+    if (normalized.length <= this.maxSpeechChars) return normalized;
+    const clipped = normalized.slice(0, this.maxSpeechChars);
+    const sentenceBoundary = Math.max(
+      clipped.lastIndexOf('. '),
+      clipped.lastIndexOf('! '),
+      clipped.lastIndexOf('? ')
+    );
+    if (sentenceBoundary >= 120) return clipped.slice(0, sentenceBoundary + 1).trim();
+    const wordBoundary = clipped.lastIndexOf(' ');
+    const limit = wordBoundary >= 80 ? wordBoundary : Math.max(1, this.maxSpeechChars - 1);
+    return `${clipped.slice(0, limit).trim()}.`;
   }
 
   _selectPreferredVoice() {

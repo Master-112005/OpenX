@@ -37,6 +37,7 @@ class VoiceExecutionCoordinator extends EventEmitter {
       duplicateResumeSuppressed: 0
     };
     this.activeTurn = null;
+    this.responseGenerator = dependencies.responseGenerator || new ResponseGenerator();
     this.managerSubscriptions = [];
     if (dependencies.manager) this.attachToSessionManager(dependencies.manager);
   }
@@ -258,7 +259,7 @@ class VoiceExecutionCoordinator extends EventEmitter {
     if (explicit) return explicit;
     const response = String(result?.response || result?.message || '').trim();
     if (!response) return '';
-    return new ResponseGenerator().createSpokenResponse(response, {
+    return this.responseGenerator.createSpokenResponse(response, {
       source: 'voice',
       result,
       force: true

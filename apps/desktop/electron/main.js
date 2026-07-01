@@ -165,6 +165,7 @@ let voiceCaptureRunId = 0;
 let voiceCaptureStartOptions = null;
 let voiceCaptureFrameReceiver = null;
 let voiceCaptureWarmupTimer = null;
+let voiceResourceWarmupTimer = null;
 let voiceStartInFlight = false;
 let voiceLastStartAt = 0;
 let voiceCaptureFrameStats = {
@@ -713,10 +714,33 @@ function scheduleVoiceRuntimePrewarm(reason = 'startup') {
   }
 }
 
+function scheduleVoiceResourceWarmup(reason = 'post-startup') {
+  if (voiceResourceWarmupTimer) {
+    clearTimeout(voiceResourceWarmupTimer);
+    voiceResourceWarmupTimer = null;
+  }
+  voiceResourceWarmupTimer = setTimeout(() => {
+    voiceResourceWarmupTimer = null;
+    if (!voiceSessionManager || cleanupFinished || cleanupPromise) return;
+    try {
+      voiceSessionManager.warmUpResources(reason);
+    } catch (error) {
+      mainLogger.warn('Voice resource warm-up failed', { error: error.message });
+    }
+  }, VOICE_CAPTURE_WARMUP_DELAY_MS * 2);
+  if (typeof voiceResourceWarmupTimer.unref === 'function') {
+    voiceResourceWarmupTimer.unref();
+  }
+}
+
 function destroyVoiceCaptureWindow() {
   if (voiceCaptureWarmupTimer) {
     clearTimeout(voiceCaptureWarmupTimer);
     voiceCaptureWarmupTimer = null;
+  }
+  if (voiceResourceWarmupTimer) {
+    clearTimeout(voiceResourceWarmupTimer);
+    voiceResourceWarmupTimer = null;
   }
   stopVoiceCaptureStream('runtime-cleanup');
   if (voiceCaptureWindow && !voiceCaptureWindow.isDestroyed()) {
@@ -1670,7 +1694,7 @@ function registerChatShortcut() {
       });
 
       if (!registered) {
-        mainLogger.error('Failed to register chat shortcut', { shortcut });
+        mainLogger.error('Failed to register voice shortcut', { shortcut });
         continue;
       }
 
@@ -1696,7 +1720,7 @@ function registerChatShortcut() {
       registeredChatShortcuts.push(shortcut);
       mainLogger.info('Registered voice shortcut', { shortcut });
     } catch (error) {
-      mainLogger.error('Invalid chat shortcut', { shortcut, error: error.message });
+      mainLogger.error('Invalid voice shortcut', { shortcut, error: error.message });
     }
   }
 }
@@ -1739,14 +1763,7 @@ async function initializeAssistant() {
     resources: { sessionManager: voiceSessionManager, ...voiceResources }
   });
   scheduleVoiceRuntimePrewarm('assistant-initialized');
-  setTimeout(() => {
-    if (!voiceSessionManager || cleanupFinished || cleanupPromise) return;
-    try {
-      voiceSessionManager.warmUpResources('post-startup');
-    } catch (error) {
-      mainLogger.warn('Voice resource warm-up failed', { error: error.message });
-    }
-  }, VOICE_CAPTURE_WARMUP_DELAY_MS * 2).unref?.();
+  scheduleVoiceResourceWarmup('post-startup');
 
   registerChatShortcut();
   mainLogger.info('Assistant initialized', {

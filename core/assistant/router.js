@@ -14,6 +14,7 @@ const { MediaCommandRouter } = require('../automation/media');
 const { CommandFrameParser } = require('./parser');
 const NaturalLanguageRouter = require('./nlu');
 const { AppCommandLanguage, BrowserCommandLanguage } = NaturalLanguageRouter;
+const ResponseGenerator = require('./responses');
 
 const CONFIDENCE_THRESHOLD = 0.5;
 const PHONE_TRANSFER_ACTION_PATTERN = /^(?:send|share|transfer|copy|export|push|move|send\s+over|send\s+across)\b/i;
@@ -77,6 +78,7 @@ class ActionRouter {
     });
     this.appCommandLanguage = new AppCommandLanguage();
     this.browserCommandLanguage = new BrowserCommandLanguage();
+    this.responseGenerator = new ResponseGenerator(config);
     this.learningStore = config?.learningStore || null;
     this.mediaRouter = new MediaCommandRouter({
       logging: config?.logging,
@@ -4978,9 +4980,7 @@ _resolveExplicitTimerIntent(rawText, preparedInput) {
   }
 
   _buildResponse(type, template, context) {
-const ResponseGenerator = require('./responses');
-    const generator = new ResponseGenerator(this.config);
-    return generator.generate(type, template, context);
+    return this.responseGenerator.generate(type, template, context);
   }
 
   _trySearchFallback(rawCommandText, preparedInput) {
