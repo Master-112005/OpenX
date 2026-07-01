@@ -711,9 +711,7 @@ const RESPONSE_BUILDERS = {
           : `Switched the ${displayName} session to "${query}" for you.`;
       }
       if (verified) {
-        return replacedExisting
-          ? `Verified ${displayName} was opened for "${query}" after stopping the previous playback.`
-          : `Verified ${displayName} was opened for "${query}".`;
+        return `Verified ${displayName} was opened for "${query}".`;
       }
       if (method === 'browser') {
         return `Opening ${displayName} for "${query}" in your browser now.`;

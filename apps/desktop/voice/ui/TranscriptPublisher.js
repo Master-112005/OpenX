@@ -22,6 +22,7 @@ class TranscriptPublisher extends EventEmitter {
     this.partialTranscript = '';
     this.finalTranscript = '';
     this.updateCount = 0;
+    this.suppressedDuplicateCount = 0;
   }
 
   /**
@@ -32,6 +33,11 @@ class TranscriptPublisher extends EventEmitter {
    */
   publish(transcript, options = {}) {
     const payload = this._normalizeTranscript(transcript, options);
+    const previous = payload.partial ? this.partialTranscript : this.finalTranscript;
+    if (payload.transcript === previous && payload.transcript) {
+      this.suppressedDuplicateCount += 1;
+      return { published: false, transcript: payload.transcript, partial: payload.partial, skipped: 'duplicate-transcript' };
+    }
     if (payload.partial) {
       this.partialTranscript = payload.transcript;
     } else {
@@ -74,7 +80,8 @@ class TranscriptPublisher extends EventEmitter {
     return {
       partialTranscript: this.partialTranscript,
       finalTranscript: this.finalTranscript,
-      updateCount: this.updateCount
+      updateCount: this.updateCount,
+      suppressedDuplicateCount: this.suppressedDuplicateCount
     };
   }
 

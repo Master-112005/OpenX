@@ -1457,6 +1457,35 @@ describe('Voice Subsystem Architecture', function() {
     assert.equal(updates.length, 2);
   });
 
+  it('should suppress duplicate Voice UI state and transcript updates', function() {
+    const { VoiceOverlay, TranscriptPublisher } = require('../../apps/desktop/voice/ui');
+    const stateUpdates = [];
+    const overlay = new VoiceOverlay({
+      windowController: {
+        updateState: view => stateUpdates.push(view)
+      },
+      clock: () => new Date('2026-07-01T00:00:00.000Z')
+    });
+
+    const firstState = overlay.updateState('LISTENING');
+    const duplicateState = overlay.updateState('LISTENING');
+    assert.equal(firstState.updated, true);
+    assert.equal(duplicateState.updated, false);
+    assert.equal(stateUpdates.length, 1);
+
+    const transcriptUpdates = [];
+    const publisher = new TranscriptPublisher({
+      target: { updateTranscript: payload => transcriptUpdates.push(payload) }
+    });
+    const firstTranscript = publisher.publishPartial('open chrome');
+    const duplicateTranscript = publisher.publishPartial('open chrome');
+
+    assert.equal(firstTranscript.published, true);
+    assert.equal(duplicateTranscript.published, false);
+    assert.equal(transcriptUpdates.length, 1);
+    assert.equal(publisher.getState().suppressedDuplicateCount, 1);
+  });
+
   it('should resolve Voice UI colors from the active assistant theme', function() {
     const { VoiceTheme } = require('../../apps/desktop/voice/ui');
     const theme = new VoiceTheme({

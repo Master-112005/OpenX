@@ -21,9 +21,12 @@ class VoiceAnimationController {
     this.currentAnimation = 'none';
     this.metrics = {
       animationCount: 0,
+      suppressedDuplicates: 0,
       lastAnimation: 'none',
       lastTriggeredAt: null
     };
+    this.lastSignature = '';
+    this.duplicateWindowMs = Number(options.duplicateWindowMs) || 120;
   }
 
   /**
@@ -38,16 +41,30 @@ class VoiceAnimationController {
       throw new AnimationFailure('Voice animation name is invalid.');
     }
     const selected = this.reducedMotion && !['none', 'fade-out'].includes(requested) ? 'none' : requested;
+    const now = this.clock();
+    const signature = `${selected}:${String(context.state || '')}`;
+    const lastTime = this.metrics.lastTriggeredAt ? Date.parse(this.metrics.lastTriggeredAt) : 0;
+    if (signature === this.lastSignature && now.getTime() - lastTime <= this.duplicateWindowMs) {
+      this.metrics.suppressedDuplicates += 1;
+      return Object.freeze({
+        animation: selected,
+        skipped: true,
+        at: now.toISOString(),
+        context: Object.freeze({ ...context }),
+        reason: 'duplicate-animation'
+      });
+    }
     const result = Object.freeze({
       animation: selected,
       skipped: selected !== requested,
-      at: this.clock().toISOString(),
+      at: now.toISOString(),
       context: Object.freeze({ ...context })
     });
     this.currentAnimation = selected;
     this.metrics.animationCount += 1;
     this.metrics.lastAnimation = selected;
     this.metrics.lastTriggeredAt = result.at;
+    this.lastSignature = signature;
     this._log('Animation Triggered', result);
     return result;
   }

@@ -372,7 +372,7 @@ describe('Response Generator', function() {
 
     assert.equal(
       result,
-      'Verified YouTube was opened for "playdate song" after stopping the previous playback, sir.'
+      'Verified YouTube was opened for "playdate song", sir.'
     );
   });
 

@@ -11,6 +11,7 @@ const { buildDataPaths } = require('../assistant/Data');
 
 const DEFAULT_PLATFORM = 'youtube';
 const VK_MEDIA_STOP = 178;
+const VK_MEDIA_PLAY_PAUSE = 179;
 
 const CHROME_PATHS = [
   'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
@@ -74,6 +75,9 @@ class MediaController {
     this.browser = new BrowserController(config);
     this.windowSession = new WindowsSessionController(config);
     this.activeSession = null;
+    this.systemMediaSessionCooldownMs = Number(config?.media?.systemSessionCooldownMs) || 60000;
+    this.systemMediaSessionPauseUnavailableUntil = 0;
+    this.systemMediaSessionResumeUnavailableUntil = 0;
   }
 
   async play(query, platform) {
@@ -679,6 +683,197 @@ class MediaController {
     };
   }
 
+  quietForVoiceActivation(reason = 'voice-activation') {
+    const systemSession = this._tryPauseSystemMediaSession();
+    if (systemSession.hasSession) {
+      const wasPlaying = String(systemSession.playbackStatus || '').toLowerCase() === 'playing';
+      if (wasPlaying && systemSession.pauseSucceeded) {
+        return {
+          success: true,
+          data: {
+            action: 'pause',
+            reason,
+            method: 'system-media-session',
+            playbackStatus: systemSession.playbackStatus,
+            afterStatus: systemSession.afterStatus || null,
+            sourceAppUserModelId: systemSession.sourceAppUserModelId || null,
+            restore: {
+              action: 'resume',
+              method: 'system-media-session',
+              sourceAppUserModelId: systemSession.sourceAppUserModelId || null
+            }
+          }
+        };
+      }
+
+      if (wasPlaying) {
+        try {
+          this._sendGlobalMediaKey(VK_MEDIA_PLAY_PAUSE);
+          return {
+            success: true,
+            data: {
+              action: 'pause',
+              reason,
+              method: 'global-media-key-fallback',
+              playbackStatus: systemSession.playbackStatus,
+              sourceAppUserModelId: systemSession.sourceAppUserModelId || null,
+              restore: {
+                action: 'resume',
+                method: 'global-media-key-fallback',
+                sourceAppUserModelId: systemSession.sourceAppUserModelId || null
+              }
+            }
+          };
+        } catch (err) {
+          return {
+            success: false,
+            error: `Failed to pause active media for voice: ${err.message}`,
+            data: {
+              action: 'pause',
+              reason,
+              method: 'global-media-key-fallback',
+              playbackStatus: systemSession.playbackStatus,
+              sourceAppUserModelId: systemSession.sourceAppUserModelId || null
+            }
+          };
+        }
+      }
+
+      return {
+        success: true,
+        data: {
+          action: 'none',
+          reason: 'media-not-playing',
+          method: 'system-media-session',
+          playbackStatus: systemSession.playbackStatus || 'unknown',
+          sourceAppUserModelId: systemSession.sourceAppUserModelId || null
+        }
+      };
+    }
+
+    if (this.activeSession?.platform) {
+      const result = this.pause();
+      return {
+        success: Boolean(result.success),
+        error: result.error,
+        data: {
+          ...(result.data || {}),
+          action: result.data?.action || 'pause',
+          reason,
+          method: result.data?.method || 'known-openx-media-session',
+          platform: this.activeSession.platform,
+          fallback: true,
+          restore: {
+            action: 'resume',
+            method: 'known-openx-media-session',
+            platform: this.activeSession.platform
+          }
+        }
+      };
+    }
+
+    return {
+      success: true,
+      data: {
+        action: 'none',
+        reason: 'no-active-media-session',
+        method: 'system-media-session'
+      }
+    };
+  }
+
+  restoreAfterVoiceActivation(quietingResult = {}, reason = 'voice-session-closed') {
+    const data = quietingResult?.data || quietingResult || {};
+    const restore = data.restore || {};
+    if (restore.action !== 'resume') {
+      return {
+        success: true,
+        data: {
+          action: 'none',
+          reason: 'no-voice-media-restore-needed'
+        }
+      };
+    }
+
+    if (restore.method === 'system-media-session') {
+      const result = this._tryResumeSystemMediaSession(restore.sourceAppUserModelId || data.sourceAppUserModelId || '');
+      if (result.playSucceeded || String(result.playbackStatus || '').toLowerCase() === 'playing') {
+        return {
+          success: true,
+          data: {
+            action: result.playSucceeded ? 'resume' : 'none',
+            reason,
+            method: 'system-media-session',
+            playbackStatus: result.playbackStatus || null,
+            afterStatus: result.afterStatus || null,
+            sourceAppUserModelId: result.sourceAppUserModelId || restore.sourceAppUserModelId || null
+          }
+        };
+      }
+      return {
+        success: false,
+        error: result.error || 'Failed to resume media after voice.',
+        data: {
+          action: 'resume',
+          reason,
+          method: 'system-media-session',
+          playbackStatus: result.playbackStatus || null,
+          sourceAppUserModelId: result.sourceAppUserModelId || restore.sourceAppUserModelId || null
+        }
+      };
+    }
+
+    if (restore.method === 'global-media-key-fallback') {
+      try {
+        this._sendGlobalMediaKey(VK_MEDIA_PLAY_PAUSE);
+        return {
+          success: true,
+          data: {
+            action: 'resume',
+            reason,
+            method: 'global-media-key-fallback',
+            sourceAppUserModelId: restore.sourceAppUserModelId || null
+          }
+        };
+      } catch (err) {
+        return {
+          success: false,
+          error: `Failed to resume media after voice: ${err.message}`,
+          data: {
+            action: 'resume',
+            reason,
+            method: 'global-media-key-fallback',
+            sourceAppUserModelId: restore.sourceAppUserModelId || null
+          }
+        };
+      }
+    }
+
+    if (restore.method === 'known-openx-media-session') {
+      const result = this.resume();
+      return {
+        success: Boolean(result.success),
+        error: result.error,
+        data: {
+          ...(result.data || {}),
+          action: result.data?.action || 'resume',
+          reason,
+          method: 'known-openx-media-session',
+          platform: restore.platform || data.platform || null
+        }
+      };
+    }
+
+    return {
+      success: true,
+      data: {
+        action: 'none',
+        reason: 'unknown-voice-media-restore-method',
+        method: restore.method || null
+      }
+    };
+  }
+
   destroy() {
     if (this.activeSession?.managedWindow) {
       this._closeManagedSession();
@@ -778,6 +973,182 @@ Add-Type -TypeDefinition $signature -ErrorAction SilentlyContinue | Out-Null
       timeout: 5000,
       stdio: 'pipe'
     });
+  }
+
+  _tryPauseSystemMediaSession() {
+    if (Date.now() < this.systemMediaSessionPauseUnavailableUntil) {
+      return {
+        hasSession: false,
+        skipped: true,
+        error: 'system-media-session-query-cooling-down'
+      };
+    }
+
+    const script = `
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Runtime.WindowsRuntime
+$null = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media.Control, ContentType=WindowsRuntime]
+function Wait-WinRtAsyncOperation($operation, [Type]$resultType) {
+  $methods = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
+    $_.Name -eq 'AsTask' -and $_.IsGenericMethodDefinition -and $_.GetParameters().Count -eq 1
+  }
+  foreach ($method in $methods) {
+    try {
+      $task = $method.MakeGenericMethod($resultType).Invoke($null, @($operation))
+      return $task.GetAwaiter().GetResult()
+    } catch {}
+  }
+  throw 'Unable to await WinRT operation.'
+}
+$operation = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]::RequestAsync()
+$managerType = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]
+$manager = Wait-WinRtAsyncOperation $operation $managerType
+$session = $manager.GetCurrentSession()
+if ($null -eq $session) {
+  @{ hasSession = $false } | ConvertTo-Json -Compress
+  exit 0
+}
+$playbackInfo = $session.GetPlaybackInfo()
+$status = if ($playbackInfo -and $playbackInfo.PlaybackStatus) { $playbackInfo.PlaybackStatus.ToString() } else { 'Unknown' }
+$pauseSucceeded = $false
+$afterStatus = $status
+if ($status -eq 'Playing') {
+  try {
+    $pauseOperation = $session.TryPauseAsync()
+    $pauseSucceeded = Wait-WinRtAsyncOperation $pauseOperation ([bool])
+    $afterInfo = $session.GetPlaybackInfo()
+    if ($afterInfo -and $afterInfo.PlaybackStatus) { $afterStatus = $afterInfo.PlaybackStatus.ToString() }
+  } catch {
+    $pauseSucceeded = $false
+  }
+}
+@{
+  hasSession = $true
+  playbackStatus = $status
+  afterStatus = $afterStatus
+  pauseSucceeded = [bool]$pauseSucceeded
+  sourceAppUserModelId = $session.SourceAppUserModelId
+} | ConvertTo-Json -Compress
+`;
+
+    try {
+      const output = this._runSystemMediaSessionScript(script).trim();
+      const jsonLine = output
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .reverse()
+        .find(line => line.startsWith('{') && line.endsWith('}'));
+      if (!jsonLine) return { hasSession: false, error: 'no-media-session-output' };
+      return JSON.parse(jsonLine);
+    } catch (err) {
+      const error = this._compactSystemMediaSessionError(err);
+      this.systemMediaSessionPauseUnavailableUntil = Date.now() + this.systemMediaSessionCooldownMs;
+      this.logger.info(`MediaController: system media session query unavailable (${error})`);
+      return { hasSession: false, error };
+    }
+  }
+
+  _tryResumeSystemMediaSession(sourceAppUserModelId = '') {
+    if (Date.now() < this.systemMediaSessionResumeUnavailableUntil) {
+      return {
+        hasSession: false,
+        playSucceeded: false,
+        skipped: true,
+        error: 'system-media-session-resume-cooling-down'
+      };
+    }
+
+    const safeSource = String(sourceAppUserModelId || '').replace(/'/g, "''");
+    const script = `
+$ErrorActionPreference = 'Stop'
+Add-Type -AssemblyName System.Runtime.WindowsRuntime
+$null = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager, Windows.Media.Control, ContentType=WindowsRuntime]
+function Wait-WinRtAsyncOperation($operation, [Type]$resultType) {
+  $methods = [System.WindowsRuntimeSystemExtensions].GetMethods() | Where-Object {
+    $_.Name -eq 'AsTask' -and $_.IsGenericMethodDefinition -and $_.GetParameters().Count -eq 1
+  }
+  foreach ($method in $methods) {
+    try {
+      $task = $method.MakeGenericMethod($resultType).Invoke($null, @($operation))
+      return $task.GetAwaiter().GetResult()
+    } catch {}
+  }
+  throw 'Unable to await WinRT operation.'
+}
+$operation = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]::RequestAsync()
+$managerType = [Windows.Media.Control.GlobalSystemMediaTransportControlsSessionManager]
+$manager = Wait-WinRtAsyncOperation $operation $managerType
+$session = $manager.GetCurrentSession()
+$sourceAppUserModelId = '${safeSource}'
+if ($sourceAppUserModelId) {
+  foreach ($candidate in $manager.GetSessions()) {
+    if ($candidate.SourceAppUserModelId -eq $sourceAppUserModelId) {
+      $session = $candidate
+      break
+    }
+  }
+}
+if ($null -eq $session) {
+  @{ hasSession = $false; playSucceeded = $false } | ConvertTo-Json -Compress
+  exit 0
+}
+$playbackInfo = $session.GetPlaybackInfo()
+$status = if ($playbackInfo -and $playbackInfo.PlaybackStatus) { $playbackInfo.PlaybackStatus.ToString() } else { 'Unknown' }
+$playSucceeded = $false
+$afterStatus = $status
+if ($status -ne 'Playing') {
+  try {
+    $playOperation = $session.TryPlayAsync()
+    $playSucceeded = Wait-WinRtAsyncOperation $playOperation ([bool])
+    $afterInfo = $session.GetPlaybackInfo()
+    if ($afterInfo -and $afterInfo.PlaybackStatus) { $afterStatus = $afterInfo.PlaybackStatus.ToString() }
+  } catch {
+    $playSucceeded = $false
+  }
+}
+@{
+  hasSession = $true
+  playbackStatus = $status
+  afterStatus = $afterStatus
+  playSucceeded = [bool]$playSucceeded
+  sourceAppUserModelId = $session.SourceAppUserModelId
+} | ConvertTo-Json -Compress
+`;
+
+    try {
+      const output = this._runSystemMediaSessionScript(script).trim();
+      const jsonLine = output
+        .split(/\r?\n/)
+        .map(line => line.trim())
+        .reverse()
+        .find(line => line.startsWith('{') && line.endsWith('}'));
+      if (!jsonLine) return { hasSession: false, error: 'no-media-session-output' };
+      return JSON.parse(jsonLine);
+    } catch (err) {
+      const error = this._compactSystemMediaSessionError(err);
+      this.systemMediaSessionResumeUnavailableUntil = Date.now() + this.systemMediaSessionCooldownMs;
+      this.logger.info(`MediaController: system media session resume unavailable (${error})`);
+      return { hasSession: false, playSucceeded: false, error };
+    }
+  }
+
+  _runSystemMediaSessionScript(script) {
+    return execFileSync('powershell.exe', ['-NoProfile', '-Command', script], {
+      timeout: 2500,
+      stdio: 'pipe',
+      encoding: 'utf8'
+    });
+  }
+
+  _compactSystemMediaSessionError(err) {
+    const raw = Buffer.isBuffer(err?.stderr)
+      ? err.stderr.toString('utf8')
+      : String(err?.stderr || err?.message || err || '');
+    const message = raw
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .find(Boolean) || 'unknown-error';
+    return message.replace(/\s+/g, ' ').slice(0, 220);
   }
 }
 

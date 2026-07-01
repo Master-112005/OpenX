@@ -17,7 +17,8 @@ const {
   AudioDeviceManager,
   AudioPermissions,
   STTEngine,
-  STTConfiguration
+  STTConfiguration,
+  SESSION_EVENTS
 } = require('../voice');
 const { SettingsService } = require('../settings');
 const { AssistantEventBus, EVENTS, Logger } = require('../../../core/assistant/Data');
@@ -168,6 +169,7 @@ let voiceCaptureWarmupTimer = null;
 let voiceResourceWarmupTimer = null;
 let voiceStartInFlight = false;
 let voiceLastStartAt = 0;
+let voiceMediaQuietingState = null;
 let voiceCaptureFrameStats = {
   received: 0,
   delivered: 0,
@@ -1626,6 +1628,87 @@ function openChatFromShortcut(shortcut = '') {
   return { success: true };
 }
 
+function quietMediaForVoiceActivation(shortcut = '') {
+  const mediaController = assistant?.automation?.media;
+  if (!mediaController || typeof mediaController.quietForVoiceActivation !== 'function') {
+    return { success: true, skipped: true, reason: 'media-controller-unavailable' };
+  }
+
+  try {
+    const result = mediaController.quietForVoiceActivation('voice-hotkey');
+    const action = result?.data?.action || 'unknown';
+    if (result?.success && action !== 'none') {
+      if (result.data?.restore?.action) {
+        voiceMediaQuietingState = {
+          result,
+          shortcut,
+          startedAt: Date.now()
+        };
+      }
+      mainLogger.info('Media quieted for voice listening', {
+        shortcut,
+        action,
+        method: result.data?.method,
+        playbackStatus: result.data?.playbackStatus,
+        sourceAppUserModelId: result.data?.sourceAppUserModelId
+      });
+    } else if (!result?.success) {
+      mainLogger.warn('Media quieting for voice listening failed', {
+        shortcut,
+        error: result?.error || 'Unknown media quieting failure',
+        method: result?.data?.method
+      });
+    }
+    return result || { success: true, skipped: true, reason: 'empty-media-result' };
+  } catch (error) {
+    mainLogger.warn('Media quieting for voice listening crashed safely', {
+      shortcut,
+      error: error.message
+    });
+    return { success: false, error: error.message };
+  }
+}
+
+function restoreMediaAfterVoiceSession(reason = 'voice-session-closed') {
+  const state = voiceMediaQuietingState;
+  voiceMediaQuietingState = null;
+  if (!state?.result?.data?.restore?.action) {
+    return { success: true, skipped: true, reason: 'no-media-quieting-state' };
+  }
+
+  const mediaController = assistant?.automation?.media;
+  if (!mediaController || typeof mediaController.restoreAfterVoiceActivation !== 'function') {
+    return { success: false, error: 'Media controller unavailable for restore' };
+  }
+
+  try {
+    const result = mediaController.restoreAfterVoiceActivation(state.result, reason);
+    const action = result?.data?.action || 'unknown';
+    if (result?.success && action !== 'none') {
+      mainLogger.info('Media restored after voice listening', {
+        action,
+        method: result.data?.method,
+        reason,
+        sourceAppUserModelId: result.data?.sourceAppUserModelId,
+        quietedForMs: Math.max(0, Date.now() - Number(state.startedAt || Date.now()))
+      });
+    } else if (!result?.success) {
+      mainLogger.warn('Media restore after voice listening failed', {
+        reason,
+        error: result?.error || 'Unknown media restore failure',
+        method: result?.data?.method
+      });
+    }
+    return result || { success: true, skipped: true, reason: 'empty-media-restore-result' };
+  } catch (error) {
+    mainLogger.warn('Media restore after voice listening crashed safely', {
+      reason,
+      error: error.message
+    });
+    return { success: false, error: error.message };
+  }
+}
+
 function startVoiceListeningFromShortcut(shortcut = '') {
   if (!voiceSessionManager) {
     mainLogger.warn('Voice shortcut ignored because voice session manager is unavailable', { shortcut });
@@ -1658,6 +1741,7 @@ function startVoiceListeningFromShortcut(shortcut = '') {
     prewarmVoiceRuntime('voice-shortcut');
     const started = voiceSessionManager.startSession({ id: `voice-shortcut-${Date.now()}` });
     try {
+      quietMediaForVoiceActivation(shortcut);
       voiceSessionManager.startSpeechToText();
       voiceSessionManager.startAudioCapture();
     } catch (captureError) {
@@ -1694,7 +1778,7 @@ function registerChatShortcut() {
       });
 
       if (!registered) {
-        mainLogger.error('Failed to register voice shortcut', { shortcut });
+        mainLogger.error('Failed to register chat shortcut', { shortcut });
         continue;
       }
 
@@ -1713,7 +1797,7 @@ function registerChatShortcut() {
       });
 
       if (!registered) {
-        mainLogger.error('Failed to register chat shortcut', { shortcut });
+        mainLogger.error('Failed to register voice shortcut', { shortcut });
         continue;
       }
 
@@ -1743,6 +1827,9 @@ async function initializeAssistant() {
   voiceSessionManager = new VoiceSessionManager({
     logger: mainLogger,
     resources: voiceResources
+  });
+  voiceSessionManager.on(SESSION_EVENTS.VOICE_SESSION_CLOSED, event => {
+    restoreMediaAfterVoiceSession(event?.session?.currentState || event?.state || 'voice-session-closed');
   });
   voiceOverlay = createVoiceOverlayForManager(voiceSessionManager);
   voiceAssistantBridge = new VoiceAssistantBridge({

@@ -25,6 +25,10 @@ describe('Electron Chat Shortcut', function() {
     assert.match(script, /startVoiceListeningFromShortcut\(shortcut\)/);
     assert.match(script, /chatWindow\.hide\(\)/);
     assert.match(script, /voiceSessionManager\.startSession/);
+    assert.match(script, /function quietMediaForVoiceActivation\(shortcut = ''\)/);
+    assert.match(script, /function restoreMediaAfterVoiceSession\(reason = 'voice-session-closed'\)/);
+    assert.match(script, /quietMediaForVoiceActivation\(shortcut\)/);
+    assert.match(script, /VOICE_SESSION_CLOSED/);
     assert.match(script, /voiceSessionManager\.startAudioCapture\(\)/);
     assert.match(script, /voiceSessionManager\.startSpeechToText\(\)/);
     assert.match(script, /VOICE_SHORTCUT_DEBOUNCE_MS/);

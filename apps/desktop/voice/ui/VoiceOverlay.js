@@ -54,6 +54,9 @@ class VoiceOverlay extends EventEmitter {
     };
     this._manager = null;
     this._subscriptions = [];
+    this._lastStateSignature = '';
+    this._lastStateRenderedAt = 0;
+    this._duplicateStateWindowMs = 100;
   }
 
   /**
@@ -139,7 +142,18 @@ class VoiceOverlay extends EventEmitter {
    * @returns {{updated: boolean, state: string, view: object}}
    */
   updateState(state, context = {}) {
-    const view = this._composeView(state, this._contextFromSession(context));
+    const sessionContext = this._contextFromSession(context);
+    const preview = this.stateRenderer.render(state, sessionContext);
+    const signature = this._stateSignature(preview);
+    const now = this.clock().getTime();
+    const duplicate = signature === this._lastStateSignature &&
+      now - this._lastStateRenderedAt <= this._duplicateStateWindowMs;
+    if (duplicate) {
+      return { updated: false, state: preview.state, view: this.currentView, skipped: 'duplicate-state' };
+    }
+    this._lastStateSignature = signature;
+    this._lastStateRenderedAt = now;
+    const view = this._composeView(state, sessionContext);
     this.visible = view.visible !== false;
     this.metrics.stateChanges += 1;
     if (view.state === 'EXECUTING') this.emit(VOICE_UI_EVENTS.EXECUTION_STARTED, Object.freeze({ view }));
@@ -276,6 +290,21 @@ class VoiceOverlay extends EventEmitter {
       commandText: event.commandText || event.command || '',
       error: event.error || null
     };
+  }
+
+  /**
+   * Build a small signature for duplicate UI state suppression.
+   * @param {object} view Rendered view.
+   * @returns {string}
+   * @private
+   */
+  _stateSignature(view = {}) {
+    return [
+      view.state || '',
+      view.statusText || '',
+      view.transcript || '',
+      view.errorMessage || ''
+    ].join('\u001f');
   }
 
   /**
