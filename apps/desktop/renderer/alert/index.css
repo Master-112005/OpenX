@@ -1,3 +1,8 @@
+:root {
+  --motion-normal: 240ms;
+  --motion-ease: cubic-bezier(.2,.8,.2,1);
+}
+
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 body {
@@ -29,6 +34,8 @@ body {
   position: relative;
   text-align: center;
   width: 100%;
+  contain: layout paint style;
+  transform: translateZ(0);
 }
 
 .drag-region { inset: 0 0 auto; height: 42px; position: absolute; -webkit-app-region: drag; }
@@ -66,7 +73,7 @@ time { color: rgba(255,255,255,.68); font-size: 11px; font-weight: 650; margin-t
   font-weight: 750;
   min-height: 48px;
   padding: 0 14px;
-  transition: transform .25s cubic-bezier(.2,.8,.2,1), background .25s ease, box-shadow .25s ease;
+  transition: transform var(--motion-normal) var(--motion-ease), background var(--motion-normal) var(--motion-ease), box-shadow var(--motion-normal) var(--motion-ease);
   -webkit-app-region: no-drag;
 }
 .glass-button.primary { background: rgba(255,255,255,.92); color: #161619; }

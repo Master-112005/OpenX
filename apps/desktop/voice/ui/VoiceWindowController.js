@@ -221,17 +221,19 @@ class VoiceWindowController {
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'self';">
 <style>
-:root { --voice-bg: rgba(17,22,36,.82); --voice-text: #f4f7ff; --voice-muted: rgba(244,247,255,.68); --voice-accent: #4488ff; --voice-border: rgba(255,255,255,.16); --voice-blur: 34px; }
+:root { --voice-bg: rgba(17,22,36,.82); --voice-text: #f4f7ff; --voice-muted: rgba(244,247,255,.68); --voice-accent: #4488ff; --voice-border: rgba(255,255,255,.16); --voice-blur: 34px; --voice-ease: cubic-bezier(.2,.8,.2,1); }
 html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; font-family: Segoe UI, system-ui, sans-serif; color: var(--voice-text); }
-#voice-overlay { box-sizing: border-box; height: 100vh; padding: 18px 20px; border: 1px solid var(--voice-border); border-radius: 24px; background: var(--voice-bg); backdrop-filter: blur(var(--voice-blur)) saturate(160%); box-shadow: 0 24px 80px rgba(0,0,0,.35), inset 0 1px 1px rgba(255,255,255,.16); display: grid; grid-template-columns: 54px 1fr; gap: 14px; align-items: center; }
-#icon { width: 50px; height: 50px; border-radius: 16px; display: grid; place-items: center; background: color-mix(in srgb, var(--voice-accent) 22%, transparent); border: 1px solid color-mix(in srgb, var(--voice-accent) 42%, transparent); font-weight: 700; }
+body { animation: overlay-in 240ms var(--voice-ease) both; }
+#voice-overlay { box-sizing: border-box; height: 100vh; padding: 18px 20px; border: 1px solid var(--voice-border); border-radius: 24px; background: var(--voice-bg); backdrop-filter: blur(var(--voice-blur)) saturate(160%); box-shadow: 0 24px 80px rgba(0,0,0,.35), inset 0 1px 1px rgba(255,255,255,.16); display: grid; grid-template-columns: 54px 1fr; gap: 14px; align-items: center; contain: layout paint style; transform: translateZ(0); }
+#icon { width: 50px; height: 50px; border-radius: 16px; display: grid; place-items: center; background: color-mix(in srgb, var(--voice-accent) 22%, transparent); border: 1px solid color-mix(in srgb, var(--voice-accent) 42%, transparent); font-weight: 700; transform: translateZ(0); will-change: transform, opacity; }
 #title { font-size: 15px; font-weight: 650; line-height: 1.25; }
 #status { color: var(--voice-muted); font-size: 13px; margin-top: 3px; }
-#transcript { margin-top: 10px; min-height: 20px; font-size: 14px; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.listening #icon { animation: pulse 1.2s ease-in-out infinite; }
-.processing #icon { animation: pulse 1.6s ease-in-out infinite; }
+#transcript { margin-top: 10px; min-height: 20px; font-size: 14px; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: opacity 180ms var(--voice-ease), transform 180ms var(--voice-ease); }
+.listening #icon { animation: pulse 1.4s var(--voice-ease) infinite; }
+.processing #icon { animation: pulse 1.7s var(--voice-ease) infinite; }
 .error #icon { color: #ffb1b1; border-color: rgba(255,120,120,.45); }
-@keyframes pulse { 0%,100% { transform: scale(1); opacity: .78; } 50% { transform: scale(1.06); opacity: 1; } }
+@keyframes overlay-in { from { opacity: 0; transform: translate3d(0, 8px, 0) scale(.985); } to { opacity: 1; transform: none; } }
+@keyframes pulse { 0%,100% { transform: translateZ(0) scale(1); opacity: .78; } 50% { transform: translateZ(0) scale(1.055); opacity: 1; } }
 @media (prefers-reduced-motion: reduce) { * { animation: none !important; transition: none !important; } }
 </style>
 </head>

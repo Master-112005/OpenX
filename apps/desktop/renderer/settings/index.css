@@ -1,3 +1,8 @@
+:root {
+  --motion-normal: 240ms;
+  --motion-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
 * {
   box-sizing: border-box;
   margin: 0;
@@ -91,11 +96,12 @@ body {
   border: 1px solid rgba(255, 255, 255, 0.15);
   border-radius: 32px;
   box-shadow: 0 16px 42px rgba(0, 0, 0, 0.22), inset 0 1px 1px rgba(255, 255, 255, 0.15);
-  contain: layout paint;
+  contain: layout paint style;
   margin: 0;
   max-width: 520px;
   padding: 34px;
   position: relative;
+  transform: translateZ(0);
 }
 
 .app-icon {
@@ -122,7 +128,7 @@ button {
   border: 1px solid rgba(255, 255, 255, 0.18);
   border-radius: 18px;
   padding: 12px 20px;
-  transition: background 0.25s ease, transform 0.25s ease;
+  transition: background var(--motion-normal) var(--motion-ease), transform var(--motion-normal) var(--motion-ease);
 }
 button:hover { transform: translateY(-2px); }
 button.secondary { background: rgba(255,255,255,.1); border-color: rgba(255,255,255,.14); }

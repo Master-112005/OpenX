@@ -79,6 +79,8 @@ let activeAlertTones = [];
 let isAssistantMuted = localStorage.getItem(ASSISTANT_MUTED_STORAGE_KEY) === 'true';
 let glassTintAnimationFrame = null;
 let pendingGlassTintValue = 42;
+let messageScrollAnimationFrame = null;
+let renderedMessageCount = messagesEl ? messagesEl.querySelectorAll('.message').length : 0;
 let phonePairingCountdownHandle = null;
 const PHONE_PERMISSIONS = [
   ['remoteCommands', 'Remote Commands'],
@@ -275,15 +277,34 @@ function addMessage(text, type, meta, options = {}) {
   }
   msg.append(avatar, stack);
   messagesEl.appendChild(msg);
-  const renderedMessages = messagesEl.querySelectorAll('.message');
-  for (let index = 0; index < renderedMessages.length - MAX_RENDERED_MESSAGES; index += 1) {
-    renderedMessages[index].remove();
-  }
-  messagesEl.scrollTop = messagesEl.scrollHeight;
+  renderedMessageCount += 1;
+  pruneRenderedMessages();
+  scheduleMessagesScroll();
   return msg;
 }
 
+function pruneRenderedMessages() {
+  while (renderedMessageCount > MAX_RENDERED_MESSAGES) {
+    const firstMessage = messagesEl.querySelector('.message');
+    if (!firstMessage) {
+      renderedMessageCount = 0;
+      return;
+    }
+    firstMessage.remove();
+    renderedMessageCount -= 1;
+  }
+}
+
+function scheduleMessagesScroll() {
+  if (messageScrollAnimationFrame !== null) return;
+  messageScrollAnimationFrame = requestAnimationFrame(() => {
+    messageScrollAnimationFrame = null;
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  });
+}
+
 function showTyping() {
+  hideTyping();
   const el = document.createElement('div');
   el.className = 'typing';
   el.id = 'typing-indicator';
@@ -291,7 +312,7 @@ function showTyping() {
     el.appendChild(document.createElement('span'));
   }
   messagesEl.appendChild(el);
-  messagesEl.scrollTop = messagesEl.scrollHeight;
+  scheduleMessagesScroll();
 }
 
 function hideTyping() {
@@ -1426,7 +1447,7 @@ function ensureWelcomeMessage() {
   }
 
   addMessage(
-    `At your service, ${getHonorific()}. Type a command here.`,
+    `Ready when you are, ${getHonorific()}. Type a command here.`,
     'assistant',
     assistantMeta('ready')
   );

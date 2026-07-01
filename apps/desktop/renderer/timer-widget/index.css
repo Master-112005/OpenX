@@ -7,6 +7,8 @@
   --track: rgba(255, 255, 255, 0.16);
   --progress: #48d6a8;
   --timer: #70a7ff;
+  --motion-fast: 160ms;
+  --motion-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 * {
@@ -46,7 +48,8 @@ body {
   box-shadow: 0 14px 34px rgba(0, 0, 0, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.16);
   -webkit-app-region: drag;
   backdrop-filter: blur(10px) saturate(112%);
-  contain: layout paint;
+  contain: layout paint style;
+  transform: translateZ(0);
 }
 
 .close-btn,
@@ -146,7 +149,7 @@ body {
   cursor: pointer;
   font: inherit;
   padding: 0;
-  transition: background 160ms ease, border-color 160ms ease, box-shadow 160ms ease, transform 120ms ease;
+  transition: background var(--motion-fast) var(--motion-ease), border-color var(--motion-fast) var(--motion-ease), box-shadow var(--motion-fast) var(--motion-ease), transform 120ms var(--motion-ease);
   -webkit-app-region: no-drag;
 }
 

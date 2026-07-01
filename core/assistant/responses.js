@@ -1047,55 +1047,55 @@ const RESPONSE_BUILDERS = {
         `I have closed ${win} as requested.`
       ]);
     },
-    'help': () => 'I can assist you with opening and managing applications, searching the web, handling files and folders, controlling media playback, adjusting system settings, and much more. Please let me know what you would like me to handle.',
+    'help': () => 'I can help with apps, web searches, files and folders, media playback, reminders, alarms, system settings, phone features, and calendar planning. Tell me what you want done, and I will handle it.',
     'greeting': context => {
       const type = valueFromContext(context, 'greetingType', 'hello');
       const input = valueFromContext(context, 'input', type);
       const variantsByType = {
         morning: [
-          'Good morning, sir. How may I assist you today?',
-          'Good morning. I am ready to serve. What shall we begin with?',
-          'Morning, sir. What would you like me to help you with?'
+          'Good morning. What would you like to get done today?',
+          'Good morning. I am ready when you are.',
+          'Morning. What should we start with?'
         ],
         afternoon: [
-          'Good afternoon, sir. How may I be of service?',
-          'Good afternoon. I am at your disposal.',
-          'Afternoon, sir. What shall we work on?'
+          'Good afternoon. What would you like me to handle?',
+          'Good afternoon. I am ready to help.',
+          'Afternoon. What shall we work on?'
         ],
         evening: [
-          'Good evening, sir. How may I assist you?',
+          'Good evening. What would you like handled?',
           'Good evening. I am ready to help.',
-          'Evening, sir. What would you like handled?'
+          'Evening. What do you need?'
         ],
         wellbeing: [
-          'I am well, thank you, sir. How may I help you?',
-          'Doing fine, sir. What do you need assistance with?',
-          'I am here and ready to serve. What do you need?'
+          'I am doing well. What can I help with?',
+          'Doing fine. What do you need?',
+          'I am ready to help. What should I handle?'
         ],
         hi: [
-          'Hello, sir. How may I assist you?',
-          'Hi, sir. What do you need?',
-          'Hello. How may I be of service?'
+          'Hello. What can I do for you?',
+          'Hi. What do you need?',
+          'Hello. How can I help?'
         ],
         hey: [
-          'Hey, sir. How may I help?',
-          'Hey. What do you need assistance with?',
-          'I am here, sir. What shall I handle?'
+          'Hey. How can I help?',
+          'Hey. What do you need?',
+          'I am here. What shall I handle?'
         ],
         hello: [
-          'Hello, sir. How may I assist you?',
           'Hello. What would you like me to do?',
-          'I am here, sir. What do you need?'
+          'Hello. I am ready when you are.',
+          'I am here. What do you need?'
         ]
       };
       return chooseVariant(`greeting:${type}:${input}`, variantsByType[type] || variantsByType.hello);
     },
     'thanks': () => chooseVariant('thanks', [
-      'You are welcome, sir.',
-      'My pleasure, sir.',
-      'Always at your service.'
+      'You are welcome.',
+      'Happy to help.',
+      'Anytime.'
     ]),
-    default: () => 'That task has been completed, sir.'
+    default: () => 'Done.'
   },
 
   error: {
@@ -1105,23 +1105,23 @@ const RESPONSE_BUILDERS = {
       const userInput = input || '';
 
       if (userInput.includes('?')) {
-        return `I understand you need information about that. Let me help you with that request, sir.`;
+        return 'I can help with that. Please give me a little more detail so I can answer it properly.';
       }
 
       if (suggestions.length > 0) {
-        return `I will do my best to help with that, sir. Let me try: ${suggestions.join(', ')}.`;
+        return `I am not fully sure what you meant. The closest options I found are: ${suggestions.join(', ')}.`;
       }
 
-      return `I am here to assist you, sir. Let me try to handle that request for you.`;
+      return 'I did not understand that command clearly. Try saying it another way with the app, file, time, or action you want.';
     },
     executionFailed: context => humanizeError(context?.error),
-    permissionDenied: () => 'I will note that limitation, sir. I can still help you with other tasks.',
+    permissionDenied: () => 'I cannot do that with the current permission setting, but I can still help with other tasks.',
     missingEntities: context => {
       const names = valueFromContext(context, 'names', context?.entities?.names || 'details');
-      return `I will need one more detail to complete that for you, sir: ${names}. Could you please provide that?`;
+      return `I need one more detail before I can continue: ${names}.`;
     },
-    noCommand: () => 'I am ready to assist you, sir. What would you like me to do?',
-    notFound: () => 'I could not find what you asked for, sir. Let me know if you would like me to search for it or try a different approach.',
+    noCommand: () => 'I am ready. What would you like me to do?',
+    notFound: () => 'I could not find that. You can ask me to search again with a different name or location.',
     timeout: () => {
       const isTest = typeof global.it === 'function' || process.env.NODE_ENV === 'test';
       if (isTest) {
@@ -1137,22 +1137,22 @@ const RESPONSE_BUILDERS = {
   },
 
   confirmation: {
-    confirmDelete: context => `Before I proceed, I require your confirmation. This operation will permanently remove ${valueFromContext(context, 'count')} item${valueFromContext(context, 'count') === 1 ? '' : 's'}. Do you authorize this deletion, sir?`,
-    confirmShutdown: () => 'Your authorization is required to initiate a complete system shutdown. Please confirm.',
-    confirmRestart: () => 'Your authorization is required to reboot the system. Please confirm.',
+    confirmDelete: context => `Please confirm before I delete ${valueFromContext(context, 'count')} item${valueFromContext(context, 'count') === 1 ? '' : 's'}. This cannot be undone.`,
+    confirmShutdown: () => 'Please confirm before I shut down the computer.',
+    confirmRestart: () => 'Please confirm before I restart the computer.',
     confirmAction: context => {
       const details = valueFromContext(context, 'details', valueFromContext(context, 'action'));
       return `Before I proceed, please confirm: ${details}. Say yes to continue or no to cancel.`;
     },
-    awaitingDecision: () => 'I am awaiting your decision, sir. Please say proceed or cancel.',
-    cancelled: () => 'Understood, sir. The action has been cancelled.',
+    awaitingDecision: () => 'Please say proceed or cancel.',
+    cancelled: () => 'Understood. I cancelled it.',
     timedOut: () => 'The confirmation has timed out, so I have cancelled that request.',
-    default: () => 'I require your confirmation before I proceed with that operation, sir.'
+    default: () => 'Please confirm before I continue.'
   },
 
   info: {
-    listening: () => 'I am listening, sir.',
-    processing: () => 'Working on it, sir.',
+    listening: () => 'I am listening.',
+    processing: () => 'Working on it.',
     idle: () => 'Ready when you are, sir.',
     wakeWord: () => {
       const isTest = typeof global.it === 'function' || process.env.NODE_ENV === 'test';
@@ -1160,9 +1160,9 @@ const RESPONSE_BUILDERS = {
         return 'Yes, sir. I am at your service';
       }
       return chooseVariant('info.wakeWord', [
-        `Yes, sir. How may I assist you?`,
-        `I am here and listening, sir.`,
-        `At your service, sir. What do you need?`
+        'Yes. What do you need?',
+        'I am listening.',
+        'I am here. What should I handle?'
       ]);
     },
     default: () => ''

@@ -28,6 +28,9 @@
   --danger: #ff7d86;
   --radius: 28px;
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI Variable", "Segoe UI", sans-serif;
+  --motion-fast: 160ms;
+  --motion-normal: 240ms;
+  --motion-ease: cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
 * {
@@ -75,6 +78,22 @@ button {
   position: relative;
   text-shadow: var(--adaptive-text-shadow);
   width: 100vw;
+}
+
+.calendar-view,
+.timetable-view,
+.side-panel,
+.quick-add-button,
+.day-cell,
+.entry-card {
+  backface-visibility: hidden;
+  transform: translateZ(0);
+}
+
+.calendar-view,
+.timetable-view,
+.side-panel {
+  contain: layout paint style;
 }
 
 .titlebar {
@@ -261,7 +280,7 @@ button {
 }
 
 .side-panel.open {
-  animation: panel-pop 0.18s cubic-bezier(0.2, 0.8, 0.2, 1);
+  animation: panel-pop var(--motion-normal) var(--motion-ease);
 }
 
 .side-panel-head {
@@ -316,7 +335,7 @@ button {
 
 .planner-shell.date-selected .timetable-view,
 .planner-shell[data-view="timetable"] .timetable-view {
-  animation: timetable-reveal 0.28s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation: timetable-reveal 0.3s var(--motion-ease) both;
   display: flex;
   opacity: 1;
   pointer-events: auto;
@@ -797,7 +816,7 @@ html[data-glass-contrast="dark-text"] .panel-close-button:hover {
 @keyframes panel-pop {
   from {
     opacity: 0;
-    transform: translateY(-8px) scale(0.98);
+    transform: translate3d(0, -8px, 0) scale(0.98);
   }
 
   to {
@@ -809,7 +828,7 @@ html[data-glass-contrast="dark-text"] .panel-close-button:hover {
 @keyframes timetable-reveal {
   from {
     opacity: 0;
-    transform: translateX(14px) scale(0.99);
+    transform: translate3d(14px, 0, 0) scale(0.99);
   }
 
   to {

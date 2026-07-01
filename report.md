@@ -59,193 +59,289 @@ Input
 
 ### 3.1 Complete project directory tree
 
-The tree below includes every project file and source directory. It intentionally excludes dependency, generated-output, version-control, and editor/agent metadata directories: `node_modules/`, `dist/`, `graphify-out/`, `.git/`, `.codex/`, `.cursor/`, `.agents/`, `.code-review-graph/`, and `.playwright-mcp/`.
+The list below includes every project file currently present in the workspace, with local-only and generated noise excluded. Omitted paths include `node_modules/`, `dist/`, `graphify-out/`, `OpenX_Data/`, `openx_data/`, `.git/`, `.codex/`, `.cursor/`, `.agents/`, `.code-review-graph/`, `.playwright-mcp/`, `.vscode/`, `*.log`, and `*.tmp`.
 
 ```text
 OpenX/
-├── apps
-│   └── desktop
-│       ├── electron
-│       │   ├── crash-recovery.js
-│       │   ├── main.js
-│       │   └── security.js
-│       ├── renderer
-│       │   ├── alert
-│       │   │   ├── index.css
-│       │   │   ├── index.html
-│       │   │   └── index.js
-│       │   ├── chat
-│       │   │   ├── index.css
-│       │   │   ├── index.html
-│       │   │   └── index.js
-│       │   └── settings
-│       │       ├── index.css
-│       │       ├── index.html
-│       │       └── index.js
-│       ├── voice
-│       │   └── tts.js
-│       ├── permissions.js
-│       ├── preload.js
-│       └── settings.js
-├── build
-│   ├── icon.ico
-│   ├── icon.png
-│   ├── ICON_README.md
-│   └── installer.nsh
-├── core
-│   ├── assistant
-│   │   ├── active-learning
-│   │   │   ├── ActiveLearningManager.js
-│   │   │   ├── AliasStore.js
-│   │   │   ├── BaseStore.js
-│   │   │   ├── CorrectionStore.js
-│   │   │   ├── LearningGuard.js
-│   │   │   ├── LearningLanguage.js
-│   │   │   ├── PreferenceStore.js
-│   │   │   ├── UsageStatsStore.js
-│   │   │   └── WorkflowStore.js
-│   │   ├── nlp
-│   │   │   ├── nlp.js
-│   │   │   ├── preprocessor.js
-│   │   │   ├── scorer.js
-│   │   │   └── web-targets.js
-│   │   ├── Active-learning.js
-│   │   ├── contest.js
-│   │   ├── context.js
-│   │   ├── language.js
-│   │   ├── Data.js
-│   │   ├── entities.js
-│   │   ├── index.js
-│   │   ├── intents.js
-│   │   ├── nle.js
-│   │   ├── nlu.js
-│   │   ├── parser.js
-│   │   ├── personality.js
-│   │   ├── responses.js
-│   │   └── router.js
-│   ├── automation
-│   │   ├── common
-│   │   │   ├── action-confirm.js
-│   │   │   ├── action-velidation.js
-│   │   │   ├── action-verification.js
-│   │   │   ├── launcher.js
-│   │   │   ├── path-utils.js
-│   │   │   └── windows-session.js
-│   │   ├── apps.js
-│   │   ├── brightness.js
-│   │   ├── browser.js
-│   │   ├── communications.js
-│   │   ├── files.js
-│   │   ├── folders.js
-│   │   ├── index.js
-│   │   ├── media.js
-│   │   ├── scheduler.js
-│   │   ├── screenshot-recording.js
-│   │   ├── system.js
-│   │   ├── volume.js
-│   │   └── windows.js
-│   └── context-awareness
-│       ├── active-window.js
-│       ├── app-registry.js
-│       ├── context-engine.js
-│       ├── mode-engine.js
-│       ├── process-monitor.js
-│       └── signals.js
-├── docs
-│   ├── architecture
-│   │   └── overview.md
-│   ├── modules
-│   │   ├── assistant-communication.md
-│   │   ├── communications.md
-│   │   ├── core-engine.md
-│   │   ├── nlp-pipeline.md
-│   │   └── settings.md
-│   ├── plugins
-│   │   └── development.md
-│   ├── setup
-│   │   └── installation.md
-│   └── workflows
-│       └── command-execution.md
-├── plugins
-│   ├── chrome
-│   │   ├── index.js
-│   │   └── plugin.json
-│   ├── communications
-│   │   └── whatsapp-desktop.js
-│   ├── discord
-│   │   ├── index.js
-│   │   └── plugin.json
-│   ├── forms
-│   │   ├── index.js
-│   │   └── understanding.js
-│   ├── sample_plugin
-│   │   ├── index.js
-│   │   └── plugin.json
-│   ├── youtube
-│   │   ├── index.js
-│   │   └── plugin.json
-│   └── plugin-controller.js
-├── scripts
-│   └── start-electron.js
-├── tests
-│   ├── automation
-│   │   ├── apps.test.js
-│   │   ├── automation.test.js
-│   │   ├── browser.test.js
-│   │   ├── communications.test.js
-│   │   ├── file-management.test.js
-│   │   ├── media.test.js
-│   │   ├── volume-brightness.test.js
-│   │   └── windows-session.test.js
-│   ├── context-awareness
-│   │   ├── context-awareness.test.js
-│   │   └── mode-engine.test.js
-│   ├── core
-│   │   ├── active-learning-v2.test.js
-│   │   ├── app-language.test.js
-│   │   ├── architecture-structure.test.js
-│   │   ├── assistant.test.js
-│   │   ├── browser-language.test.js
-│   │   ├── command-corpus.test.js
-│   │   ├── crash-recovery.test.js
-│   │   ├── data-root.test.js
-│   │   ├── electron-security.test.js
-│   │   ├── entities.test.js
-│   │   ├── human-context.test.js
-│   │   ├── intents.test.js
-│   │   ├── learning.test.js
-│   │   ├── learning-repair.test.js
-│   │   ├── logger.test.js
-│   │   ├── media-youtube-corpus.test.js
-│   │   ├── nlp.test.js
-│   │   ├── nlu.test.js
-│   │   ├── parser.test.js
-│   │   ├── permissions.test.js
-│   │   ├── renderer-security.test.js
-│   │   ├── responses.test.js
-│   │   ├── router.test.js
-│   │   ├── scheduler-alert.test.js
-│   │   ├── security-critical.test.js
-│   │   └── settings.test.js
-│   ├── media-handling
-│   │   └── media-handling.test.js
-│   ├── plugins
-│   └── ui
-│       ├── chat-renderer.test.js
-│       └── schedule-alert-renderer.test.js
-├── .gitignore
-├── AGENTS.md
-├── commands.md
-├── config.js
-├── eslint.config.mjs
-├── package.json
-├── package-lock.json
-├── README.md
-├── report.md
-└── RULES.md
+  .gitignore
+  AGENTS.md
+  commands.md
+  config.js
+  eslint.config.mjs
+  package.json
+  package-lock.json
+  README.md
+  report.md
+  RULES.md
+  apps/desktop/electron/crash-recovery.js
+  apps/desktop/electron/main.js
+  apps/desktop/electron/security.js
+  apps/desktop/permissions.js
+  apps/desktop/phone-verification.js
+  apps/desktop/preload.js
+  apps/desktop/settings.js
+  apps/desktop/renderer/alert/index.css
+  apps/desktop/renderer/alert/index.html
+  apps/desktop/renderer/alert/index.js
+  apps/desktop/renderer/chat/index.css
+  apps/desktop/renderer/chat/index.html
+  apps/desktop/renderer/chat/index.js
+  apps/desktop/renderer/planner/index.css
+  apps/desktop/renderer/planner/index.html
+  apps/desktop/renderer/planner/index.js
+  apps/desktop/renderer/settings/index.css
+  apps/desktop/renderer/settings/index.html
+  apps/desktop/renderer/settings/index.js
+  apps/desktop/renderer/timer-widget/index.css
+  apps/desktop/renderer/timer-widget/index.html
+  apps/desktop/renderer/timer-widget/index.js
+  apps/desktop/renderer/voice-capture/index.html
+  apps/desktop/renderer/voice-capture/index.js
+  apps/desktop/voice/index.js
+  apps/desktop/voice/tts.js
+  apps/desktop/voice/audio/AudioBuffer.js
+  apps/desktop/voice/audio/AudioCapture.js
+  apps/desktop/voice/audio/AudioConfiguration.js
+  apps/desktop/voice/audio/AudioDeviceManager.js
+  apps/desktop/voice/audio/AudioErrors.js
+  apps/desktop/voice/audio/AudioEvents.js
+  apps/desktop/voice/audio/AudioFrame.js
+  apps/desktop/voice/audio/AudioPermissions.js
+  apps/desktop/voice/audio/index.js
+  apps/desktop/voice/config/VoiceSettings.js
+  apps/desktop/voice/diagnostics/DiagnosticsConfiguration.js
+  apps/desktop/voice/diagnostics/DiagnosticsErrors.js
+  apps/desktop/voice/diagnostics/DiagnosticsEvents.js
+  apps/desktop/voice/diagnostics/DiagnosticsManager.js
+  apps/desktop/voice/diagnostics/DiagnosticsReport.js
+  apps/desktop/voice/diagnostics/ErrorTracker.js
+  apps/desktop/voice/diagnostics/EventTimeline.js
+  apps/desktop/voice/diagnostics/HealthMonitor.js
+  apps/desktop/voice/diagnostics/index.js
+  apps/desktop/voice/diagnostics/LatencyMonitor.js
+  apps/desktop/voice/diagnostics/MetricsCollector.js
+  apps/desktop/voice/diagnostics/PerformanceMonitor.js
+  apps/desktop/voice/diagnostics/privacy.js
+  apps/desktop/voice/diagnostics/ResourceMonitor.js
+  apps/desktop/voice/diagnostics/SessionStatistics.js
+  apps/desktop/voice/diagnostics/VoiceLogger.js
+  apps/desktop/voice/diagnostics/VoiceMetrics.js
+  apps/desktop/voice/integration/AssistantDispatcher.js
+  apps/desktop/voice/integration/AssistantInputAdapter.js
+  apps/desktop/voice/integration/index.js
+  apps/desktop/voice/integration/VoiceAssistantBridge.js
+  apps/desktop/voice/integration/VoiceExecutionCoordinator.js
+  apps/desktop/voice/integration/VoiceIntegrationConfiguration.js
+  apps/desktop/voice/integration/VoiceIntegrationErrors.js
+  apps/desktop/voice/integration/VoiceIntegrationEvents.js
+  apps/desktop/voice/integration/VoiceResponseHandler.js
+  apps/desktop/voice/normalization/AcronymNormalizer.js
+  apps/desktop/voice/normalization/ApplicationNormalizer.js
+  apps/desktop/voice/normalization/CommandNormalizer.js
+  apps/desktop/voice/normalization/DictionaryNormalizer.js
+  apps/desktop/voice/normalization/index.js
+  apps/desktop/voice/normalization/NormalizationConfiguration.js
+  apps/desktop/voice/normalization/NormalizationErrors.js
+  apps/desktop/voice/normalization/NormalizationEvents.js
+  apps/desktop/voice/normalization/NormalizedTranscript.js
+  apps/desktop/voice/normalization/TechnologyNormalizer.js
+  apps/desktop/voice/normalization/TextCleaner.js
+  apps/desktop/voice/normalization/TextValidator.js
+  apps/desktop/voice/normalization/TranscriptNormalizer.js
+  apps/desktop/voice/normalization/TranscriptProcessor.js
+  apps/desktop/voice/preprocessing/AudioFrameProcessor.js
+  apps/desktop/voice/preprocessing/AudioPipeline.js
+  apps/desktop/voice/preprocessing/AudioProcessingErrors.js
+  apps/desktop/voice/preprocessing/AudioProcessingEvents.js
+  apps/desktop/voice/preprocessing/AudioProcessor.js
+  apps/desktop/voice/preprocessing/index.js
+  apps/desktop/voice/preprocessing/ProcessedAudioFrame.js
+  apps/desktop/voice/preprocessing/ProcessingConfiguration.js
+  apps/desktop/voice/preprocessing/RNNoiseProcessor.js
+  apps/desktop/voice/preprocessing/SpeechSourceClassifier.js
+  apps/desktop/voice/preprocessing/VoiceActivityDetector.js
+  apps/desktop/voice/session/SessionEvents.js
+  apps/desktop/voice/session/VoiceSession.js
+  apps/desktop/voice/session/VoiceSessionManager.js
+  apps/desktop/voice/session/VoiceStateMachine.js
+  apps/desktop/voice/stt/DecoderState.js
+  apps/desktop/voice/stt/index.js
+  apps/desktop/voice/stt/ModelLoader.js
+  apps/desktop/voice/stt/ModelManager.js
+  apps/desktop/voice/stt/ParakeetEngine.js
+  apps/desktop/voice/stt/SherpaRuntime.js
+  apps/desktop/voice/stt/STTConfiguration.js
+  apps/desktop/voice/stt/STTEngine.js
+  apps/desktop/voice/stt/STTErrors.js
+  apps/desktop/voice/stt/STTEvents.js
+  apps/desktop/voice/stt/TranscriptAssembler.js
+  apps/desktop/voice/stt/TranscriptResult.js
+  apps/desktop/voice/stt/TranscriptSegment.js
+  apps/desktop/voice/ui/index.js
+  apps/desktop/voice/ui/TranscriptPublisher.js
+  apps/desktop/voice/ui/VoiceAccessibility.js
+  apps/desktop/voice/ui/VoiceAnimationController.js
+  apps/desktop/voice/ui/VoiceConfiguration.js
+  apps/desktop/voice/ui/VoiceOverlay.js
+  apps/desktop/voice/ui/VoiceOverlayIPC.js
+  apps/desktop/voice/ui/VoiceStateRenderer.js
+  apps/desktop/voice/ui/VoiceStatusIndicator.js
+  apps/desktop/voice/ui/VoiceTheme.js
+  apps/desktop/voice/ui/VoiceUIErrors.js
+  apps/desktop/voice/ui/VoiceUIEvents.js
+  apps/desktop/voice/ui/VoiceWindowController.js
+  build/icon.ico
+  build/icon.png
+  build/ICON_README.md
+  build/installer.nsh
+  build/openx-chrome-host.exe
+  core/assistant/Active-learning.js
+  core/assistant/contest.js
+  core/assistant/context.js
+  core/assistant/Data.js
+  core/assistant/entities.js
+  core/assistant/index.js
+  core/assistant/intents.js
+  core/assistant/language.js
+  core/assistant/nle.js
+  core/assistant/nlu.js
+  core/assistant/parser.js
+  core/assistant/personality.js
+  core/assistant/responses.js
+  core/assistant/router.js
+  core/assistant/active-learning/ActiveLearningManager.js
+  core/assistant/active-learning/AliasStore.js
+  core/assistant/active-learning/BaseStore.js
+  core/assistant/active-learning/CorrectionStore.js
+  core/assistant/active-learning/LearningGuard.js
+  core/assistant/active-learning/LearningLanguage.js
+  core/assistant/active-learning/PreferenceStore.js
+  core/assistant/active-learning/UsageStatsStore.js
+  core/assistant/active-learning/WorkflowStore.js
+  core/assistant/nlp/nlp.js
+  core/assistant/nlp/preprocessor.js
+  core/assistant/nlp/scorer.js
+  core/assistant/nlp/web-targets.js
+  core/automation/apps.js
+  core/automation/brightness.js
+  core/automation/browser.js
+  core/automation/communications.js
+  core/automation/files.js
+  core/automation/folders.js
+  core/automation/index.js
+  core/automation/media.js
+  core/automation/planner.js
+  core/automation/scheduler.js
+  core/automation/screenshot-recording.js
+  core/automation/system.js
+  core/automation/volume.js
+  core/automation/windows.js
+  core/automation/common/action-confirm.js
+  core/automation/common/action-velidation.js
+  core/automation/common/action-verification.js
+  core/automation/common/launcher.js
+  core/automation/common/path-utils.js
+  core/automation/common/windows-session.js
+  core/context-awareness/active-window.js
+  core/context-awareness/app-registry.js
+  core/context-awareness/context-engine.js
+  core/context-awareness/mode-engine.js
+  core/context-awareness/process-monitor.js
+  core/context-awareness/signals.js
+  core/phone/DeviceRegistry.js
+  core/phone/FileTransferManager.js
+  core/phone/FileTransferProtocol.js
+  core/phone/IdentityVerificationService.js
+  core/phone/index.js
+  core/phone/PairingService.js
+  core/phone/PairingTokenManager.js
+  core/phone/PhoneCommandRouter.js
+  core/phone/PhoneConnectionManager.js
+  core/phone/PhoneServer.js
+  core/phone/QRPairingService.js
+  core/phone/SecurityManager.js
+  core/phone/SessionManager.js
+  core/phone/TransferHistory.js
+  core/phone/TransferIntegrity.js
+  docs/architecture/overview.md
+  docs/modules/assistant-communication.md
+  docs/modules/communications.md
+  docs/modules/core-engine.md
+  docs/modules/nlp-pipeline.md
+  docs/modules/settings.md
+  docs/plugins/development.md
+  docs/setup/installation.md
+  docs/workflows/command-execution.md
+  models/parakeet/decoder.int8.onnx
+  models/parakeet/encoder.int8.onnx
+  models/parakeet/joiner.int8.onnx
+  models/parakeet/tokens.txt
+  plugins/chrome/index.js
+  plugins/chrome/plugin.json
+  plugins/communications/whatsapp-desktop.js
+  plugins/discord/index.js
+  plugins/discord/plugin.json
+  plugins/forms/index.js
+  plugins/forms/understanding.js
+  plugins/plugin-controller.js
+  plugins/sample_plugin/index.js
+  plugins/sample_plugin/plugin.json
+  plugins/youtube/index.js
+  plugins/youtube/plugin.json
+  scripts/enable-phone-pairing-firewall.ps1
+  scripts/start-electron.js
+  tests/automation/apps.test.js
+  tests/automation/automation.test.js
+  tests/automation/browser.test.js
+  tests/automation/communications.test.js
+  tests/automation/file-management.test.js
+  tests/automation/media.test.js
+  tests/automation/volume-brightness.test.js
+  tests/automation/windows-session.test.js
+  tests/context-awareness/context-awareness.test.js
+  tests/context-awareness/mode-engine.test.js
+  tests/core/active-learning-v2.test.js
+  tests/core/app-language.test.js
+  tests/core/architecture-structure.test.js
+  tests/core/assistant.test.js
+  tests/core/browser-language.test.js
+  tests/core/command-corpus.test.js
+  tests/core/crash-recovery.test.js
+  tests/core/data-root.test.js
+  tests/core/electron-security.test.js
+  tests/core/electron-shortcut.test.js
+  tests/core/entities.test.js
+  tests/core/human-context.test.js
+  tests/core/intents.test.js
+  tests/core/learning.test.js
+  tests/core/learning-repair.test.js
+  tests/core/logger.test.js
+  tests/core/media-youtube-corpus.test.js
+  tests/core/nlp.test.js
+  tests/core/nlu.test.js
+  tests/core/parser.test.js
+  tests/core/permissions.test.js
+  tests/core/phone-device-permissions.test.js
+  tests/core/phone-file-transfer.test.js
+  tests/core/phone-identity-verification.test.js
+  tests/core/phone-pairing.test.js
+  tests/core/phone-qr-pairing.test.js
+  tests/core/phone-security.test.js
+  tests/core/phone.test.js
+  tests/core/planner.test.js
+  tests/core/renderer-security.test.js
+  tests/core/responses.test.js
+  tests/core/router.test.js
+  tests/core/scheduler-alert.test.js
+  tests/core/security-critical.test.js
+  tests/core/settings.test.js
+  tests/core/voice-subsystem.test.js
+  tests/media-handling/media-handling.test.js
+  tests/ui/chat-renderer.test.js
+  tests/ui/planner-renderer.test.js
+  tests/ui/schedule-alert-renderer.test.js
+  tests/ui/timer-widget-renderer.test.js
 ```
-
-Current source additions beyond the older generated tree include `apps/desktop/renderer/planner/`, `apps/desktop/renderer/timer-widget/`, `apps/desktop/renderer/voice-capture/`, the full `apps/desktop/voice/` subsystem, `apps/desktop/phone-verification.js`, `core/phone/`, `core/automation/planner.js`, and `core/assistant/language.js`.
 
 ### 3.2 Assistant layer
 
@@ -303,26 +399,26 @@ Domain implementations are flat files:
 
 ```text
 core/automation/
-├── apps.js
-├── brightness.js
-├── browser.js
-├── communications.js
-├── files.js
-├── folders.js
-├── index.js
-├── media.js
-├── scheduler.js
-├── screenshot-recording.js
-├── system.js
-├── volume.js
-├── windows.js
-└── common/
-    ├── action-confirm.js
-    ├── action-velidation.js
-    ├── action-verification.js
-    ├── launcher.js
-    ├── path-utils.js
-    └── windows-session.js
+â”œâ”€â”€ apps.js
+â”œâ”€â”€ brightness.js
+â”œâ”€â”€ browser.js
+â”œâ”€â”€ communications.js
+â”œâ”€â”€ files.js
+â”œâ”€â”€ folders.js
+â”œâ”€â”€ index.js
+â”œâ”€â”€ media.js
+â”œâ”€â”€ scheduler.js
+â”œâ”€â”€ screenshot-recording.js
+â”œâ”€â”€ system.js
+â”œâ”€â”€ volume.js
+â”œâ”€â”€ windows.js
+â””â”€â”€ common/
+    â”œâ”€â”€ action-confirm.js
+    â”œâ”€â”€ action-velidation.js
+    â”œâ”€â”€ action-verification.js
+    â”œâ”€â”€ launcher.js
+    â”œâ”€â”€ path-utils.js
+    â””â”€â”€ windows-session.js
 ```
 
 The filename `action-velidation.js` intentionally follows the requested project structure. Its class and behavior use the correct term `ActionValidation`.
@@ -333,7 +429,7 @@ The filename `action-velidation.js` intentionally follows the requested project 
 
 NLP normalizes case and spacing, applies explicit phrase repairs, corrects known token sequences, preserves domain vocabulary, and uses bounded fuzzy matching for likely spelling errors. It also identifies action/query structure and caches prepared inputs and intent patterns.
 
-The vocabulary explicitly preserves valid words that could otherwise be mistaken for commands. For example, “research” remains “research” rather than being repaired to “search.”
+The vocabulary explicitly preserves valid words that could otherwise be mistaken for commands. For example, â€œresearchâ€ remains â€œresearchâ€ rather than being repaired to â€œsearch.â€
 
 ### 4.2 NLU and parsing
 
@@ -343,7 +439,7 @@ NLU produces semantic frames containing action, domain, target, values, question
 
 The router prioritizes explicit and domain-specific resolvers before exact intent matching and general capability classification. This order protects precise commands from broad fallbacks.
 
-Multi-command planning occurs before generic capability fallback. This prevents a broad verb such as “open” or “close” from swallowing later clauses.
+Multi-command planning occurs before generic capability fallback. This prevents a broad verb such as â€œopenâ€ or â€œcloseâ€ from swallowing later clauses.
 
 ### 4.4 Validation and clarification
 
@@ -355,7 +451,7 @@ Multi-command planning occurs before generic capability fallback. This prevents 
 - `needsClarification: true`;
 - no automation execution.
 
-Standalone incomplete phrases such as “open” and “search for” remain rejected rather than inventing targets.
+Standalone incomplete phrases such as â€œopenâ€ and â€œsearch forâ€ remain rejected rather than inventing targets.
 
 ### 4.5 Permissions and confirmation
 
@@ -413,7 +509,7 @@ The corpus result should be interpreted as **100% classification coverage**, not
 
 `plugins/plugin-controller.js` validates manifests, trusted IDs, plugin paths, permissions, namespaces, and declared automation dependencies.
 
-Plugin actions and intents must use `plugin.<id>.*`. A plugin may call a core automation action only when it appears in the manifest’s `usesAutomation` list. This prevents a low-scope plugin from invoking arbitrary desktop operations.
+Plugin actions and intents must use `plugin.<id>.*`. A plugin may call a core automation action only when it appears in the manifestâ€™s `usesAutomation` list. This prevents a low-scope plugin from invoking arbitrary desktop operations.
 
 ### 6.2 Current packages
 
