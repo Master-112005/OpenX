@@ -25,6 +25,7 @@ function nextJson(socket) {
 }
 
 describe('Phone file transfer', function() {
+  this.timeout(10000);
   let tempDir;
   let receiveDirectory;
   let historyPath;

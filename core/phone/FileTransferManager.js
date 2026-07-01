@@ -6,6 +6,38 @@ const FileTransferProtocol = require('./FileTransferProtocol');
 const TransferHistory = require('./TransferHistory');
 const TransferIntegrity = require('./TransferIntegrity');
 
+const ZIP_MIN_DATE_MS = Date.UTC(1980, 0, 1);
+const ZIP_CRC32_TABLE = createCrc32Table();
+
+function createCrc32Table() {
+  const table = new Uint32Array(256);
+  for (let index = 0; index < table.length; index += 1) {
+    let value = index;
+    for (let bit = 0; bit < 8; bit += 1) {
+      value = (value & 1) ? (0xedb88320 ^ (value >>> 1)) : (value >>> 1);
+    }
+    table[index] = value >>> 0;
+  }
+  return table;
+}
+
+function crc32(buffer) {
+  let crc = 0xffffffff;
+  for (const byte of buffer) {
+    crc = ZIP_CRC32_TABLE[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  }
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function toDosDateTime(dateValue) {
+  const date = new Date(Math.max(new Date(dateValue || Date.now()).getTime(), ZIP_MIN_DATE_MS));
+  const year = Math.min(Math.max(date.getFullYear(), 1980), 2107);
+  return {
+    time: (date.getHours() << 11) | (date.getMinutes() << 5) | Math.floor(date.getSeconds() / 2),
+    date: ((year - 1980) << 9) | ((date.getMonth() + 1) << 5) | date.getDate()
+  };
+}
+
 class FileTransferManager {
   constructor(options = {}) {
     if (!options.deviceRegistry || typeof options.deviceRegistry.isTrusted !== 'function') {
@@ -307,24 +339,14 @@ class FileTransferManager {
     await fs.promises.mkdir(this.tempDirectory, { recursive: true });
     const baseName = this.protocol.validateFileName(path.basename(resolvedFolder));
     const zipPath = path.join(this.tempDirectory, `${baseName}-${crypto.randomUUID()}.zip`);
-    const { ZipArchive } = require('archiver');
 
-    await new Promise((resolve, reject) => {
-      const output = fs.createWriteStream(zipPath, { flags: 'wx', mode: 0o600 });
-      const archive = new ZipArchive({ zlib: { level: 9 } });
-      output.once('close', resolve);
-      output.once('error', reject);
-      archive.once('error', reject);
-      archive.on('warning', warning => {
-        if (warning.code !== 'ENOENT') reject(warning);
-      });
-      archive.pipe(output);
-      archive.directory(resolvedFolder, false);
-      archive.finalize().catch(reject);
-    }).catch(async error => {
+    try {
+      const zipBuffer = await this._createStoredZipBuffer(resolvedFolder);
+      await fs.promises.writeFile(zipPath, zipBuffer, { flag: 'wx', mode: 0o600 });
+    } catch (error) {
       await fs.promises.rm(zipPath, { force: true });
       throw error;
-    });
+    }
 
     const zipStats = await fs.promises.stat(zipPath);
     try {
@@ -334,6 +356,109 @@ class FileTransferManager {
       throw error;
     }
     return zipPath;
+  }
+
+  async _createStoredZipBuffer(folderPath) {
+    const entries = await this._collectZipEntries(folderPath);
+    const localParts = [];
+    const centralParts = [];
+    let offset = 0;
+
+    for (const entry of entries) {
+      const name = Buffer.from(entry.name, 'utf8');
+      const data = entry.data || Buffer.alloc(0);
+      const checksum = crc32(data);
+      const { time, date } = toDosDateTime(entry.modifiedAt);
+      const localHeader = Buffer.alloc(30);
+      localHeader.writeUInt32LE(0x04034b50, 0);
+      localHeader.writeUInt16LE(20, 4);
+      localHeader.writeUInt16LE(0, 6);
+      localHeader.writeUInt16LE(0, 8);
+      localHeader.writeUInt16LE(time, 10);
+      localHeader.writeUInt16LE(date, 12);
+      localHeader.writeUInt32LE(checksum, 14);
+      localHeader.writeUInt32LE(data.length, 18);
+      localHeader.writeUInt32LE(data.length, 22);
+      localHeader.writeUInt16LE(name.length, 26);
+      localHeader.writeUInt16LE(0, 28);
+      localParts.push(localHeader, name, data);
+
+      const centralHeader = Buffer.alloc(46);
+      centralHeader.writeUInt32LE(0x02014b50, 0);
+      centralHeader.writeUInt16LE(20, 4);
+      centralHeader.writeUInt16LE(20, 6);
+      centralHeader.writeUInt16LE(0, 8);
+      centralHeader.writeUInt16LE(0, 10);
+      centralHeader.writeUInt16LE(time, 12);
+      centralHeader.writeUInt16LE(date, 14);
+      centralHeader.writeUInt32LE(checksum, 16);
+      centralHeader.writeUInt32LE(data.length, 20);
+      centralHeader.writeUInt32LE(data.length, 24);
+      centralHeader.writeUInt16LE(name.length, 28);
+      centralHeader.writeUInt16LE(0, 30);
+      centralHeader.writeUInt16LE(0, 32);
+      centralHeader.writeUInt16LE(0, 34);
+      centralHeader.writeUInt16LE(0, 36);
+      centralHeader.writeUInt32LE(entry.directory ? 0x10 : 0, 38);
+      centralHeader.writeUInt32LE(offset, 42);
+      centralParts.push(centralHeader, name);
+      offset += localHeader.length + name.length + data.length;
+    }
+
+    const centralOffset = offset;
+    const centralSize = centralParts.reduce((total, part) => total + part.length, 0);
+    const end = Buffer.alloc(22);
+    end.writeUInt32LE(0x06054b50, 0);
+    end.writeUInt16LE(0, 4);
+    end.writeUInt16LE(0, 6);
+    end.writeUInt16LE(entries.length, 8);
+    end.writeUInt16LE(entries.length, 10);
+    end.writeUInt32LE(centralSize, 12);
+    end.writeUInt32LE(centralOffset, 16);
+    end.writeUInt16LE(0, 20);
+
+    return Buffer.concat([...localParts, ...centralParts, end]);
+  }
+
+  async _collectZipEntries(rootFolder, currentFolder = rootFolder, context = { estimatedSize: 22 }) {
+    const dirents = await fs.promises.readdir(currentFolder, { withFileTypes: true });
+    const sorted = dirents.sort((left, right) => left.name.localeCompare(right.name));
+    const entries = [];
+    if (currentFolder !== rootFolder && sorted.length === 0) {
+      const relative = path.relative(rootFolder, currentFolder).split(path.sep).join('/');
+      this._addEstimatedZipEntrySize(context, relative, 0);
+      entries.push({
+        name: `${relative}/`,
+        data: Buffer.alloc(0),
+        directory: true,
+        modifiedAt: Date.now()
+      });
+    }
+
+    for (const dirent of sorted) {
+      const absolutePath = path.join(currentFolder, dirent.name);
+      if (dirent.isDirectory()) {
+        entries.push(...await this._collectZipEntries(rootFolder, absolutePath, context));
+      } else if (dirent.isFile()) {
+        const stats = await fs.promises.stat(absolutePath);
+        const relative = path.relative(rootFolder, absolutePath).split(path.sep).join('/');
+        this._addEstimatedZipEntrySize(context, relative, stats.size);
+        const data = await fs.promises.readFile(absolutePath);
+        entries.push({
+          name: relative,
+          data,
+          directory: false,
+          modifiedAt: stats.mtime
+        });
+      }
+    }
+    return entries;
+  }
+
+  _addEstimatedZipEntrySize(context, entryName, size) {
+    const nameLength = Buffer.byteLength(String(entryName || ''), 'utf8');
+    context.estimatedSize += Number(size || 0) + 76 + (nameLength * 2);
+    this.protocol.validateFileSize(context.estimatedSize);
   }
 
   _assertTrusted(deviceId) {

@@ -314,6 +314,7 @@ class ActionRouter {
       ['_resolvePhoneTransferIntent', () => this._resolvePhoneTransferIntent(rawCommandText, preparedInput, source)],
       ['_resolveScreenshotIntent', () => this._resolveScreenshotIntent(rawCommandText, preparedInput)],
       ['_resolveFormFillIntent', () => this._resolveFormFillIntent(rawCommandText, preparedInput)],
+      ['_resolveEarlyCapabilityCommandIntent', () => this._resolveEarlyCapabilityCommandIntent(rawCommandText, preparedInput)],
       ['_resolveYouTubeMediaIntent', () => this._resolveYouTubeMediaIntent(rawCommandText, preparedInput)],
       ['_resolveBrowserFollowupIntent', () => this._resolveBrowserFollowupIntent(rawCommandText, preparedInput)],
       ['_resolveAppLanguageIntent', () => this._resolveAppLanguageIntent(rawCommandText, preparedInput)],
@@ -349,6 +350,24 @@ class ActionRouter {
       ['_resolveCapabilityCommandIntent', () => this._resolveCapabilityCommandIntent(rawCommandText, preparedInput)],
       ['_resolveSemanticFrameIntent', () => this._resolveSemanticFrameIntent(rawCommandText, preparedInput)]
     ], { rawCommandText });
+  }
+
+  _resolveEarlyCapabilityCommandIntent(rawCommandText, preparedInput = {}) {
+    const text = `${rawCommandText || ''} ${preparedInput?.correctedText || ''}`.toLowerCase();
+    if (/\b(?:file|files|folder|folders|directory|directories|document|documents|pdf|pdfs|docx?|xlsx?|pptx?|csv|json|zip|rar|image|images|photo|photos|picture|pictures|screenshot|screenshots|downloads?|desktop|resume|report|song|songs|track|tracks|playlist|playlists|music|video|videos|album|artist|favorites?|favourites?)\b|[^\s]+\.[a-z0-9]{1,10}\b/i.test(text)) {
+      return null;
+    }
+    const capability = this._classifyCapabilityCommand(
+      preparedInput?.correctedText,
+      rawCommandText
+    );
+    if (!capability) {
+      return null;
+    }
+    if (!['workflow-step', 'document-tools', 'local-command', 'desktop-automation'].includes(capability.capability)) {
+      return null;
+    }
+    return this._resolveCapabilityCommandIntent(rawCommandText, preparedInput, { allowGeneric: true });
   }
 
   _runResolverChain(resolvers = [], context = {}) {
@@ -1799,6 +1818,55 @@ class ActionRouter {
 
   async _execute(commandId, intentResult, entities, rawCommandText = '', source = 'chat', languageUnderstanding = null, executionOptions = {}) {
     try {
+      if (intentResult.intent.id === 'assistant.capability') {
+        let capabilityData = { action: 'capability.recognized', ...entities };
+        if (this.automationEngine && typeof this.automationEngine.execute === 'function') {
+          try {
+            const markerResult = await Promise.resolve(this.automationEngine.execute(intentResult.intent.action, entities, {
+              commandId,
+              intent: intentResult.intent.id,
+              input: rawCommandText,
+              source,
+              languageUnderstanding,
+              capabilityMarkerOnly: true
+            }));
+            if (markerResult?.data) capabilityData = markerResult.data;
+          } catch (error) {
+            this.logger.warn('Capability marker execution failed', { error: error.message, input: rawCommandText });
+          }
+        }
+        this._recordRoutingEvidence({
+          input: rawCommandText,
+          source,
+          intent: intentResult.intent.id,
+          success: true,
+          languageUnderstanding,
+          routeSource: entities?.routeSource || null,
+          validationStatus: 'recognized'
+        });
+        return {
+          commandId,
+          success: true,
+          needsClarification: false,
+          intent: intentResult.intent.id,
+          confidence: intentResult.confidence,
+          entities,
+          response: this._buildResponse('success', intentResult.intent.id, {
+            entities,
+            result: { success: true, data: capabilityData },
+            intent: intentResult.intent,
+            input: rawCommandText,
+            source
+          }),
+          error: null,
+          languageUnderstanding,
+          validation: null,
+          verification: null,
+          confirmation: { required: false, message: '' },
+          data: capabilityData
+        };
+      }
+
       const result = await this.nle.execute(intentResult.intent.action, entities, {
         commandId,
         intent: intentResult.intent.id,

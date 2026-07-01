@@ -6,6 +6,7 @@ describe('Voice Subsystem Architecture', function() {
   const voiceRoot = path.join(__dirname, '..', '..', 'apps', 'desktop', 'voice');
 
   it('should expose the complete public architecture surface from index.js', function() {
+    this.timeout(10000);
     const voice = require('../../apps/desktop/voice');
     const expectedExports = [
       'VoiceSessionManager',

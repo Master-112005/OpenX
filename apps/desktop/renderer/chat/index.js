@@ -284,15 +284,17 @@ function addMessage(text, type, meta, options = {}) {
 }
 
 function pruneRenderedMessages() {
-  while (renderedMessageCount > MAX_RENDERED_MESSAGES) {
-    const firstMessage = messagesEl.querySelector('.message');
-    if (!firstMessage) {
-      renderedMessageCount = 0;
-      return;
-    }
-    firstMessage.remove();
-    renderedMessageCount -= 1;
+  if (renderedMessageCount <= MAX_RENDERED_MESSAGES) return;
+  const renderedMessages = messagesEl.querySelectorAll('.message');
+  const overflow = renderedMessages.length - MAX_RENDERED_MESSAGES;
+  if (overflow <= 0) {
+    renderedMessageCount = renderedMessages.length;
+    return;
   }
+  for (let index = 0; index < overflow; index += 1) {
+    renderedMessages[index].remove();
+  }
+  renderedMessageCount = MAX_RENDERED_MESSAGES;
 }
 
 function scheduleMessagesScroll() {
