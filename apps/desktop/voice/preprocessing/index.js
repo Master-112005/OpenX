@@ -13,6 +13,7 @@ const AudioPipeline = require('./AudioPipeline');
 const AudioFrameProcessor = require('./AudioFrameProcessor');
 const RNNoiseProcessor = require('./RNNoiseProcessor');
 const VoiceActivityDetector = require('./VoiceActivityDetector');
+const SpeechSourceClassifier = require('./SpeechSourceClassifier');
 const ProcessedAudioFrame = require('./ProcessedAudioFrame');
 const ProcessingConfiguration = require('./ProcessingConfiguration');
 const AUDIO_PROCESSING_EVENTS = require('./AudioProcessingEvents');
@@ -24,6 +25,7 @@ module.exports = {
   AudioFrameProcessor,
   RNNoiseProcessor,
   VoiceActivityDetector,
+  SpeechSourceClassifier,
   ProcessedAudioFrame,
   ProcessingConfiguration,
   AUDIO_PROCESSING_EVENTS,

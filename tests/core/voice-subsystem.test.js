@@ -32,6 +32,7 @@ describe('Voice Subsystem Architecture', function() {
       'AudioPipeline',
       'AudioFrameProcessor',
       'VoiceActivityDetector',
+      'SpeechSourceClassifier',
       'RNNoiseProcessor',
       'ProcessedAudioFrame',
       'ProcessingConfiguration',
@@ -108,6 +109,7 @@ describe('Voice Subsystem Architecture', function() {
       'audio/index.js',
       'preprocessing/AudioPipeline.js',
       'preprocessing/VoiceActivityDetector.js',
+      'preprocessing/SpeechSourceClassifier.js',
       'preprocessing/RNNoiseProcessor.js',
       'preprocessing/AudioProcessor.js',
       'preprocessing/AudioFrameProcessor.js',
@@ -538,7 +540,24 @@ describe('Voice Subsystem Architecture', function() {
       })
     });
     const manager = new VoiceSessionManager({
-      resources: { audioCapture },
+      resources: {
+        audioCapture,
+        speechSourceClassifier: {
+          classify: frame => ({
+            accepted: true,
+            reason: 'test-validated-speech',
+            classification: 'human-speech',
+            confidence: Number(frame.speechConfidence) || 0.8,
+            metrics: {},
+            segment: {},
+            frameIndex: frame?.originalFrame?.frameIndex ?? null,
+            speechActivityState: frame?.speechActivityState || 'UNKNOWN',
+            endpointCandidate: Boolean(frame?.endpointCandidate),
+            at: new Date().toISOString()
+          }),
+          reset: () => ({ reset: true })
+        }
+      },
       setTimeout: () => ({ unref() {} }),
       clearTimeout: () => {}
     });
@@ -770,6 +789,172 @@ describe('Voice Subsystem Architecture', function() {
     assert.equal(session.context.audio.framesReceived, 1);
     assert.equal(session.context.audio.latestFrame.speechActivityState, 'SPEECH');
     assert.equal(manager.getAudioProcessingStatus().initialized, true);
+  });
+
+  it('should classify human speech before it reaches STT', function() {
+    const {
+      SpeechSourceClassifier,
+      AudioFrame,
+      ProcessedAudioFrame
+    } = require('../../apps/desktop/voice');
+    const classifier = new SpeechSourceClassifier();
+    const speech = Buffer.alloc(640);
+    for (let index = 0; index + 1 < speech.length; index += 2) {
+      speech.writeInt16LE(index % 4 === 0 ? 7000 : -5000, index);
+    }
+    const speechFrame = new ProcessedAudioFrame({
+      originalFrame: new AudioFrame({ frameIndex: 1, pcm: speech, durationMs: 20 }),
+      cleanedPcm: speech,
+      speechActivityState: 'SPEECH',
+      speechConfidence: 0.72
+    });
+    const silenceFrame = new ProcessedAudioFrame({
+      originalFrame: new AudioFrame({ frameIndex: 2, pcm: Buffer.alloc(640), durationMs: 20 }),
+      cleanedPcm: Buffer.alloc(640),
+      speechActivityState: 'SILENCE',
+      speechConfidence: 0
+    });
+    const endpointFrame = new ProcessedAudioFrame({
+      originalFrame: new AudioFrame({ frameIndex: 3, pcm: Buffer.alloc(640), durationMs: 20 }),
+      cleanedPcm: Buffer.alloc(640),
+      speechActivityState: 'ENDPOINT',
+      speechConfidence: 0,
+      endpointCandidate: true
+    });
+
+    const speechDecision = classifier.classify(speechFrame);
+    const endpointDecision = classifier.classify(endpointFrame);
+    const silenceDecision = classifier.classify(silenceFrame);
+
+    assert.equal(speechDecision.accepted, true);
+    assert.equal(speechDecision.classification, 'human-speech');
+    assert.equal(endpointDecision.accepted, true);
+    assert.equal(endpointDecision.reason, 'validated-speech-endpoint');
+    assert.equal(silenceDecision.accepted, false);
+    assert.equal(silenceDecision.classification, 'non-speech');
+    assert.equal(classifier.getMetrics().acceptedSpeech, 2);
+    assert.equal(classifier.getMetrics().rejectedNonSpeech, 1);
+  });
+
+  it('should keep validated speech segments continuous through quiet tail frames', function() {
+    const {
+      SpeechSourceClassifier,
+      AudioFrame,
+      ProcessedAudioFrame
+    } = require('../../apps/desktop/voice');
+    const classifier = new SpeechSourceClassifier();
+    const speech = Buffer.alloc(640);
+    for (let index = 0; index + 1 < speech.length; index += 2) {
+      speech.writeInt16LE(5000, index);
+    }
+    const accepted = classifier.classify(new ProcessedAudioFrame({
+      originalFrame: new AudioFrame({ frameIndex: 1, pcm: speech, durationMs: 20 }),
+      cleanedPcm: speech,
+      speechActivityState: 'SPEECH',
+      speechConfidence: 0.4
+    }));
+    const tail = classifier.classify(new ProcessedAudioFrame({
+      originalFrame: new AudioFrame({ frameIndex: 2, pcm: Buffer.alloc(640), durationMs: 20 }),
+      cleanedPcm: Buffer.alloc(640),
+      speechActivityState: 'SILENCE',
+      speechConfidence: 0.01,
+      processingMetadata: { silenceDurationMs: 80 }
+    }));
+
+    assert.equal(accepted.accepted, true);
+    assert.equal(tail.accepted, true);
+    assert.equal(tail.reason, 'validated-speech-tail');
+  });
+
+  it('should release speech pre-roll frames after the segment is validated', function() {
+    const {
+      VoiceSessionManager,
+      AudioFrame,
+      ProcessedAudioFrame
+    } = require('../../apps/desktop/voice');
+    const delivered = [];
+    const sttEngine = {
+      on() {},
+      start: () => ({ started: true, state: 'DECODING' }),
+      isRunning: () => true,
+      partial: frame => {
+        delivered.push(frame.originalFrame.frameIndex);
+        return { transcript: '', partial: true };
+      },
+      cancel: () => ({ cancelled: true }),
+      getStatus: () => ({ running: true })
+    };
+    const manager = new VoiceSessionManager({
+      resources: { sttEngine },
+      setTimeout: () => ({ unref() {} }),
+      clearTimeout: () => {}
+    });
+    const candidate = new ProcessedAudioFrame({
+      originalFrame: new AudioFrame({ frameIndex: 1, pcm: [1, 0, 2, 0], durationMs: 20 }),
+      cleanedPcm: [1, 0, 2, 0],
+      speechActivityState: 'POSSIBLE_SPEECH',
+      speechConfidence: 0.09
+    });
+    const accepted = new ProcessedAudioFrame({
+      originalFrame: new AudioFrame({ frameIndex: 2, pcm: [20, 0, 21, 0], durationMs: 20 }),
+      cleanedPcm: [20, 0, 21, 0],
+      speechActivityState: 'SPEECH',
+      speechConfidence: 0.45
+    });
+
+    manager.startSession({ id: 'speech-preroll-session' });
+    manager.startSpeechToText();
+    manager._deliverAudioFrameToSession(candidate);
+    manager._deliverAudioFrameToSession(accepted);
+
+    assert.deepEqual(delivered, [1, 2]);
+    assert.equal(manager.getMetrics().runtimePipeline.speechPrerollFramesBuffered, 1);
+    assert.equal(manager.getMetrics().runtimePipeline.speechPrerollFramesFlushed, 1);
+  });
+
+  it('should prevent rejected audio from being delivered to STT', function() {
+    const {
+      VoiceSessionManager,
+      AudioFrame,
+      ProcessedAudioFrame,
+      SESSION_EVENTS
+    } = require('../../apps/desktop/voice');
+    let partialCalls = 0;
+    const speechDecisions = [];
+    const sttEngine = {
+      on() {},
+      start: () => ({ started: true, state: 'DECODING' }),
+      isRunning: () => true,
+      partial: () => {
+        partialCalls += 1;
+        return { transcript: 'should not happen', partial: true };
+      },
+      cancel: () => ({ cancelled: true }),
+      getStatus: () => ({ running: true })
+    };
+    const manager = new VoiceSessionManager({
+      resources: { sttEngine },
+      setTimeout: () => ({ unref() {} }),
+      clearTimeout: () => {}
+    });
+    const noiseFrame = new ProcessedAudioFrame({
+      originalFrame: new AudioFrame({ frameIndex: 9, pcm: Buffer.alloc(640), durationMs: 20 }),
+      cleanedPcm: Buffer.alloc(640),
+      speechActivityState: 'SILENCE',
+      speechConfidence: 0
+    });
+
+    manager.on(SESSION_EVENTS.VOICE_SPEECH_DECISION, event => speechDecisions.push(event.speechDecision));
+    manager.startSession({ id: 'speech-filter-session' });
+    manager.startSpeechToText();
+    manager._deliverAudioFrameToSession(noiseFrame);
+
+    assert.equal(partialCalls, 0);
+    assert.equal(manager.getMetrics().runtimePipeline.sttFrames, 0);
+    assert.equal(manager.getMetrics().runtimePipeline.rejectedSpeechCandidates, 1);
+    assert.equal(manager.getMetrics().runtimePipeline.rejectedNonSpeech, 1);
+    assert.equal(speechDecisions.length, 1);
+    assert.equal(speechDecisions[0].accepted, false);
   });
 
   it('should load STT configuration and validate decoder state transitions', function() {

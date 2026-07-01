@@ -8,7 +8,7 @@ const VoiceSettings = require('../config/VoiceSettings');
 const VoiceLogger = require('../diagnostics/VoiceLogger');
 const VoiceMetrics = require('../diagnostics/VoiceMetrics');
 const { AudioCapture, AUDIO_EVENTS } = require('../audio');
-const { AudioProcessor, AUDIO_PROCESSING_EVENTS } = require('../preprocessing');
+const { AudioProcessor, SpeechSourceClassifier, AUDIO_PROCESSING_EVENTS } = require('../preprocessing');
 const { STTEngine, STT_EVENTS } = require('../stt');
 const { TranscriptProcessor, NORMALIZATION_EVENTS } = require('../normalization');
 
@@ -22,12 +22,13 @@ const { TranscriptProcessor, NORMALIZATION_EVENTS } = require('../normalization'
 class VoiceSessionManager {
   /**
    * Create the Voice session manager.
-   * @param {{SessionClass?: typeof VoiceSession, AudioCaptureClass?: typeof AudioCapture, AudioProcessorClass?: typeof AudioProcessor, STTEngineClass?: typeof STTEngine, TranscriptProcessorClass?: typeof TranscriptProcessor, stateMachine?: VoiceStateMachine, logger?: VoiceLogger, metrics?: VoiceMetrics, clock?: () => Date, setTimeout?: Function, clearTimeout?: Function, timeouts?: object, resources?: object}} dependencies Replaceable dependencies.
+   * @param {{SessionClass?: typeof VoiceSession, AudioCaptureClass?: typeof AudioCapture, AudioProcessorClass?: typeof AudioProcessor, SpeechSourceClassifierClass?: typeof SpeechSourceClassifier, STTEngineClass?: typeof STTEngine, TranscriptProcessorClass?: typeof TranscriptProcessor, stateMachine?: VoiceStateMachine, logger?: VoiceLogger, metrics?: VoiceMetrics, clock?: () => Date, setTimeout?: Function, clearTimeout?: Function, timeouts?: object, resources?: object}} dependencies Replaceable dependencies.
    */
   constructor(dependencies = {}) {
     this.SessionClass = dependencies.SessionClass || VoiceSession;
     this.AudioCaptureClass = dependencies.AudioCaptureClass || AudioCapture;
     this.AudioProcessorClass = dependencies.AudioProcessorClass || AudioProcessor;
+    this.SpeechSourceClassifierClass = dependencies.SpeechSourceClassifierClass || SpeechSourceClassifier;
     this.STTEngineClass = dependencies.STTEngineClass || STTEngine;
     this.TranscriptProcessorClass = dependencies.TranscriptProcessorClass || TranscriptProcessor;
     this.stateMachine = dependencies.stateMachine || new VoiceStateMachine();
@@ -43,6 +44,7 @@ class VoiceSessionManager {
     this.resources = {
       audioCapture: dependencies.resources?.audioCapture || null,
       audioProcessor: dependencies.resources?.audioProcessor || null,
+      speechSourceClassifier: dependencies.resources?.speechSourceClassifier || null,
       sttEngine: dependencies.resources?.sttEngine || null,
       transcriptProcessor: dependencies.resources?.transcriptProcessor || null,
       ui: null,
@@ -57,6 +59,8 @@ class VoiceSessionManager {
     this.sessionHistory = [];
     this.recognitionCycleSequence = 0;
     this.recognitionCycle = this._createRecognitionCycle('manager-created');
+    this.speechPrerollFrames = [];
+    this.speechPrerollFrameLimit = 35;
     this.runtimePipelineStats = {
       audioFrames: 0,
       processedFrames: 0,
@@ -70,6 +74,17 @@ class VoiceSessionManager {
       emptyFinals: 0,
       endpointDetections: 0,
       finalizationRequests: 0,
+      speechCandidates: 0,
+      acceptedSpeechCandidates: 0,
+      rejectedSpeechCandidates: 0,
+      rejectedNonSpeech: 0,
+      rejectedBackgroundAudio: 0,
+      rejectedTransientNoise: 0,
+      rejectedElectronicAudio: 0,
+      rejectedLowConfidenceSpeech: 0,
+      rejectedUnstableSpeech: 0,
+      speechPrerollFramesBuffered: 0,
+      speechPrerollFramesFlushed: 0,
       audioFramesWhileBusy: 0,
       staleAudioFrames: 0,
       recognitionConsumerPauses: 0,
@@ -293,7 +308,10 @@ class VoiceSessionManager {
    * @returns {{reset: boolean}}
    */
   resetAudioProcessing() {
-    return this._getAudioProcessor().reset();
+    const result = this._getAudioProcessor().reset();
+    this._resetSpeechSourceClassifier();
+    this.speechPrerollFrames = [];
+    return result;
   }
 
   /**
@@ -335,6 +353,16 @@ class VoiceSessionManager {
    */
   recognizeProcessedFrame(processedFrame) {
     this._assertSession();
+    const speechDecision = this._classifySpeechSourceForSession(processedFrame);
+    if (!speechDecision.accepted) {
+      this._logRuntimePipeline('Manual processed frame rejected before STT', {
+        recognitionCycleId: this.recognitionCycle.id,
+        frameIndex: processedFrame?.originalFrame?.frameIndex,
+        reason: speechDecision.reason,
+        classification: speechDecision.classification
+      }, true);
+      return { skipped: true, reason: speechDecision.reason, speechDecision };
+    }
     return this._getSTTEngine().partial(processedFrame);
   }
 
@@ -639,6 +667,8 @@ class VoiceSessionManager {
     }
     this.currentSession = null;
     this.recognitionCycle = this._createRecognitionCycle('manager-reset');
+    this._resetSpeechSourceClassifier();
+    this.speechPrerollFrames = [];
     this.currentState = this.stateMachine.getInitialState();
     this._log('Reset', { state: this.currentState });
     return { success: true, state: this.currentState };
@@ -837,6 +867,8 @@ class VoiceSessionManager {
           resource.close();
         } else if (key === 'audioProcessor' && typeof resource.reset === 'function') {
           resource.reset();
+        } else if (key === 'speechSourceClassifier' && typeof resource.reset === 'function') {
+          resource.reset();
         } else if (key === 'sttEngine' && typeof resource.cancel === 'function') {
           resource.cancel();
         } else if (key === 'transcriptProcessor' && typeof resource.reset === 'function') {
@@ -906,6 +938,34 @@ class VoiceSessionManager {
   _attachAudioProcessor(audioProcessor) {
     if (!audioProcessor || typeof audioProcessor.on !== 'function') return;
     audioProcessor.on(AUDIO_PROCESSING_EVENTS.FRAME_PROCESSED, this._processedFrameListener);
+  }
+
+  /**
+   * Return or create the manager-owned speech source classifier.
+   * @returns {SpeechSourceClassifier}
+   * @private
+   */
+  _getSpeechSourceClassifier() {
+    if (!this.resources.speechSourceClassifier) {
+      this.resources.speechSourceClassifier = new this.SpeechSourceClassifierClass({
+        logger: this.logger,
+        metrics: this.metricsRecorder,
+        clock: this.clock
+      });
+    }
+    return this.resources.speechSourceClassifier;
+  }
+
+  /**
+   * Reset the manager-owned speech source classifier if available.
+   * @returns {boolean}
+   * @private
+   */
+  _resetSpeechSourceClassifier() {
+    const classifier = this._getSpeechSourceClassifier();
+    if (!classifier || typeof classifier.reset !== 'function') return false;
+    classifier.reset();
+    return true;
   }
 
   /**
@@ -1024,35 +1084,27 @@ class VoiceSessionManager {
     }
     this.runtimePipelineStats.processedFrames += 1;
     this._recordRecognitionFrame(frame);
+    const speechDecision = this._classifySpeechSourceForSession(frame);
+    if (!speechDecision.accepted) {
+      this._trackSpeechPrerollFrame(frame, speechDecision);
+      this._logRuntimePipeline('Processed audio rejected before STT', {
+        recognitionCycleId: this.recognitionCycle.id,
+        frameIndex: frame?.originalFrame?.frameIndex,
+        reason: speechDecision.reason,
+        classification: speechDecision.classification,
+        confidence: speechDecision.confidence
+      });
+      return;
+    }
+    const framesForRecognition = this._consumeSpeechPrerollFrames(frame);
     this._logRuntimePipeline('Processed audio frame ready for STT', {
       processedFrames: this.runtimePipelineStats.processedFrames,
+      speechDecision,
+      prerollFrames: framesForRecognition.length - 1,
       frame: typeof frame?.toMetadata === 'function' ? frame.toMetadata() : undefined
     });
-    if (this.currentSession && typeof this.currentSession.receiveAudioFrame === 'function') {
-      this.currentSession.receiveAudioFrame(frame);
-    }
-    if (this.resources.sttEngine && typeof this.resources.sttEngine.isRunning === 'function' && this.resources.sttEngine.isRunning()) {
-      try {
-        this.runtimePipelineStats.sttFrames += 1;
-        this.resources.sttEngine.partial(frame);
-        this._logRuntimePipeline('Processed audio frame delivered to STT', {
-          sttFrames: this.runtimePipelineStats.sttFrames,
-          frameIndex: frame?.originalFrame?.frameIndex
-        });
-        if (frame?.endpointCandidate && typeof this.resources.sttEngine.final === 'function') {
-          if (!this._markRecognitionFinalizing('vad-endpoint', frame)) return;
-          this._logRuntimePipeline('VAD endpoint detected; finalizing STT stream', {
-            recognitionCycleId: this.recognitionCycle.id,
-            frameIndex: frame?.originalFrame?.frameIndex,
-            speechActivityState: frame?.speechActivityState
-          }, true);
-          this.resources.sttEngine.final();
-        }
-      } catch (error) {
-        this._publish(SESSION_EVENTS.VOICE_ERROR, this._buildEventPayload(null, {
-          error: this._normalizeError(error)
-        }));
-      }
+    for (const recognitionFrame of framesForRecognition) {
+      if (!this._deliverAcceptedFrameToRecognition(recognitionFrame)) return;
     }
   }
 
@@ -1203,6 +1255,8 @@ class VoiceSessionManager {
     this.recognitionCycle.startedAt = this.clock().toISOString();
     this.recognitionCycle.startedAtMs = Date.parse(this.recognitionCycle.startedAt);
     this.runtimePipelineStats.lastPartialTranscript = '';
+    this._resetSpeechSourceClassifier();
+    this.speechPrerollFrames = [];
     this._publishRecognitionCycle('started', { reason });
     this._log('Recognition Cycle Started', {
       recognitionCycleId: this.recognitionCycle.id,
@@ -1276,6 +1330,158 @@ class VoiceSessionManager {
       confidence: this.recognitionCycle.confidence
     });
     return this.recognitionCycle;
+  }
+
+  /**
+   * Validate one processed frame as a speech source before STT delivery.
+   * @param {object} frame Processed audio frame.
+   * @returns {object}
+   * @private
+   */
+  _classifySpeechSourceForSession(frame) {
+    let decision;
+    try {
+      decision = this._getSpeechSourceClassifier().classify(frame);
+    } catch (error) {
+      decision = {
+        accepted: false,
+        reason: 'speech-source-classifier-error',
+        classification: 'classifier-error',
+        confidence: 0,
+        error: this._normalizeError(error),
+        frameIndex: Number.isInteger(frame?.originalFrame?.frameIndex) ? frame.originalFrame.frameIndex : null,
+        speechActivityState: String(frame?.speechActivityState || 'UNKNOWN'),
+        endpointCandidate: Boolean(frame?.endpointCandidate),
+        at: this.clock().toISOString()
+      };
+      this._publish(SESSION_EVENTS.VOICE_ERROR, this._buildEventPayload(null, {
+        error: decision.error
+      }));
+    }
+    this._recordSpeechSourceDecision(decision);
+    return decision;
+  }
+
+  /**
+   * Record and publish one pre-STT speech-source decision.
+   * @param {object} decision Classifier decision.
+   * @returns {void}
+   * @private
+   */
+  _recordSpeechSourceDecision(decision = {}) {
+    this.runtimePipelineStats.speechCandidates += 1;
+    if (decision.accepted) {
+      this.runtimePipelineStats.acceptedSpeechCandidates += 1;
+    } else {
+      this.runtimePipelineStats.rejectedSpeechCandidates += 1;
+      const classification = String(decision.classification || '');
+      if (classification === 'non-speech') this.runtimePipelineStats.rejectedNonSpeech += 1;
+      if (classification === 'background-audio') this.runtimePipelineStats.rejectedBackgroundAudio += 1;
+      if (classification === 'transient-noise') this.runtimePipelineStats.rejectedTransientNoise += 1;
+      if (classification === 'electronic-audio') this.runtimePipelineStats.rejectedElectronicAudio += 1;
+      if (classification === 'low-confidence') this.runtimePipelineStats.rejectedLowConfidenceSpeech += 1;
+      if (classification === 'unstable-candidate') this.runtimePipelineStats.rejectedUnstableSpeech += 1;
+    }
+    this._publish(SESSION_EVENTS.VOICE_SPEECH_DECISION, this._buildEventPayload(this.currentSession, {
+      speechDecision: {
+        ...decision,
+        metrics: decision.metrics ? { ...decision.metrics } : undefined,
+        segment: decision.segment ? { ...decision.segment } : undefined
+      },
+      recognitionCycle: { ...this.recognitionCycle }
+    }));
+  }
+
+  /**
+   * Buffer early speech-like frames until the speech segment is validated.
+   * @param {object} frame Processed audio frame.
+   * @param {object} decision Speech source decision.
+   * @returns {void}
+   * @private
+   */
+  _trackSpeechPrerollFrame(frame, decision = {}) {
+    if (!this._isSpeechPrerollCandidate(frame, decision)) {
+      const state = String(frame?.speechActivityState || '').toUpperCase();
+      if (state.includes('SILENCE') || state === 'UNKNOWN') this.speechPrerollFrames = [];
+      return;
+    }
+    this.speechPrerollFrames.push(frame);
+    if (this.speechPrerollFrames.length > this.speechPrerollFrameLimit) {
+      this.speechPrerollFrames.splice(0, this.speechPrerollFrames.length - this.speechPrerollFrameLimit);
+    }
+    this.runtimePipelineStats.speechPrerollFramesBuffered += 1;
+  }
+
+  /**
+   * Return buffered lead-in frames plus the current accepted frame.
+   * @param {object} currentFrame Current accepted processed frame.
+   * @returns {object[]}
+   * @private
+   */
+  _consumeSpeechPrerollFrames(currentFrame) {
+    const frames = this.speechPrerollFrames.filter(frame => frame !== currentFrame);
+    this.speechPrerollFrames = [];
+    if (frames.length) {
+      this.runtimePipelineStats.speechPrerollFramesFlushed += frames.length;
+      this._logRuntimePipeline('Speech pre-roll frames released to STT', {
+        recognitionCycleId: this.recognitionCycle.id,
+        framesReleased: frames.length
+      });
+    }
+    return [...frames, currentFrame];
+  }
+
+  /**
+   * Check whether a rejected frame should be held as speech pre-roll.
+   * @param {object} frame Processed audio frame.
+   * @param {object} decision Speech source decision.
+   * @returns {boolean}
+   * @private
+   */
+  _isSpeechPrerollCandidate(frame, decision = {}) {
+    const state = String(frame?.speechActivityState || '').toUpperCase();
+    const confidence = Number(decision.confidence ?? frame?.speechConfidence) || 0;
+    if (state.includes('POSSIBLE') || state.includes('SPEECH')) return true;
+    if (decision.classification === 'unstable-candidate') return true;
+    return confidence >= 0.04 && decision.classification !== 'background-audio' && decision.classification !== 'electronic-audio';
+  }
+
+  /**
+   * Deliver one accepted frame to the session and STT consumer.
+   * @param {object} frame Processed audio frame.
+   * @returns {boolean}
+   * @private
+   */
+  _deliverAcceptedFrameToRecognition(frame) {
+    if (this.currentSession && typeof this.currentSession.receiveAudioFrame === 'function') {
+      this.currentSession.receiveAudioFrame(frame);
+    }
+    if (!(this.resources.sttEngine && typeof this.resources.sttEngine.isRunning === 'function' && this.resources.sttEngine.isRunning())) {
+      return true;
+    }
+    try {
+      this.runtimePipelineStats.sttFrames += 1;
+      this.resources.sttEngine.partial(frame);
+      this._logRuntimePipeline('Processed audio frame delivered to STT', {
+        sttFrames: this.runtimePipelineStats.sttFrames,
+        frameIndex: frame?.originalFrame?.frameIndex
+      });
+      if (frame?.endpointCandidate && typeof this.resources.sttEngine.final === 'function') {
+        if (!this._markRecognitionFinalizing('vad-endpoint', frame)) return false;
+        this._logRuntimePipeline('VAD endpoint detected; finalizing STT stream', {
+          recognitionCycleId: this.recognitionCycle.id,
+          frameIndex: frame?.originalFrame?.frameIndex,
+          speechActivityState: frame?.speechActivityState
+        }, true);
+        this.resources.sttEngine.final();
+      }
+    } catch (error) {
+      this._publish(SESSION_EVENTS.VOICE_ERROR, this._buildEventPayload(null, {
+        error: this._normalizeError(error)
+      }));
+      return false;
+    }
+    return true;
   }
 
   /**
@@ -1561,6 +1767,17 @@ class VoiceSessionManager {
       emptyFinals: 0,
       endpointDetections: 0,
       finalizationRequests: 0,
+      speechCandidates: 0,
+      acceptedSpeechCandidates: 0,
+      rejectedSpeechCandidates: 0,
+      rejectedNonSpeech: 0,
+      rejectedBackgroundAudio: 0,
+      rejectedTransientNoise: 0,
+      rejectedElectronicAudio: 0,
+      rejectedLowConfidenceSpeech: 0,
+      rejectedUnstableSpeech: 0,
+      speechPrerollFramesBuffered: 0,
+      speechPrerollFramesFlushed: 0,
       audioFramesWhileBusy: 0,
       staleAudioFrames: 0,
       recognitionConsumerPauses: 0,
