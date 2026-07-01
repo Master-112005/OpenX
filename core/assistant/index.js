@@ -1771,34 +1771,40 @@ class Assistant extends EventEmitter {
   }
 
   _resolvePhoneTransferFollowUp(normalized, lastFile, lastFolderPath) {
-    const phoneTargetPattern = /\b(?:to|with)\s+(?:my\s+)?(?:phone|mobile|iphone|android|device|this\s+phone)\b/;
+    const phoneTargetPattern = /\b(?:to|with|onto|on|into|over\s+to|across\s+to)\s+(?:my\s+)?(?:phone|mobile|iphone|android|device|smartphone|cell|cellphone|tablet|handset|this\s+phone)\b/;
     if (!phoneTargetPattern.test(normalized)) {
       return '';
     }
 
-    const transferVerbMatch = normalized.match(/^(send|share|transfer)\b/);
+    const transferVerbMatch = normalized.match(/^(send|share|transfer|copy|export|push|move)\b|^(send\s+over|send\s+across)\b/);
     if (!transferVerbMatch) {
       return '';
     }
-    const verb = transferVerbMatch[1];
+    const verb = transferVerbMatch[1] || 'send';
     const path = require('path');
+    const actionPattern = '(?:send|share|transfer|copy|export|push|move|send\\s+over|send\\s+across)';
+    const targetPattern = '(?:to|with|onto|on|into|over\\s+to|across\\s+to)\\s+(?:my\\s+)?(?:phone|mobile|iphone|android|device|smartphone|cell|cellphone|tablet|handset|this\\s+phone)';
+    const filePronounPattern = new RegExp(`^${actionPattern}\\s+(?:it|that|this|this\\s+one|that\\s+one)(?:\\s+file)?\\s+${targetPattern}$`, 'i');
+    const imagePronounPattern = new RegExp(`^${actionPattern}\\s+(?:it|that|this|this\\s+one|that\\s+one|latest|last|recent)(?:\\s+(?:image|photo|picture|pic|screenshot))?\\s+${targetPattern}$`, 'i');
+    const folderPronounPattern = new RegExp(`^${actionPattern}\\s+(?:its|it'?s|that|this|the|current)\\s+(?:folder|directory)\\s+${targetPattern}$`, 'i');
+    const currentFolderPattern = new RegExp(`^${actionPattern}\\s+(?:this|that|the|current)\\s+(?:folder|directory)\\s+${targetPattern}$`, 'i');
 
-    if (/^(?:send|share|transfer)\s+(?:it|that|this)(?:\s+file)?\s+(?:to|with)\s+(?:my\s+)?(?:phone|mobile|iphone|android|device|this\s+phone)$/i.test(normalized)) {
+    if (filePronounPattern.test(normalized)) {
       return lastFile?.path ? `${verb} ${lastFile.path} to my phone` : '';
     }
 
-    if (/^(?:send|share|transfer)\s+(?:it|that|this)\s+image\s+(?:to|with)\s+(?:my\s+)?(?:phone|mobile|iphone|android|device|this\s+phone)$/i.test(normalized)) {
+    if (imagePronounPattern.test(normalized)) {
       return lastFile?.path ? `${verb} ${lastFile.path} to my phone` : '';
     }
 
-    if (/^(?:send|share|transfer)\s+(?:its|it'?s|that|the)\s+folder\s+(?:to|with)\s+(?:my\s+)?(?:phone|mobile|iphone|android|device|this\s+phone)$/i.test(normalized)) {
+    if (folderPronounPattern.test(normalized)) {
       if (lastFile?.path) {
         return `${verb} ${path.dirname(lastFile.path)} to my phone`;
       }
       return lastFolderPath ? `${verb} ${lastFolderPath} to my phone` : '';
     }
 
-    if (/^(?:send|share|transfer)\s+(?:this|that|the)\s+folder\s+(?:to|with)\s+(?:my\s+)?(?:phone|mobile|iphone|android|device|this\s+phone)$/i.test(normalized)) {
+    if (currentFolderPattern.test(normalized)) {
       return lastFolderPath ? `${verb} ${lastFolderPath} to my phone` : '';
     }
 

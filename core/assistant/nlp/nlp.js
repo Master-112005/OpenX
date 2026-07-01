@@ -305,11 +305,17 @@ class NlpProcessor {
       return 'window';
     }
     if (
-      /\b(?:send|share|transfer)\b/.test(combined) &&
-      /\b(?:phone|mobile|iphone|android|device)\b/.test(combined) &&
-      /\b(?:file|files|folder|folders|directory|directories|desktop|downloads|documents|pictures|pdf|pdfs|image|images|photo|photos|screenshot|screenshots)\b/.test(combined)
+      /\b(?:send|share|transfer|copy|export|push|move)\b/.test(combined) &&
+      /\b(?:phone|mobile|iphone|android|device|smartphone|cell|cellphone|tablet|handset)\b/.test(combined) &&
+      /\b(?:file|files|folder|folders|directory|directories|desktop|downloads|documents|pictures|pdf|pdfs|image|images|photo|photos|picture|pictures|screenshot|screenshots|video|videos|audio|music|zip|rar|csv|json)\b|[^\s]+\.[a-z0-9]{1,10}\b/i.test(combined)
     ) {
       return 'phone-transfer';
+    }
+    if (
+      /\b(?:audio|media|movie|music|playback|playlist|player|song|songs|track|tracks|video|videos|youtube|spotify|vlc)\b/.test(combined) &&
+      ['play', 'pause', 'resume', 'stop', 'next', 'previous', 'mute', 'unmute', 'increase', 'decrease'].includes(actionVerb)
+    ) {
+      return 'media';
     }
     if (/\b(?:file|files|folder|folders|directory|directories|desktop|downloads|documents|pictures|pdf|pdfs|image|images|photo|photos)\b/.test(combined) || localScope) {
       return 'local-file';
@@ -332,11 +338,17 @@ class NlpProcessor {
     }
 
     if (
-      /\b(?:send|share|transfer)\b/.test(combined) &&
-      /\b(?:phone|mobile|iphone|android|device)\b/.test(combined) &&
-      /\b(?:file|folder|directory|desktop|downloads|documents|pictures|music|videos|image|photo|picture|screenshot)\b/i.test(combined)
+      /\b(?:send|share|transfer|copy|export|push|move)\b/.test(combined) &&
+      /\b(?:phone|mobile|iphone|android|device|smartphone|cell|cellphone|tablet|handset)\b/.test(combined) &&
+      /\b(?:file|folder|directory|desktop|downloads|documents|pictures|music|videos|image|photo|picture|screenshot|zip|rar|csv|json)\b|[^\s]+\.[a-z0-9]{1,10}\b/i.test(combined)
     ) {
       return 'phone-transfer';
+    }
+    if (
+      /\b(?:audio|media|movie|music|playback|playlist|player|song|songs|track|tracks|video|videos|youtube|spotify|vlc)\b/.test(combined) &&
+      ['play', 'pause', 'resume', 'stop', 'next', 'previous', 'mute', 'unmute', 'increase', 'decrease'].includes(actionVerb)
+    ) {
+      return 'media';
     }
     if (/\b(?:file|folder|directory|desktop|downloads|documents|pictures|music|videos)\b|[^\s]+\.[a-z0-9]{1,10}\b/i.test(combined)) {
       return 'local-file';

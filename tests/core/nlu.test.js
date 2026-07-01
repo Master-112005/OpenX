@@ -112,6 +112,22 @@ describe('Natural Language Router', function() {
     assert.equal(result.entities.newTab, true);
   });
 
+  it('should understand natural phone file transfer language', function() {
+    const router = createRouter();
+    const photo = router.resolveIntent('copy latest photo onto my mobile');
+    const report = router.resolveIntent('push report pdf to my tablet');
+    const folder = router.resolveIntent('export downloads folder to my android phone');
+
+    assert.equal(photo.intent.id, 'phone.sendFile');
+    assert.equal(photo.semanticFrame.domain, 'phone-transfer');
+    assert.equal(photo.entities.transferKind, 'image');
+    assert.equal(photo.entities.path, 'latest photo');
+    assert.equal(report.intent.id, 'phone.sendFile');
+    assert.equal(report.entities.path, 'report pdf');
+    assert.equal(folder.intent.id, 'phone.sendFile');
+    assert.equal(folder.entities.transferKind, 'folder');
+  });
+
   it('should distinguish typo-tolerant local file and folder searches', function() {
     const router = createRouter();
     const fileResult = router.resolveIntent('serch for my quaterly reprt file');

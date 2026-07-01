@@ -16,6 +16,9 @@ const NaturalLanguageRouter = require('./nlu');
 const { AppCommandLanguage, BrowserCommandLanguage } = NaturalLanguageRouter;
 
 const CONFIDENCE_THRESHOLD = 0.5;
+const PHONE_TRANSFER_ACTION_PATTERN = /^(?:send|share|transfer|copy|export|push|move|send\s+over|send\s+across)\b/i;
+const PHONE_TRANSFER_TRAILING_TARGET_PATTERN = /\s+(?:to|with|onto|on|into|over\s+to|across\s+to)\s+(?:my\s+)?(?:phone|mobile|iphone|android|device|smartphone|cell|cellphone|tablet|handset|this\s+phone)\s*$/i;
+const PHONE_TRANSFER_TARGET_WORD_PATTERN = /\b(?:phone|mobile|iphone|android|device|smartphone|cell|cellphone|tablet|handset)\b/i;
 
 const WEBSITE_URL_MAP = {
   'github': 'https://github.com',
@@ -592,11 +595,14 @@ class ActionRouter {
     const text = String(rawText || '').toLowerCase();
     const fileCommand = /\b(?:folder|directory|file|document)\b/.test(text) &&
       /\b(?:open|show|launch|start|find|locate|search|move|copy|rename|delete|create)\b/.test(text);
+    const phoneTransferCommand = PHONE_TRANSFER_ACTION_PATTERN.test(text) &&
+      PHONE_TRANSFER_TARGET_WORD_PATTERN.test(text) &&
+      /\b(?:file|files|folder|folders|directory|document|documents|pdf|docx?|xlsx?|pptx?|csv|json|zip|image|images|photo|photos|picture|pictures|screenshot|screenshots|video|videos|audio|music|downloads?|desktop|it|that|this)\b/i.test(text);
     const scheduleCommand = /\b(?:timer|countdown|pomodoro|alarm|reminder|remind)\b/.test(text) &&
       /\b(?:set|start|create|add|pause|resume|reset|stop|cancel|delete|show|list|snooze|wake|remind)\b/.test(text);
     const networkCommand = /\b(?:wifi|wi\s*fi|bluetooth|blue\s*tooth)\b/.test(text) &&
       /\b(?:open|show|check|connect|disconnect|forget|enable|disable|turn|switch|settings|status)\b/.test(text);
-    return fileCommand || scheduleCommand || networkCommand;
+    return fileCommand || phoneTransferCommand || scheduleCommand || networkCommand;
   }
 
   _resolveCapabilityCommandIntent(rawText, preparedInput = {}, options = {}) {
@@ -2750,11 +2756,12 @@ class ActionRouter {
     }
 
     const lower = input.toLowerCase();
-    if (!/^(?:send|share|transfer)\b/.test(lower)) {
+    if (!PHONE_TRANSFER_ACTION_PATTERN.test(lower)) {
       return null;
     }
 
-    const phoneTargetMatch = raw.match(/\s+(?:to|with)\s+(?:my\s+)?(?:phone|mobile|iphone|android|device|this\s+phone)\s*$/i);
+    const phoneTargetMatch = raw.match(PHONE_TRANSFER_TRAILING_TARGET_PATTERN) ||
+      input.match(PHONE_TRANSFER_TRAILING_TARGET_PATTERN);
     if (!phoneTargetMatch) {
       return null;
     }
@@ -2764,21 +2771,22 @@ class ActionRouter {
       return null;
     }
 
-    const withoutTarget = raw.slice(0, phoneTargetMatch.index).trim();
-    const sourceText = withoutTarget
-      .replace(/^(?:send|share|transfer)\s+/i, '')
-      .replace(/^(?:me\s+)?/i, '')
-      .trim();
+    const sourceCandidate = raw.match(PHONE_TRANSFER_TRAILING_TARGET_PATTERN)
+      ? raw.slice(0, raw.match(PHONE_TRANSFER_TRAILING_TARGET_PATTERN).index).trim()
+      : input.slice(0, input.match(PHONE_TRANSFER_TRAILING_TARGET_PATTERN).index).trim();
+    const sourceText = this._cleanPhoneTransferSource(sourceCandidate);
+    const sourceForKind = `${sourceText} ${raw} ${input}`;
 
-    const transferKind = /\b(?:folder|directory)\b/i.test(sourceText)
+    const transferKind = /\b(?:folder|folders|directory|directories)\b/i.test(sourceForKind)
       ? 'folder'
-      : /\b(?:image|images|photo|photos|picture|pictures|screenshot|screenshots)\b/i.test(sourceText)
+      : /\b(?:image|images|photo|photos|picture|pictures|screenshot|screenshots|pic|pics)\b/i.test(sourceForKind)
         ? 'image'
         : 'file';
 
     const normalizedSource = sourceText
+      .replace(/^(?:me\s+)?/i, '')
       .replace(/^(?:the|a|an|my)\s+/i, '')
-      .replace(/\s+(?:file|files|image|images|photo|photos|picture|pictures)$/i, '')
+      .replace(/\s+(?:file|files)$/i, '')
       .trim();
 
     const pathValue = normalizedSource || sourceText;
@@ -2794,6 +2802,16 @@ class ActionRouter {
         transferKind
       }
     };
+  }
+
+  _cleanPhoneTransferSource(value) {
+    return String(value || '')
+      .trim()
+      .replace(PHONE_TRANSFER_ACTION_PATTERN, '')
+      .replace(/^(?:me\s+|the\s+|a\s+|an\s+|my\s+)+/i, '')
+      .replace(/\b(?:over|across)\s*$/i, '')
+      .replace(/\s+/g, ' ')
+      .trim();
   }
 
   _resolveExplicitFileIntent(rawText, preparedInput) {

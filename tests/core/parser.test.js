@@ -93,4 +93,18 @@ describe('Input Parser', function() {
       true
     );
   });
+
+  it('should classify phone transfer command frames with natural aliases', function() {
+    const { CommandFrameParser } = require('../../core/assistant/parser');
+    const frame = new CommandFrameParser().parse('copy latest screenshot onto my mobile');
+
+    assert.equal(frame.action, 'send');
+    assert.equal(frame.domain, 'phone-transfer');
+    assert.equal(frame.appRouteAllowed, true);
+    assert.equal(frame.relations.some(relation =>
+      relation.type === 'action-target' &&
+      relation.from === 'copy' &&
+      relation.to === 'latest'
+    ), true);
+  });
 });

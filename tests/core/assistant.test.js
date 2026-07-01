@@ -915,7 +915,7 @@ describe('Assistant Confirmation Flow', function() {
           commandId: 'cmd-phone-send',
           success: true,
           intent: 'phone.sendFile',
-          entities: { path: input.replace(/^send\s+/i, '').replace(/\s+to my phone$/i, '') },
+          entities: { path: input.replace(/^(?:send|share|transfer|copy|push|export|move)\s+/i, '').replace(/\s+to my phone$/i, '') },
           data: { transferredName: 'PASSWORDS.txt', deviceName: 'Galaxy S25' },
           response: 'Sent PASSWORDS.txt to Galaxy S25.'
         };
@@ -933,6 +933,51 @@ describe('Assistant Confirmation Flow', function() {
 
     assert.equal(sent.success, true);
     assert.equal(routedInputs[1], `send ${filePath} to my phone`);
+  });
+
+  it('should rewrite natural phone transfer follow-ups using recent file context', async function() {
+    const routedInputs = [];
+    const filePath = 'C:\\Users\\rakes\\Pictures\\photo.png';
+    const router = {
+      process: async (input) => {
+        routedInputs.push(input);
+        if (routedInputs.length === 1) {
+          return {
+            commandId: 'cmd-photo-search-phone',
+            success: true,
+            intent: 'file.search',
+            entities: { query: 'photo' },
+            data: {
+              query: 'photo',
+              count: 1,
+              entries: [{ name: 'photo.png', type: 'file', path: filePath }]
+            },
+            response: 'I found 1 matching item: photo.png.'
+          };
+        }
+
+        return {
+          commandId: 'cmd-phone-copy',
+          success: true,
+          intent: 'phone.sendFile',
+          entities: { path: filePath, transferKind: 'image' },
+          data: { transferredName: 'photo.png', deviceName: 'Galaxy S25' },
+          response: 'Sent photo.png to Galaxy S25.'
+        };
+      }
+    };
+
+    const assistant = new Assistant({ activeLearning: { enabled: false } }, {
+      router,
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    await assistant.processCommand('find latest photo', 'phone');
+    const sent = await assistant.processCommand('copy that photo onto my mobile', 'phone');
+
+    assert.equal(sent.success, true);
+    assert.equal(routedInputs[1], `copy ${filePath} to my phone`);
   });
 
   it('should rewrite folder transfer follow-ups using the last folder reference', async function() {

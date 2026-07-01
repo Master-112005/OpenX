@@ -306,12 +306,20 @@ class ContextManager {
     return this.findRecent(entry => Boolean(this._fileReferenceFromEntry(entry)), 30);
   }
 
+  getLastPhoneTransfer() {
+    return this.findRecent(entry =>
+      entry?.success &&
+      entry.intent === 'phone.sendFile' &&
+      (entry.entities?.path || entry.data?.path || entry.data?.transferredName)
+    , 30);
+  }
+
   getLastActionableCommand(limit = 12) {
     return this.history
       .slice(-limit)
       .reverse()
       .find(entry => entry?.success && entry?.input && entry?.intent &&
-        /^(?:app|browser|file|folder|media|volume|brightness|window)\./.test(entry.intent)) || null;
+        /^(?:app|browser|file|folder|media|volume|brightness|window|phone)\./.test(entry.intent)) || null;
   }
 
   resolveEllipticalFollowUp(input) {

@@ -2457,6 +2457,12 @@ describe('Action Router', function() {
     const imageResult = await router.process('transfer latest screenshot to my phone', 'phone', {
       phoneContext: { deviceId: 'phone001', deviceName: 'Galaxy S25' }
     });
+    const naturalResult = await router.process('copy latest photo onto my mobile', 'phone', {
+      phoneContext: { deviceId: 'phone001', deviceName: 'Galaxy S25' }
+    });
+    const tabletResult = await router.process('push report pdf to my tablet', 'phone', {
+      phoneContext: { deviceId: 'phone001', deviceName: 'Galaxy S25' }
+    });
 
     assert.equal(fileResult.intent, 'phone.sendFile');
     assert.equal(fileResult.entities.path, 'report.pdf');
@@ -2466,7 +2472,14 @@ describe('Action Router', function() {
     assert.equal(folderResult.entities.transferKind, 'folder');
     assert.equal(imageResult.intent, 'phone.sendFile');
     assert.equal(imageResult.entities.transferKind, 'image');
+    assert.equal(naturalResult.intent, 'phone.sendFile');
+    assert.equal(naturalResult.entities.path, 'latest photo');
+    assert.equal(naturalResult.entities.transferKind, 'image');
+    assert.equal(tabletResult.intent, 'phone.sendFile');
+    assert.equal(tabletResult.entities.path, 'report pdf');
     assert.deepEqual(executed.map(step => step.actionId), [
+      'phone.sendFile',
+      'phone.sendFile',
       'phone.sendFile',
       'phone.sendFile',
       'phone.sendFile'

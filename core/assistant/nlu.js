@@ -13,11 +13,13 @@ const ACTION_ALIASES = new Map([
   ['boost', 'increase'],
   ['close', 'close'],
   ['continue', 'resume'],
+  ['copy', 'send'],
   ['decrease', 'decrease'],
   ['dim', 'decrease'],
   ['down', 'decrease'],
   ['end', 'stop'],
   ['exit', 'close'],
+  ['export', 'send'],
   ['find', 'search'],
   ['focus', 'switch'],
   ['fullscreen', 'maximize'],
@@ -33,11 +35,13 @@ const ACTION_ALIASES = new Map([
   ['maximize', 'maximize'],
   ['minimize', 'minimize'],
   ['mute', 'mute'],
+  ['move', 'send'],
   ['next', 'next'],
   ['open', 'open'],
   ['pause', 'pause'],
   ['play', 'play'],
   ['previous', 'previous'],
+  ['push', 'send'],
   ['quit', 'close'],
   ['raise', 'increase'],
   ['alert', 'remind'],
@@ -70,8 +74,13 @@ const DOMAIN_TERMS = {
   volume: new Set(['audio', 'sound', 'volume']),
   brightness: new Set(['brightness', 'display', 'light', 'screen']),
   window: new Set(['fullscreen', 'maximize', 'minimize', 'screen', 'tab', 'window']),
-  file: new Set(['directory', 'document', 'documents', 'file', 'files', 'folder', 'folders', 'pdf', 'photo', 'photos', 'picture', 'pictures']),
-  phoneTransfer: new Set(['android', 'device', 'iphone', 'mobile', 'phone']),
+  file: new Set([
+    'audio', 'csv', 'directory', 'directories', 'doc', 'docs', 'document', 'documents', 'docx',
+    'download', 'downloads', 'file', 'files', 'folder', 'folders', 'image', 'images', 'jpeg',
+    'jpg', 'json', 'music', 'pdf', 'photo', 'photos', 'picture', 'pictures', 'png', 'ppt',
+    'pptx', 'rar', 'screenshot', 'screenshots', 'txt', 'video', 'videos', 'xlsx', 'zip'
+  ]),
+  phoneTransfer: new Set(['android', 'cell', 'cellphone', 'device', 'handset', 'iphone', 'mobile', 'phone', 'smartphone', 'tablet']),
   web: new Set(['browser', 'chrome', 'edge', 'firefox', 'google', 'internet', 'site', 'website', 'web', 'youtube']),
   schedule: new Set(['alarm', 'alarms', 'alert', 'clock', 'notify', 'remind', 'reminder', 'reminders', 'timer', 'timers'])
 };
@@ -268,11 +277,12 @@ class NaturalLanguageRouter {
       return 'browser-tab';
     }
 
-    if ((/\.[a-z0-9]{1,10}\b/i.test(text) || has('file')) && action === 'send' && has('phoneTransfer')) {
+    const hasFileEvidence = /\.[a-z0-9]{1,10}\b/i.test(text) || has('file');
+    const hasPhoneTransferTarget = has('phoneTransfer') ||
+      /\b(?:my\s+)?(?:phone|mobile|iphone|android|device|smartphone|cell|cellphone|tablet|handset)\b/i.test(text);
+
+    if (hasFileEvidence && action === 'send' && hasPhoneTransferTarget) {
       return 'phone-transfer';
-    }
-    if (/\.[a-z0-9]{1,10}\b/i.test(text) || has('file')) {
-      return 'local-file';
     }
     if (has('schedule') || (action === 'set' && /\btime\s+for\s+(?:\d+|one|two|three|four|five|ten)\s+(?:seconds?|minutes?|hours?)\b/.test(text))) {
       return 'schedule';
@@ -292,6 +302,9 @@ class NaturalLanguageRouter {
     }
     if (has('mediaPlatform') && ['play', 'pause', 'resume', 'stop', 'next', 'previous', 'mute', 'unmute'].includes(action)) {
       return 'media';
+    }
+    if (hasFileEvidence) {
+      return 'local-file';
     }
     if (['maximize', 'minimize'].includes(action) || (has('window') && ['show', 'close'].includes(action))) {
       return 'window';
@@ -407,8 +420,10 @@ class NaturalLanguageRouter {
           ? 'image'
           : 'file';
       const source = rawText
-        .replace(/^(?:send|share|transfer)\s+/i, '')
-        .replace(/\s+(?:to|with)\s+(?:my\s+)?(?:phone|mobile|iphone|android|device|this\s+phone)\s*$/i, '')
+        .replace(/^(?:send|share|transfer|copy|export|push|move|send\s+over|send\s+across)\s+/i, '')
+        .replace(/^(?:me\s+|the\s+|a\s+|an\s+|my\s+)+/i, '')
+        .replace(/\s+(?:to|with|onto|on|into|over\s+to|across\s+to)\s+(?:my\s+)?(?:phone|mobile|iphone|android|device|smartphone|cell|cellphone|tablet|handset|this\s+phone)\s*$/i, '')
+        .replace(/\s+(?:file|files)$/i, '')
         .trim();
       entities.path = entities.path || source;
     }

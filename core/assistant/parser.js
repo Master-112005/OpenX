@@ -119,6 +119,10 @@ const ACTION_ALIASES = new Map([
   ['send', 'send'],
   ['share', 'send'],
   ['transfer', 'send'],
+  ['copy', 'send'],
+  ['export', 'send'],
+  ['push', 'send'],
+  ['move', 'send'],
   ['open', 'open'],
   ['launch', 'open'],
   ['start', 'open'],
@@ -180,6 +184,18 @@ const APP_CUES = new Set([
   'program',
   'process',
   'window'
+]);
+
+const PHONE_TRANSFER_TARGETS = new Set([
+  'android',
+  'cell',
+  'device',
+  'handset',
+  'iphone',
+  'mobile',
+  'phone',
+  'smartphone',
+  'tablet'
 ]);
 
 const FILLER = new Set([
@@ -274,18 +290,16 @@ class CommandFrameParser {
     const hasPlatform = targetTokens.some(token => MEDIA_PLATFORMS.has(token)) ||
       /\byou\s*tube\b/.test(normalizedText);
     const hasUtility = targetTokens.some(token => UTILITY_TARGETS.has(token));
-    const hasFile = /\b(?:file|folder|directory|document|pdf|docx?|txt|java|py|js|xlsx?|pptx?)\b/.test(normalizedText);
+    const hasFile = /\b(?:file|files|folder|folders|directory|directories|document|documents|pdf|docx?|txt|java|py|js|xlsx?|pptx?|csv|json|zip|rar|image|images|photo|photos|picture|pictures|screenshot|screenshots|video|videos|audio|music|downloads?|documents?|desktop|pictures)\b|[^\s]+\.[a-z0-9]{1,10}\b/i.test(normalizedText);
+    const hasPhoneTransferTarget = targetTokens.some(token => PHONE_TRANSFER_TARGETS.has(token)) ||
+      /\b(?:my\s+)?(?:phone|mobile|iphone|android|device|smartphone|cell|cellphone|tablet|handset)\b/.test(normalizedText);
 
     if (action === 'open' && /\bnew\s+(?:chrome\s+)?tab\b/.test(normalizedText)) {
       return 'browser-tab';
     }
 
-    if (hasFile && action === 'send' && /\b(?:phone|mobile|iphone|android|device)\b/.test(normalizedText)) {
+    if (hasFile && action === 'send' && hasPhoneTransferTarget) {
       return 'phone-transfer';
-    }
-
-    if (hasFile) {
-      return 'local-file';
     }
 
     if (hasUtility && ['set', 'increase', 'decrease', 'mute', 'unmute'].includes(action)) {
@@ -302,6 +316,10 @@ class CommandFrameParser {
 
     if (hasPlatform && action === 'stop' && hasMediaTarget) {
       return 'media';
+    }
+
+    if (hasFile) {
+      return 'local-file';
     }
 
     return 'app';
