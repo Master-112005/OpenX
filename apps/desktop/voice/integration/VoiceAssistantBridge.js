@@ -114,6 +114,7 @@ class VoiceAssistantBridge extends EventEmitter {
     try {
       const result = await this.adapter.handle(normalizedTranscript);
       this.metrics.commandsDispatched += 1;
+      this.emit(EVENTS.VOICE_RESPONSE_READY, Object.freeze({ result }));
       await this.coordinator.finishExecution(result);
       this.emit(EVENTS.VOICE_EXECUTION_FINISHED, Object.freeze({ result }));
       return result;

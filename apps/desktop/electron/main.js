@@ -7,6 +7,7 @@ const BASE_CONFIG = require('../../../config');
 const Assistant = require('../../../core/assistant/index');
 const TextToSpeech = require('../voice/tts');
 const { VoiceTheme } = require('../voice/ui');
+const VOICE_INTEGRATION_EVENTS = require('../voice/integration/VoiceIntegrationEvents');
 const {
   VoiceSessionManager,
   VoiceAssistantBridge,
@@ -169,6 +170,8 @@ let voiceCaptureWarmupTimer = null;
 let voiceResourceWarmupTimer = null;
 let voiceStartInFlight = false;
 let voiceLastStartAt = 0;
+let voiceSpeakingStopTapAt = 0;
+let voiceSpeakingStopSessionId = null;
 let voiceMediaQuietingState = null;
 let voiceCaptureFrameStats = {
   received: 0,
@@ -198,6 +201,7 @@ const rendererCrashHistory = new Map();
 const recoveryTimeouts = new Set();
 const unresponsiveTimeouts = new Map();
 const VOICE_SHORTCUT_DEBOUNCE_MS = 450;
+const VOICE_SPEAKING_DOUBLE_TAP_MS = 1400;
 const VOICE_CAPTURE_WARMUP_DELAY_MS = 350;
 const IPC_CHANNELS = [
   'command:process',
@@ -1709,6 +1713,38 @@ function restoreMediaAfterVoiceSession(reason = 'voice-session-closed') {
   }
 }
 
+function handleVoiceShortcutDuringSpeaking(shortcut = '') {
+  const state = voiceSessionManager?.getCurrentState?.();
+  if (state !== 'SPEAKING') return null;
+
+  const now = Date.now();
+  const sessionId = voiceSessionManager?.getSession?.()?.sessionId || 'voice-session';
+  const isSecondTap = voiceSpeakingStopSessionId === sessionId &&
+    now - voiceSpeakingStopTapAt <= VOICE_SPEAKING_DOUBLE_TAP_MS;
+
+  if (isSecondTap) {
+    voiceSpeakingStopTapAt = 0;
+    voiceSpeakingStopSessionId = null;
+    const cancelled = voiceSessionManager.cancelSession('Voice shortcut double tapped while assistant was speaking.');
+    mainLogger.info('Voice shortcut cancelled speaking session on second tap', { shortcut, sessionId });
+    return { success: true, cancelled: true, stoppedSpeaking: true, state: cancelled.state };
+  }
+
+  voiceSpeakingStopTapAt = now;
+  voiceSpeakingStopSessionId = sessionId;
+  const stopped = voiceAssistantBridge?.coordinator?.stopSpeaking?.('voice-shortcut-stop-speaking')
+    || { stopped: false };
+  if (!stopped.stopped && textToSpeech) {
+    textToSpeech.stop();
+  }
+  mainLogger.info('Voice shortcut stopped assistant speech', {
+    shortcut,
+    sessionId,
+    stopped: Boolean(stopped.stopped)
+  });
+  return { success: true, stoppedSpeaking: true, cancelled: false, state };
+}
+
 function startVoiceListeningFromShortcut(shortcut = '') {
   if (!voiceSessionManager) {
     mainLogger.warn('Voice shortcut ignored because voice session manager is unavailable', { shortcut });
@@ -1716,7 +1752,12 @@ function startVoiceListeningFromShortcut(shortcut = '') {
   }
 
   try {
+    const speakingAction = handleVoiceShortcutDuringSpeaking(shortcut);
+    if (speakingAction) return speakingAction;
+
     if (voiceSessionManager.isActive()) {
+      voiceSpeakingStopTapAt = 0;
+      voiceSpeakingStopSessionId = null;
       const cancelled = voiceSessionManager.cancelSession('Voice shortcut pressed while listening.');
       mainLogger.info('Voice shortcut cancelled active listening session', { shortcut });
       return { success: true, cancelled: true, state: cancelled.state };
@@ -1734,6 +1775,8 @@ function startVoiceListeningFromShortcut(shortcut = '') {
 
     voiceStartInFlight = true;
     voiceLastStartAt = now;
+    voiceSpeakingStopTapAt = 0;
+    voiceSpeakingStopSessionId = null;
     if (chatWindow && !chatWindow.isDestroyed() && chatWindow.isVisible()) {
       chatWindow.hide();
     }
@@ -1837,6 +1880,13 @@ async function initializeAssistant() {
     assistant,
     textToSpeech,
     logger: mainLogger
+  });
+  voiceAssistantBridge.on(VOICE_INTEGRATION_EVENTS.VOICE_RESPONSE_READY, event => {
+    try {
+      voiceOverlay?.displayAssistantResult?.(event?.result || {});
+    } catch (error) {
+      mainLogger.warn('Voice overlay assistant result display failed', { error: error.message });
+    }
   });
   diagnosticsManager = new DiagnosticsManager({
     logger: mainLogger,

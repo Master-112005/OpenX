@@ -69,6 +69,31 @@ const CANCEL_PATTERNS = [
   /\b(?:do\s+not|dont)\s+(?:continue|do|proceed|run|execute|close|delete|shutdown|restart)\b/
 ];
 
+const SPOKEN_CHOICE_NUMBERS = Object.freeze({
+  one: 1,
+  first: 1,
+  won: 1,
+  two: 2,
+  second: 2,
+  too: 2,
+  to: 2,
+  three: 3,
+  third: 3,
+  tree: 3,
+  four: 4,
+  fourth: 4,
+  for: 4,
+  five: 5,
+  fifth: 5,
+  six: 6,
+  sixth: 6,
+  seven: 7,
+  seventh: 7,
+  eight: 8,
+  eighth: 8,
+  ate: 8
+});
+
 const CONFIRM_PATTERNS = [
   /\b(?:approve|confirm|continue|proceed|yes|yeah|yep|sure|ok|okay)\b/,
   /\b(?:carry\s+on|do\s+it|execute\s+it|go\s+ahead|run\s+it)\b/
@@ -1555,9 +1580,9 @@ class Assistant extends EventEmitter {
       return null;
     }
 
-    const numeric = normalized.match(/\b(?:number\s*)?(\d+)\b/);
-    if (numeric) {
-      const index = parseInt(numeric[1], 10);
+    const requestedIndex = this._extractClarificationChoiceIndex(normalized);
+    if (requestedIndex) {
+      const index = parseInt(requestedIndex, 10);
       const byIndex = list.find(choice => Number(choice.index) === index);
       if (byIndex) {
         return byIndex;
@@ -1572,13 +1597,25 @@ class Assistant extends EventEmitter {
     }) || null;
   }
 
+  _extractClarificationChoiceIndex(input) {
+    const normalized = Normalizer.normalizeText(String(input || '').trim()).toLowerCase();
+    if (!normalized) return 0;
+    const numeric = normalized.match(/\b(?:number|option|choice|folder|file|result)?\s*(\d+)(?:st|nd|rd|th)?\b/);
+    if (numeric) return Number(numeric[1]);
+    const cleaned = normalized
+      .replace(/\b(?:number|option|choice|folder|file|result|open|select|choose|pick|the|one\s+number)\b/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return SPOKEN_CHOICE_NUMBERS[cleaned] || 0;
+  }
+
   _looksLikeChoiceResponse(input, choices) {
     const normalized = String(input || '').trim().toLowerCase();
     if (!normalized) return false;
     const list = Array.isArray(choices) ? choices : [];
     if (list.length === 0) return false;
 
-    if (/^\d+$/.test(normalized)) return true;
+    if (this._extractClarificationChoiceIndex(normalized)) return true;
 
     if (normalized.length > 0 && normalized.length < 50) {
       const match = list.find(choice => {
@@ -1589,8 +1626,6 @@ class Assistant extends EventEmitter {
       });
       if (match) return true;
     }
-
-    if (/^(?:first|second|third|fourth|fifth|1st|2nd|3rd|4th|5th)$/i.test(normalized)) return true;
 
     return false;
   }

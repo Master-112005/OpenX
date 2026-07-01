@@ -183,6 +183,20 @@ class VoiceOverlay extends EventEmitter {
   }
 
   /**
+   * Display the assistant result in the voice overlay without changing assistant behavior.
+   * @param {object} result Assistant result.
+   * @returns {{updated: boolean, payload: object}}
+   */
+  displayAssistantResult(result = {}) {
+    const payload = this._buildAssistantResultPayload(result);
+    if (this.windowController && typeof this.windowController.updateAssistantResult === 'function') {
+      this.windowController.updateAssistantResult(payload);
+    }
+    this.emit(VOICE_UI_EVENTS.ASSISTANT_RESULT_DISPLAYED, Object.freeze({ payload }));
+    return { updated: true, payload };
+  }
+
+  /**
    * Display a user-safe error state.
    * @param {object|string|Error} error Error payload.
    * @returns {{displayed: boolean, view: object}}
@@ -274,6 +288,60 @@ class VoiceOverlay extends EventEmitter {
     });
     this.currentView = view;
     return view;
+  }
+
+  _buildAssistantResultPayload(result = {}) {
+    const intent = String(result?.intent || '');
+    return Object.freeze({
+      response: String(result?.response || result?.message || '').slice(0, 480),
+      intent,
+      success: Boolean(result?.success),
+      choices: this._normalizeChoices(result?.data?.choices),
+      resultEntries: this._normalizeResultEntries(result, intent)
+    });
+  }
+
+  _normalizeChoices(choices) {
+    if (!Array.isArray(choices)) return [];
+    return choices.slice(0, 8).map((choice, index) => {
+      const choiceIndex = Number(choice?.index) || index + 1;
+      const pathValue = String(choice?.path || '').slice(0, 260);
+      const title = String(choice?.title || pathValue.split(/[\\/]/).filter(Boolean).pop() || `Option ${choiceIndex}`).slice(0, 180);
+      return Object.freeze({
+        index: choiceIndex,
+        title,
+        path: pathValue
+      });
+    });
+  }
+
+  _normalizeResultEntries(result, intent) {
+    if (intent === 'browser.search') {
+      const sources = Array.isArray(result?.data?.searchSummary?.sources)
+        ? result.data.searchSummary.sources
+        : (Array.isArray(result?.data?.results) ? result.data.results : []);
+      return sources.slice(0, 4).map((entry, index) => Object.freeze({
+        index: index + 1,
+        name: String(entry?.title || entry?.sourceDomain || `Source ${index + 1}`).slice(0, 160),
+        type: 'web',
+        path: String(entry?.url || '').slice(0, 260),
+        location: String(entry?.sourceDomain || '').slice(0, 120),
+        snippet: String(entry?.snippet || '').slice(0, 180)
+      }));
+    }
+    if (!['file.search', 'folder.search', 'file.smartFind', 'file.list'].includes(intent)) {
+      return [];
+    }
+    const entries = Array.isArray(result?.data?.entries) ? result.data.entries : [];
+    return entries.slice(0, 6).map((entry, index) => Object.freeze({
+      index: index + 1,
+      name: String(entry?.name || entry?.path?.split(/[\\/]/).filter(Boolean).pop() || `Result ${index + 1}`).slice(0, 160),
+      type: String(entry?.type || (intent === 'folder.search' ? 'folder' : 'file')),
+      path: String(entry?.path || '').slice(0, 260),
+      location: String(entry?.location || '').slice(0, 120),
+      sizeMB: Number(entry?.sizeMB || 0),
+      matchScore: Number(entry?.matchScore || 0)
+    }));
   }
 
   /**

@@ -134,6 +134,16 @@ class VoiceExecutionCoordinator extends EventEmitter {
   }
 
   /**
+   * Stop only the current spoken assistant response without cancelling the voice session.
+   * @param {string} reason Stop reason.
+   * @returns {{stopped: boolean, reason: string}}
+   */
+  stopSpeaking(reason = 'assistant-speaking-stop-requested') {
+    const stopped = this._stopTextToSpeech(reason);
+    return { stopped, reason };
+  }
+
+  /**
    * Return coordinator metrics.
    * @returns {object}
    */

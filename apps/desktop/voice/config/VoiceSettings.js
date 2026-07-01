@@ -84,6 +84,7 @@ const VoiceSettings = Object.freeze({
     fadeDurationMs: 160,
     autoCloseDelayMs: 900,
     size: Object.freeze({ width: 420, height: 176 }),
+    expandedSize: Object.freeze({ width: 520, height: 300 }),
     position: Object.freeze({ horizontal: 'center', vertical: 'above-center', yOffset: -96 }),
     accessibility: Object.freeze({
       reducedMotion: false,

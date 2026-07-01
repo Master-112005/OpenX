@@ -5,6 +5,7 @@ const { VoiceUIError } = require('./VoiceUIErrors');
 const DEFAULT_CONFIGURATION = Object.freeze({
   overlayEnabled: true,
   size: Object.freeze({ width: 420, height: 176 }),
+  expandedSize: Object.freeze({ width: 520, height: 300 }),
   position: Object.freeze({ horizontal: 'center', vertical: 'above-center', yOffset: -96 }),
   animationDurationMs: 180,
   fadeDurationMs: 160,
@@ -89,6 +90,12 @@ class VoiceConfiguration {
     }
     if (!Number.isInteger(config.size?.height) || config.size.height < 120) {
       throw new VoiceUIError('Voice overlay height is invalid.', { code: 'InvalidVoiceUIConfiguration' });
+    }
+    if (!Number.isInteger(config.expandedSize?.width) || config.expandedSize.width < config.size.width) {
+      throw new VoiceUIError('Voice overlay expanded width is invalid.', { code: 'InvalidVoiceUIConfiguration' });
+    }
+    if (!Number.isInteger(config.expandedSize?.height) || config.expandedSize.height < config.size.height) {
+      throw new VoiceUIError('Voice overlay expanded height is invalid.', { code: 'InvalidVoiceUIConfiguration' });
     }
     for (const field of ['animationDurationMs', 'fadeDurationMs', 'autoCloseDelayMs']) {
       if (!Number.isFinite(config[field]) || config[field] < 0) {

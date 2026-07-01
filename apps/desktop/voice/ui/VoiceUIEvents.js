@@ -15,6 +15,7 @@ const VOICE_UI_EVENTS = Object.freeze({
   ERROR_DISPLAYED: 'voice.ui.error.displayed',
   EXECUTION_STARTED: 'voice.ui.execution.started',
   EXECUTION_COMPLETED: 'voice.ui.execution.completed',
+  ASSISTANT_RESULT_DISPLAYED: 'voice.ui.assistant.result.displayed',
   ANIMATION_TRIGGERED: 'voice.ui.animation.triggered',
   CANCELLATION_REQUESTED: 'voice.ui.cancellation.requested',
   THEME_CHANGED: 'voice.ui.theme.changed',

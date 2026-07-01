@@ -1,10 +1,104 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
+let voiceAssistantResultClearTimer = null;
+
+function voiceResultNameFromPath(pathValue, fallback) {
+  return String(pathValue || '').split(/[\\/]/).filter(Boolean).pop() || fallback;
+}
+
+function appendVoiceCard(list, entry, options = {}) {
+  const item = document.createElement('li');
+  item.className = 'voice-card';
+  const number = document.createElement('span');
+  number.className = 'voice-card-number';
+  number.textContent = String(Number(entry?.index) || list.children.length + 1);
+  const body = document.createElement('span');
+  const name = document.createElement('strong');
+  name.textContent = String(entry?.name || entry?.title || voiceResultNameFromPath(entry?.path, 'Result'));
+  body.appendChild(name);
+  const metaText = [
+    entry?.location,
+    entry?.sizeMB > 0 ? `${entry.sizeMB} MB` : '',
+    entry?.matchScore > 0 && entry?.type !== 'web' ? `${Math.round(entry.matchScore)}% match` : '',
+    !entry?.location && entry?.path ? entry.path : ''
+  ].filter(Boolean).join(' - ');
+  if (entry?.snippet) {
+    const snippet = document.createElement('small');
+    snippet.textContent = String(entry.snippet);
+    body.appendChild(snippet);
+  }
+  if (metaText) {
+    const meta = document.createElement('small');
+    meta.textContent = metaText;
+    body.appendChild(meta);
+  }
+  if (options.showPath && entry?.path && metaText !== entry.path) {
+    const pathEl = document.createElement('small');
+    pathEl.textContent = String(entry.path);
+    body.appendChild(pathEl);
+  }
+  item.append(number, body);
+  list.appendChild(item);
+}
+
+function renderVoiceAssistantResult(payload = {}) {
+  const responseEl = document.getElementById('assistant-response');
+  if (!responseEl) return;
+  if (voiceAssistantResultClearTimer) {
+    clearTimeout(voiceAssistantResultClearTimer);
+    voiceAssistantResultClearTimer = null;
+  }
+  const hasPayload = Boolean(String(payload.response || '').trim()) ||
+    (Array.isArray(payload.resultEntries) && payload.resultEntries.length > 0) ||
+    (Array.isArray(payload.choices) && payload.choices.length > 0);
+  if (!hasPayload) {
+    responseEl.classList.remove('visible');
+    voiceAssistantResultClearTimer = setTimeout(() => {
+      voiceAssistantResultClearTimer = null;
+      responseEl.replaceChildren();
+    }, 180);
+    return;
+  }
+  responseEl.replaceChildren();
+  const fragment = document.createDocumentFragment();
+  const response = String(payload.response || '').trim();
+  if (response) {
+    const text = document.createElement('div');
+    text.className = 'voice-response-text';
+    text.textContent = response;
+    fragment.appendChild(text);
+  }
+  const entries = Array.isArray(payload.resultEntries) ? payload.resultEntries : [];
+  const choices = Array.isArray(payload.choices) ? payload.choices : [];
+  const cards = choices.length > 0 ? choices : entries;
+  if (cards.length > 0) {
+    const list = document.createElement('ol');
+    list.className = 'voice-card-list';
+    for (const card of cards.slice(0, 8)) {
+      const normalized = choices.length > 0
+        ? {
+            index: card.index,
+            name: voiceResultNameFromPath(card.path, card.title || `Option ${card.index || list.children.length + 1}`),
+            path: card.path || card.title || ''
+          }
+        : card;
+      appendVoiceCard(list, normalized, { showPath: choices.length > 0 });
+    }
+    fragment.appendChild(list);
+  }
+  responseEl.appendChild(fragment);
+  requestAnimationFrame(() => responseEl.classList.add('visible'));
+}
+
 function updateVoiceOverlayDom(message) {
   const operation = message?.operation;
   const view = message?.payload?.view || message?.payload || {};
   const root = document.getElementById('voice-overlay');
   if (!root) return;
+  if (operation === 'displayAssistantResult') {
+    renderVoiceAssistantResult(message?.payload || {});
+    return;
+  }
   const title = document.getElementById('title');
   const status = document.getElementById('status');
   const transcript = document.getElementById('transcript');
@@ -18,10 +112,14 @@ function updateVoiceOverlayDom(message) {
   if (transcript) {
     const transcriptText = message?.payload?.transcript || view.transcript || view.partialTranscript || view.finalTranscript || '';
     transcript.textContent = transcriptText;
+    if (operation === 'updateTranscript' && transcriptText) {
+      renderVoiceAssistantResult({});
+    }
   }
   if (icon) icon.textContent = String(view.icon || 'JA').slice(0, 2).toUpperCase();
   if (operation === 'hideOverlay') {
     root.style.opacity = '0';
+    renderVoiceAssistantResult({});
   } else {
     root.style.opacity = '1';
   }

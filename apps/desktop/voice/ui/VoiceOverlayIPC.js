@@ -7,6 +7,7 @@ const ALLOWED_OPERATIONS = Object.freeze({
   HIDE_OVERLAY: 'hideOverlay',
   UPDATE_TRANSCRIPT: 'updateTranscript',
   UPDATE_STATE: 'updateState',
+  DISPLAY_ASSISTANT_RESULT: 'displayAssistantResult',
   DISPLAY_ERROR: 'displayError'
 });
 

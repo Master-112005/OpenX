@@ -1789,17 +1789,31 @@ describe('Voice Subsystem Architecture', function() {
       screen: {
         getPrimaryDisplay: () => ({ workArea: { x: 10, y: 20, width: 1000, height: 700 } })
       },
-      configuration: { size: { width: 420, height: 176 }, position: { yOffset: -96 } }
+      configuration: {
+        size: { width: 420, height: 176 },
+        expandedSize: { width: 520, height: 300 },
+        position: { yOffset: -96 }
+      }
     });
 
     const shown = controller.show({ state: 'LISTENING', statusText: 'Listening' });
+    controller.updateAssistantResult({
+      response: 'I found 2 matching folders. Choose a number.',
+      choices: [
+        { index: 1, title: 'Screenshots - C:\\A\\Screenshots', path: 'C:\\A\\Screenshots' },
+        { index: 2, title: 'Screenshots - C:\\B\\Screenshots', path: 'C:\\B\\Screenshots' }
+      ]
+    });
     controller.updateTranscript({ transcript: 'open visual', partial: true });
     controller.hide();
 
     assert.equal(shown.visible, true);
     assert.equal(controller.getStatus().created, true);
     assert.deepEqual(bounds[0], { x: 300, y: 186, width: 420, height: 176 });
+    assert.ok(bounds.some(entry => entry.width === 520 && entry.height === 300));
+    assert.deepEqual(bounds[bounds.length - 1], { x: 300, y: 186, width: 420, height: 176 });
     assert.ok(sent.some(message => message.operation === 'showOverlay'));
+    assert.ok(sent.some(message => message.operation === 'displayAssistantResult'));
     assert.ok(sent.some(message => message.operation === 'updateTranscript'));
     assert.ok(sent.some(message => message.operation === 'hideOverlay'));
   });
@@ -1842,6 +1856,35 @@ describe('Voice Subsystem Architecture', function() {
     assert.ok(windowUpdates.some(update => update.type === 'state' && update.view.state === 'PROCESSING'));
     assert.ok(windowUpdates.some(update => update.type === 'state' && update.view.state === 'EXECUTING'));
     assert.equal(overlay.getMetrics().transcriptUpdates >= 2, true);
+  });
+
+  it('should display assistant replies and folder choices in the voice overlay', function() {
+    const { VoiceOverlay } = require('../../apps/desktop/voice/ui');
+    const windowUpdates = [];
+    const overlay = new VoiceOverlay({
+      windowController: {
+        updateAssistantResult: payload => windowUpdates.push(payload)
+      }
+    });
+
+    const update = overlay.displayAssistantResult({
+      success: false,
+      needsClarification: true,
+      intent: 'folder.open',
+      response: 'I found 2 matching folders. Choose a number.',
+      data: {
+        choices: [
+          { index: 1, title: 'Screenshots - C:\\A\\Screenshots', path: 'C:\\A\\Screenshots' },
+          { index: 2, title: 'Screenshots - C:\\B\\Screenshots', path: 'C:\\B\\Screenshots' }
+        ]
+      }
+    });
+
+    assert.equal(update.updated, true);
+    assert.equal(windowUpdates.length, 1);
+    assert.equal(windowUpdates[0].response, 'I found 2 matching folders. Choose a number.');
+    assert.equal(windowUpdates[0].choices.length, 2);
+    assert.equal(windowUpdates[0].choices[0].path, 'C:\\A\\Screenshots');
   });
 
   it('should dispatch normalized voice text through the same assistant text boundary', async function() {
@@ -2221,6 +2264,27 @@ describe('Voice Subsystem Architecture', function() {
     assert.equal(sttRunning, false);
     assert.equal(manager.getMetrics().runtimePipeline.ttsCancellations, 1);
     bridge.detach();
+  });
+
+  it('should stop assistant speech without cancelling the active voice session', async function() {
+    const VoiceExecutionCoordinator = require('../../apps/desktop/voice/integration/VoiceExecutionCoordinator');
+    let stopped = false;
+    const coordinator = new VoiceExecutionCoordinator({
+      textToSpeech: {
+        isSpeaking: true,
+        stop: () => {
+          stopped = true;
+        }
+      }
+    });
+    coordinator.activeTurn = { id: 'turn-stop-only', cancelled: false };
+
+    const result = coordinator.stopSpeaking('single-tap-stop-speaking');
+
+    assert.equal(result.stopped, true);
+    assert.equal(stopped, true);
+    assert.equal(coordinator.activeTurn.cancelled, true);
+    assert.equal(coordinator.getMetrics().cancelledCommands, 0);
   });
 
   it('should collect passive local diagnostics without storing private transcript text', function() {

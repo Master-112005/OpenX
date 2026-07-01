@@ -28,6 +28,10 @@ class VoiceWindowController {
     this.window = null;
     this.visible = false;
     this.lastView = null;
+    this.sizeMode = 'compact';
+    this.resizeTimer = null;
+    this.pendingSizeMode = null;
+    this.lastBounds = null;
   }
 
   /**
@@ -67,7 +71,7 @@ class VoiceWindowController {
       this.ipc.attach(this.window.webContents);
       this._attachWindowRecovery(this.window);
       this._loadRenderer();
-      this.position();
+      this._applySizeMode('compact');
       this._log('Overlay Window Created');
       return this.window;
     } catch (error) {
@@ -81,12 +85,12 @@ class VoiceWindowController {
    * Position the overlay centered horizontally and slightly above screen center.
    * @returns {{x: number, y: number, width: number, height: number}}
    */
-  position() {
+  position(size = this._currentSize()) {
     const win = this.window;
     if (!win || this._isDestroyed(win)) {
       throw new RendererUnavailable('Voice overlay window is unavailable.');
     }
-    const { width, height } = this.configuration.size;
+    const { width, height } = size;
     const display = this._getTargetDisplay();
     const area = display.workArea || display.bounds || { x: 0, y: 0, width: 1280, height: 720 };
     const bounds = {
@@ -95,7 +99,9 @@ class VoiceWindowController {
       width,
       height
     };
-    if (typeof win.setBounds === 'function') win.setBounds(bounds);
+    if (this._boundsEqual(this.lastBounds, bounds)) return bounds;
+    if (typeof win.setBounds === 'function') win.setBounds(bounds, true);
+    this.lastBounds = bounds;
     return bounds;
   }
 
@@ -106,7 +112,7 @@ class VoiceWindowController {
    */
   show(view = {}) {
     const win = this.createWindow();
-    this.position();
+    this._setSizeMode('compact', { immediate: true });
     if (typeof win.setAlwaysOnTop === 'function') win.setAlwaysOnTop(true, 'screen-saver');
     if (typeof win.showInactive === 'function') win.showInactive();
     else if (typeof win.show === 'function') win.show();
@@ -126,6 +132,7 @@ class VoiceWindowController {
       this.window.hide();
     }
     this.visible = false;
+    this._setSizeMode('compact', { immediate: true });
     if (this.window && !this._isDestroyed(this.window)) {
       this.ipc.send(VoiceOverlayIPC.OPERATIONS.HIDE_OVERLAY, {});
     }
@@ -153,9 +160,25 @@ class VoiceWindowController {
    */
   updateTranscript(transcript = {}) {
     if (this.window && !this._isDestroyed(this.window)) {
+      if (transcript?.partial || transcript?.transcript) {
+        this._setSizeMode('compact', { delayMs: 90 });
+      }
       this.ipc.send(VoiceOverlayIPC.OPERATIONS.UPDATE_TRANSCRIPT, transcript);
     }
     return { updated: true, transcript };
+  }
+
+  /**
+   * Update assistant result presentation payload.
+   * @param {object} payload Renderer-safe assistant result payload.
+   * @returns {{updated: boolean, payload: object}}
+   */
+  updateAssistantResult(payload = {}) {
+    if (this.window && !this._isDestroyed(this.window)) {
+      this._setSizeMode(this._shouldExpandForAssistantResult(payload) ? 'expanded' : 'compact', { immediate: true });
+      this.ipc.send(VoiceOverlayIPC.OPERATIONS.DISPLAY_ASSISTANT_RESULT, payload);
+    }
+    return { updated: true, payload };
   }
 
   /**
@@ -166,6 +189,7 @@ class VoiceWindowController {
   displayError(view = {}) {
     if (!this.window || this._isDestroyed(this.window)) this.createWindow();
     this.visible = true;
+    this._setSizeMode('compact', { immediate: true });
     if (typeof this.window.showInactive === 'function') this.window.showInactive();
     this.ipc.send(VoiceOverlayIPC.OPERATIONS.DISPLAY_ERROR, { view });
     return { displayed: true, view };
@@ -181,6 +205,7 @@ class VoiceWindowController {
     }
     this.window = null;
     this.visible = false;
+    this._clearResizeTimer();
     return { destroyed: true };
   }
 
@@ -250,14 +275,22 @@ class VoiceWindowController {
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'self';">
 <style>
-:root { --voice-bg: rgba(17,22,36,.84); --voice-text: #f4f7ff; --voice-muted: rgba(244,247,255,.72); --voice-accent: #4488ff; --voice-border: rgba(255,255,255,.18); --voice-blur: 32px; --voice-ease: cubic-bezier(.2,.8,.2,1); }
-html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; font-family: Segoe UI, system-ui, sans-serif; color: var(--voice-text); }
+:root { --voice-bg: rgba(17,22,36,.84); --voice-text: #f4f7ff; --voice-muted: rgba(244,247,255,.72); --voice-accent: #4488ff; --voice-border: rgba(255,255,255,.18); --voice-blur: 32px; --voice-ease: cubic-bezier(.16,1,.3,1); }
+html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; font-family: Segoe UI, system-ui, sans-serif; color: var(--voice-text); -webkit-font-smoothing: antialiased; text-rendering: geometricPrecision; }
 body { animation: overlay-in 240ms var(--voice-ease) both; }
-#voice-overlay { box-sizing: border-box; height: 100vh; padding: 18px 20px; border: 1px solid var(--voice-border); border-radius: 24px; background: var(--voice-bg); backdrop-filter: blur(var(--voice-blur)) saturate(160%); box-shadow: 0 24px 80px rgba(0,0,0,.35), inset 0 1px 1px rgba(255,255,255,.16); display: grid; grid-template-columns: 54px minmax(0,1fr); gap: 14px; align-items: center; contain: layout paint style; transform: translate3d(0,0,0); transition: background-color 180ms var(--voice-ease), border-color 180ms var(--voice-ease), box-shadow 180ms var(--voice-ease); will-change: transform, opacity; }
+#voice-overlay { box-sizing: border-box; height: 100vh; padding: 18px 20px; border: 1px solid var(--voice-border); border-radius: 24px; background: var(--voice-bg); backdrop-filter: blur(var(--voice-blur)) saturate(160%); box-shadow: 0 24px 80px rgba(0,0,0,.35), inset 0 1px 1px rgba(255,255,255,.16); display: grid; grid-template-columns: 54px minmax(0,1fr); gap: 14px; align-items: start; contain: layout paint style; transform: translate3d(0,0,0); transition: background-color 180ms var(--voice-ease), border-color 180ms var(--voice-ease), box-shadow 180ms var(--voice-ease); will-change: transform, opacity; }
 #icon { width: 50px; height: 50px; border-radius: 16px; display: grid; place-items: center; background: color-mix(in srgb, var(--voice-accent) 22%, transparent); border: 1px solid color-mix(in srgb, var(--voice-accent) 42%, transparent); font-weight: 700; transform: translate3d(0,0,0); transition: transform 180ms var(--voice-ease), opacity 180ms var(--voice-ease), border-color 180ms var(--voice-ease); will-change: transform, opacity; }
 #title { font-size: 15px; font-weight: 650; line-height: 1.25; }
 #status { color: var(--voice-muted); font-size: 13px; margin-top: 3px; }
 #transcript { margin-top: 10px; min-height: 20px; max-width: 100%; font-size: 14px; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transform: translate3d(0,0,0); transition: opacity 160ms var(--voice-ease), transform 160ms var(--voice-ease); will-change: opacity, transform; }
+#assistant-response { margin-top: 10px; max-height: 154px; overflow: hidden auto; padding-right: 4px; opacity: 0; transform: translate3d(0, 6px, 0) scale(.992); transform-origin: top center; transition: opacity 180ms var(--voice-ease), transform 180ms var(--voice-ease); will-change: opacity, transform; contain: layout paint style; scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--voice-accent) 55%, transparent) transparent; }
+#assistant-response.visible { opacity: 1; transform: translate3d(0,0,0); }
+.voice-response-text { font-size: 13px; line-height: 1.35; color: var(--voice-text); overflow-wrap: anywhere; }
+.voice-card-list { display: grid; gap: 7px; margin: 9px 0 0; padding: 0; list-style: none; }
+.voice-card { display: grid; grid-template-columns: 26px minmax(0,1fr); gap: 8px; align-items: start; padding: 8px 9px; border-radius: 13px; border: 1px solid rgba(255,255,255,.13); background: rgba(255,255,255,.08); box-shadow: inset 0 1px 0 rgba(255,255,255,.08); contain: layout paint style; transform: translateZ(0); }
+.voice-card-number { width: 24px; height: 24px; border-radius: 9px; display: grid; place-items: center; color: var(--voice-text); background: color-mix(in srgb, var(--voice-accent) 28%, transparent); border: 1px solid color-mix(in srgb, var(--voice-accent) 45%, transparent); font-size: 12px; font-weight: 700; }
+.voice-card strong { display: block; min-width: 0; font-size: 13px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.voice-card small { display: block; margin-top: 3px; color: var(--voice-muted); font-size: 11px; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .listening #icon { animation: pulse 1.4s var(--voice-ease) infinite; }
 .processing #icon { animation: pulse 1.7s var(--voice-ease) infinite; }
 .error #icon { color: #ffb1b1; border-color: rgba(255,120,120,.45); }
@@ -273,6 +306,7 @@ body { animation: overlay-in 240ms var(--voice-ease) both; }
     <div id="title">Starting</div>
     <div id="status">Initializing voice...</div>
     <div id="transcript"></div>
+    <div id="assistant-response" aria-live="polite"></div>
   </section>
 </main>
 </body>
@@ -290,6 +324,60 @@ body { animation: overlay-in 240ms var(--voice-ease) both; }
     }
     if (this.screen?.getPrimaryDisplay) return this.screen.getPrimaryDisplay();
     return { workArea: { x: 0, y: 0, width: 1280, height: 720 } };
+  }
+
+  _currentSize() {
+    return this.sizeMode === 'expanded'
+      ? this.configuration.expandedSize
+      : this.configuration.size;
+  }
+
+  _setSizeMode(mode = 'compact', options = {}) {
+    const nextMode = mode === 'expanded' ? 'expanded' : 'compact';
+    if (!this.window || this._isDestroyed(this.window)) return null;
+    if (options.immediate) {
+      this._clearResizeTimer();
+      return this._applySizeMode(nextMode);
+    }
+    this.pendingSizeMode = nextMode;
+    this._clearResizeTimer();
+    this.resizeTimer = setTimeout(() => {
+      this.resizeTimer = null;
+      const pending = this.pendingSizeMode;
+      this.pendingSizeMode = null;
+      this._applySizeMode(pending);
+    }, Math.max(0, Number(options.delayMs) || 16));
+    if (typeof this.resizeTimer.unref === 'function') this.resizeTimer.unref();
+    return null;
+  }
+
+  _applySizeMode(mode = 'compact') {
+    const nextMode = mode === 'expanded' ? 'expanded' : 'compact';
+    this.sizeMode = nextMode;
+    return this.position(this._currentSize());
+  }
+
+  _clearResizeTimer() {
+    if (this.resizeTimer) {
+      clearTimeout(this.resizeTimer);
+      this.resizeTimer = null;
+    }
+    this.pendingSizeMode = null;
+  }
+
+  _boundsEqual(left, right) {
+    return Boolean(left && right &&
+      left.x === right.x &&
+      left.y === right.y &&
+      left.width === right.width &&
+      left.height === right.height);
+  }
+
+  _shouldExpandForAssistantResult(payload = {}) {
+    const choices = Array.isArray(payload.choices) ? payload.choices : [];
+    const resultEntries = Array.isArray(payload.resultEntries) ? payload.resultEntries : [];
+    const response = String(payload.response || '');
+    return choices.length > 0 || resultEntries.length > 0 || response.length > 120;
   }
 
   /**

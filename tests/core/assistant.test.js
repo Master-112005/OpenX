@@ -557,6 +557,48 @@ describe('Assistant Confirmation Flow', function() {
     assert.equal(selectedEntities.selectedPath, 'C:\\B\\Screenshots');
   });
 
+  it('should understand spoken numbered choices during voice folder clarification', async function() {
+    let selectedEntities = null;
+    const router = {
+      process: async () => ({
+        commandId: 'cmd-folder-voice',
+        success: false,
+        needsClarification: true,
+        intent: 'folder.open',
+        entities: { folderName: 'screenshots' },
+        data: {
+          choices: [
+            { index: 1, title: 'Screenshots - C:\\A\\Screenshots', path: 'C:\\A\\Screenshots' },
+            { index: 2, title: 'Screenshots - C:\\B\\Screenshots', path: 'C:\\B\\Screenshots' }
+          ]
+        },
+        response: 'I found multiple folders named "screenshots". Please say which one to open.'
+      }),
+      confirmAndExecute: async (commandId, intentId, entities) => {
+        selectedEntities = entities;
+        return {
+          commandId,
+          success: true,
+          intent: intentId,
+          entities,
+          response: 'Opening screenshots.'
+        };
+      }
+    };
+
+    const assistant = new Assistant({}, {
+      router,
+      automation: {},
+      eventBus: { publish() {} }
+    });
+
+    await assistant.processCommand('open screenshots folder', 'voice');
+    const second = await assistant.processCommand('one', 'voice');
+
+    assert.equal(second.success, true);
+    assert.equal(selectedEntities.selectedPath, 'C:\\A\\Screenshots');
+  });
+
   it('should keep file-list context for follow-up references like list them', async function() {
     const seenInputs = [];
     const router = {

@@ -33,6 +33,11 @@ describe('Electron Chat Shortcut', function() {
     assert.match(script, /voiceSessionManager\.startSpeechToText\(\)/);
     assert.match(script, /VOICE_SHORTCUT_DEBOUNCE_MS/);
     assert.match(script, /voiceStartInFlight/);
+    assert.match(script, /function handleVoiceShortcutDuringSpeaking\(shortcut = ''\)/);
+    assert.match(script, /VOICE_SPEAKING_DOUBLE_TAP_MS/);
+    assert.match(script, /voiceAssistantBridge\?\.coordinator\?\.stopSpeaking/);
+    assert.match(script, /Voice shortcut stopped assistant speech/);
+    assert.match(script, /Voice shortcut cancelled speaking session on second tap/);
     assert.match(script, /Registered voice shortcut/);
     assert.match(script, /Registered chat shortcut/);
     assert.doesNotMatch(script, /global chat shortcuts are disabled/i);
