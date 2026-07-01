@@ -3,7 +3,8 @@ const path = require('path');
 const {
   buildDataPaths,
   readJsonFile,
-  writeJsonAtomic
+  writeJsonAtomic,
+  migrateJsonArrayFile
 } = require('../assistant/Data');
 
 const ENTRY_TYPES = new Set(['calendar', 'timetable']);
@@ -195,19 +196,10 @@ class PlannerController {
     if (sourcePath === targetPath || !fs.existsSync(sourcePath)) return;
 
     try {
-      const sourceEntries = readJsonFile(sourcePath, [], {
-        createIfMissing: false,
-        validate: value => Array.isArray(value)
+      migrateJsonArrayFile(sourcePath, targetPath, {
+        limit: 500,
+        normalizeItem: entry => entry && ENTRY_TYPES.has(entry.type) && entry.id && entry.title ? entry : null
       });
-      const targetEntries = readJsonFile(targetPath, [], {
-        createIfMissing: false,
-        validate: value => Array.isArray(value)
-      });
-      const merged = [...targetEntries, ...sourceEntries]
-        .filter(entry => entry && ENTRY_TYPES.has(entry.type) && entry.id && entry.title)
-        .slice(-500);
-      writeJsonAtomic(targetPath, merged, { backup: true });
-      fs.unlinkSync(sourcePath);
     } catch (_) {
       // Planner migration is best effort; normal loading still uses the managed path.
     }

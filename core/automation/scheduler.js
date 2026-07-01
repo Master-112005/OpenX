@@ -7,7 +7,8 @@ const {
   EVENTS,
   buildDataPaths,
   readJsonFile,
-  writeJsonAtomic
+  writeJsonAtomic,
+  migrateJsonArrayFile
 } = require('../assistant/Data');
 
 const PRODUCT_NAME = 'OpenX';
@@ -505,20 +506,10 @@ class SchedulerController {
     if (sourcePath === targetPath || !fs.existsSync(sourcePath)) return;
 
     try {
-      const sourceItems = readJsonFile(sourcePath, [], {
-        createIfMissing: false,
-        validate: value => Array.isArray(value)
+      migrateJsonArrayFile(sourcePath, targetPath, {
+        limit: 100,
+        normalizeItem: item => this._normalizeStoredSchedule(item)
       });
-      const targetItems = readJsonFile(targetPath, [], {
-        createIfMissing: false,
-        validate: value => Array.isArray(value)
-      });
-      const merged = [...targetItems, ...sourceItems]
-        .map(item => this._normalizeStoredSchedule(item))
-        .filter(Boolean)
-        .slice(-100);
-      writeJsonAtomic(targetPath, merged, { backup: true });
-      fs.unlinkSync(sourcePath);
     } catch (error) {
       this.logger.warn('Could not migrate working-directory schedules', error.message);
     }

@@ -57,6 +57,20 @@ describe('Phone file transfer', function() {
     fs.rmSync(tempDir, { recursive: true, force: true });
   });
 
+  it('defaults transfer storage to managed OpenX data paths', function() {
+    const dataDir = path.join(tempDir, 'OpenX_Data');
+    const defaultManager = new FileTransferManager({
+      deviceRegistry: registry,
+      config: { app: { dataDir } },
+      logger: quietLogger()
+    });
+
+    assert.equal(defaultManager.receiveDirectory, path.join(dataDir, 'phone', 'received'));
+    assert.equal(defaultManager.tempDirectory, path.join(dataDir, 'runtime', 'phone-transfer'));
+    assert.equal(fs.existsSync(defaultManager.receiveDirectory), true);
+    assert.equal(fs.existsSync(defaultManager.tempDirectory), true);
+  });
+
   it('saves a trusted phone transfer and persists completed history', async function() {
     const content = Buffer.from('OpenX transfer test');
     const result = await manager.receiveFile({

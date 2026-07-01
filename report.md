@@ -468,11 +468,11 @@ The managed data root is:
 `core/assistant/Data.js` provides:
 
 - data-root and legacy-root resolution;
-- managed paths for settings, learning, schedules, logs, runtime state, media, screenshots, and backups;
+- managed paths for settings, learning, schedules, planner entries, logs, runtime state, media, screenshots, voice diagnostics, phone state, phone transfer history, received phone files, temporary transfer archives, and backups;
 - managed paths for phone pairing, trusted phone devices, phone permissions, and phone transfer history;
 - atomic file and JSON writes;
 - optional backup files;
-- migration from `%USERPROFILE%\.jarvis` without overwriting newer OpenX data;
+- migration from `%USERPROFILE%\.jarvis` and accidental project-root schedule/planner files without overwriting newer OpenX data;
 - redacting structured logging;
 - shared event names and event bus;
 - normalization, validation, and ID utilities.

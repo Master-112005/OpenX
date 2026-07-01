@@ -1,7 +1,7 @@
 const crypto = require('crypto');
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
+const { buildDataPaths } = require('../assistant/Data');
 const FileTransferProtocol = require('./FileTransferProtocol');
 const TransferHistory = require('./TransferHistory');
 const TransferIntegrity = require('./TransferIntegrity');
@@ -15,8 +15,9 @@ class FileTransferManager {
     this.protocol = options.protocol || new FileTransferProtocol();
     this.integrity = options.integrity || new TransferIntegrity();
     this.history = options.history || new TransferHistory({ config: options.config });
-    this.receiveDirectory = options.receiveDirectory || path.join(os.homedir(), 'Downloads', 'OpenX_Received');
-    this.tempDirectory = options.tempDirectory || path.join(os.tmpdir(), 'OpenX', 'phone-transfer');
+    const dataPaths = options.dataPaths || buildDataPaths(options.config);
+    this.receiveDirectory = options.receiveDirectory || dataPaths.phoneReceivedDir;
+    this.tempDirectory = options.tempDirectory || dataPaths.phoneTempDir;
     this.sendToDevice = options.sendToDevice || (async () => false);
     this.logger = options.logger || { info() {}, error() {} };
     this.now = options.now || (() => Date.now());

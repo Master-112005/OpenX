@@ -1,28 +1,16 @@
 'use strict';
 
 const path = require('path');
-const os = require('os');
-const fs = require('fs');
 
 const AliasStore = require('./AliasStore');
 const PreferenceStore = require('./PreferenceStore');
 const CorrectionStore = require('./CorrectionStore');
 const WorkflowStore = require('./WorkflowStore');
 const UsageStatsStore = require('./UsageStatsStore');
-
-const DATA_ROOT_NAME = 'OpenX_Data';
-const LEARNING_DIR_NAME = 'learning';
+const { ensureDataRoot } = require('../Data');
 
 function resolveLearningPath(config = {}) {
-  const configured = String(config?.app?.dataDir || process.env.OPENX_DATA_DIR || '').trim();
-  const dataRoot = path.resolve(configured || path.join(os.homedir(), DATA_ROOT_NAME));
-  return path.join(dataRoot, LEARNING_DIR_NAME);
-}
-
-function ensureDirectory(dir) {
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
+  return ensureDataRoot(config).learningDir;
 }
 
 class ActiveLearningManager {
@@ -34,7 +22,7 @@ class ActiveLearningManager {
   }
 
   _initializeStores() {
-    ensureDirectory(this.learningPath);
+    ensureDataRoot(this.config);
 
     this.aliasStore = new AliasStore(path.join(this.learningPath, 'aliases.json'));
     this.preferenceStore = new PreferenceStore(path.join(this.learningPath, 'preferences.json'));

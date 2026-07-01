@@ -1675,7 +1675,7 @@ async function initializeAssistant() {
     logger: mainLogger,
     configuration: {
       ...(runtimeConfig?.voice?.diagnostics || {}),
-      storageRoot: path.join(runtimeConfig.app.dataPaths.root, 'voice', 'diagnostics')
+      storageRoot: runtimeConfig.app.dataPaths.voiceDiagnosticsDir
     }
   });
   diagnosticsManager.start({
@@ -1714,7 +1714,7 @@ async function initializePhoneServer() {
   const fileTransferManager = new FileTransferManager({
     deviceRegistry,
     history: transferHistory,
-    receiveDirectory: path.join(app.getPath('downloads'), 'OpenX_Received'),
+    dataPaths: runtimeConfig.app.dataPaths,
     logger: mainLogger,
     sendToDevice: (deviceId, payload) => phoneServer?.sendToDevice(deviceId, payload) === true
   });

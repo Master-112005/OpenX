@@ -1897,6 +1897,39 @@ describe('Voice Subsystem Architecture', function() {
     diagnostics.stop();
   });
 
+  it('should write human-readable sanitized voice diagnostic log lines', function() {
+    const fs = require('fs');
+    const os = require('os');
+    const path = require('path');
+    const { VoiceLogger } = require('../../apps/desktop/voice');
+    const storageRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'openx-voice-log-'));
+    const logger = new VoiceLogger({
+      enabled: true,
+      configuration: { storageRoot, maximumLogSizeBytes: 4096 }
+    });
+
+    const result = logger.info('[Voice] Runtime pipeline: partial transcript updated', {
+      state: 'LISTENING',
+      recognitionCycleId: 'cycle-1',
+      transcript: 'open my private folder',
+      counters: {
+        audioFrames: 100,
+        processedFrames: 98,
+        sttFrames: 97,
+        partialTranscripts: 3
+      }
+    });
+    const content = fs.readFileSync(path.join(storageRoot, 'logs', 'voice.log'), 'utf8');
+
+    assert.equal(result.logged, true);
+    assert.match(result.line, /INFO\s+Voice\s+Runtime pipeline: partial transcript updated/);
+    assert.match(content, /state=LISTENING/);
+    assert.match(content, /recognition-cycle-id=cycle-1/);
+    assert.match(content, /transcript-length=22 chars/);
+    assert.match(content, /pipeline=audio:100,processed:98,stt:97,partial:3/);
+    assert.doesNotMatch(content, /open my private folder/);
+  });
+
   it('should track errors and health status without interrupting voice execution', function() {
     const fs = require('fs');
     const os = require('os');

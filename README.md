@@ -134,7 +134,7 @@ Runtime data is stored under:
 %USERPROFILE%\OpenX_Data\
 ```
 
-`core/assistant/Data.js` owns the data layout, atomic JSON writes, backups, logging helpers, and migration from the legacy `%USERPROFILE%\.jarvis` location. Settings, learning state, schedules, logs, media state, screenshots, and runtime files share the same managed root. OpenX does not maintain a contact store.
+`core/assistant/Data.js` owns the data layout, atomic JSON writes, backups, logging helpers, and migration from legacy locations. Settings, learning state, schedules, planner entries, logs, media runtime files, screenshots, voice diagnostics, phone pairing/device state, phone transfer history, received phone files, and temporary transfer archives share the same managed root. OpenX migrates legacy `%USERPROFILE%\.jarvis` files and accidental project-root `schedules.json`/`planner.json` files into `OpenX_Data`. OpenX does not maintain a contact store.
 
 ## Desktop application
 

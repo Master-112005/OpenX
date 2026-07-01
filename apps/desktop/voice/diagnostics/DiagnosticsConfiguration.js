@@ -1,7 +1,7 @@
 'use strict';
 
 const path = require('path');
-const os = require('os');
+const { buildDataPaths } = require('../../../../core/assistant/Data');
 const { DiagnosticsConfigurationError } = require('./DiagnosticsErrors');
 
 const DEFAULTS = Object.freeze({
@@ -16,7 +16,7 @@ const DEFAULTS = Object.freeze({
   maximumLogSizeBytes: 1024 * 1024,
   retentionDays: 14,
   debugMode: false,
-  storageRoot: path.join(os.homedir(), 'OpenX_Data', 'voice', 'diagnostics')
+  storageRoot: buildDataPaths().voiceDiagnosticsDir
 });
 
 /**

@@ -28,6 +28,7 @@ function buildDataPaths(config = {}) {
   const root = resolveDataRoot(config);
   const runtimeDir = path.join(root, 'runtime');
   const phoneDir = path.join(root, 'phone');
+  const voiceDir = path.join(root, 'voice');
 
   return {
     root,
@@ -35,6 +36,7 @@ function buildDataPaths(config = {}) {
     learningPath: path.join(root, 'learning.json'),
     schedulesPath: path.join(root, 'schedules.json'),
     plannerPath: path.join(root, 'planner.json'),
+    screenshotsDir: path.join(root, 'screenshots'),
     learningDir: path.join(root, 'learning'),
     learningAliasesPath: path.join(root, 'learning', 'aliases.json'),
     learningPreferencesPath: path.join(root, 'learning', 'preferences.json'),
@@ -45,7 +47,11 @@ function buildDataPaths(config = {}) {
     runtimeDir,
     cacheDir: path.join(root, 'cache'),
     mediaProfileDir: path.join(runtimeDir, 'chrome-media-profile'),
+    voiceDir,
+    voiceDiagnosticsDir: path.join(voiceDir, 'diagnostics'),
     phoneDir,
+    phoneReceivedDir: path.join(phoneDir, 'received'),
+    phoneTempDir: path.join(runtimeDir, 'phone-transfer'),
     phoneDevicesPath: path.join(phoneDir, 'devices.json'),
     phonePairingPath: path.join(phoneDir, 'pairing.json'),
     phonePermissionsPath: path.join(phoneDir, 'permissions.json'),
@@ -207,7 +213,12 @@ function ensureDataRoot(config = {}) {
     paths.runtimeDir,
     paths.cacheDir,
     paths.mediaProfileDir,
-    paths.phoneDir
+    paths.screenshotsDir,
+    paths.voiceDir,
+    paths.voiceDiagnosticsDir,
+    paths.phoneDir,
+    paths.phoneReceivedDir,
+    paths.phoneTempDir
   ].forEach(ensureDirectory);
   purgeDeprecatedContactStorage(paths.root);
   return paths;
@@ -230,6 +241,49 @@ function copyFileIfMissing(sourcePath, targetPath, migrated, skipped) {
   migrated.push({ sourcePath, targetPath });
 }
 
+function migrateJsonArrayFile(sourcePath, targetPath, options = {}) {
+  const migrated = [];
+  const skipped = [];
+  const resolvedSource = path.resolve(sourcePath);
+  const resolvedTarget = path.resolve(targetPath);
+  const removeSource = options.removeSource !== false;
+  const limit = Number.isInteger(options.limit) && options.limit > 0 ? options.limit : 1000;
+  const normalizeItem = typeof options.normalizeItem === 'function' ? options.normalizeItem : item => item;
+
+  if (resolvedSource === resolvedTarget) {
+    skipped.push({ sourcePath: resolvedSource, targetPath: resolvedTarget, reason: 'same-path' });
+    return { migrated, skipped, targetPath: resolvedTarget };
+  }
+
+  if (!fs.existsSync(resolvedSource)) {
+    skipped.push({ sourcePath: resolvedSource, reason: 'missing-source' });
+    return { migrated, skipped, targetPath: resolvedTarget };
+  }
+
+  const sourceItems = readJsonFile(resolvedSource, [], {
+    createIfMissing: false,
+    validate: value => Array.isArray(value)
+  });
+  const targetItems = readJsonFile(resolvedTarget, [], {
+    createIfMissing: false,
+    validate: value => Array.isArray(value)
+  });
+  const merged = [...targetItems, ...sourceItems]
+    .map(normalizeItem)
+    .filter(Boolean)
+    .slice(-limit);
+  writeJsonAtomic(resolvedTarget, merged, { backup: true });
+  if (removeSource) {
+    try {
+      fs.unlinkSync(resolvedSource);
+    } catch (error) {
+      skipped.push({ sourcePath: resolvedSource, reason: 'remove-failed', error: error.message });
+    }
+  }
+  migrated.push({ sourcePath: resolvedSource, targetPath: resolvedTarget, count: sourceItems.length });
+  return { migrated, skipped, targetPath: resolvedTarget };
+}
+
 function migrateLegacyData(config = {}) {
   const paths = ensureDataRoot(config);
   const legacyRoot = resolveLegacyDataRoot(config);
@@ -248,6 +302,8 @@ function migrateLegacyData(config = {}) {
 
   copyFileIfMissing(path.join(legacyRoot, 'settings.json'), paths.settingsPath, migrated, skipped);
   copyFileIfMissing(path.join(legacyRoot, 'learning.json'), paths.learningPath, migrated, skipped);
+  copyFileIfMissing(path.join(legacyRoot, 'schedules.json'), paths.schedulesPath, migrated, skipped);
+  copyFileIfMissing(path.join(legacyRoot, 'planner.json'), paths.plannerPath, migrated, skipped);
 
   return { dataRoot: paths.root, legacyRoot, migrated, skipped };
 }
@@ -263,6 +319,7 @@ return {
   readJsonFile,
   writeFileAtomic,
   writeJsonAtomic,
+  migrateJsonArrayFile,
   migrateLegacyData
 };
 
@@ -351,6 +408,8 @@ const { buildDataPaths } = dataRootModule;
 const DEFAULT_MAX_LOG_SIZE = 10 * 1024 * 1024;
 const DEFAULT_MAX_LOG_FILES = 5;
 const SENSITIVE_KEY_PATTERN = /(?:password|passcode|token|secret|authorization|cookie|credential|api[_-]?key)/i;
+const HUMAN_VOICE_LOG_PATTERN = /^(?:\[(?:Voice|Voice UI|Voice Integration|Audio|Audio Processing|STT)\]|Voice\b|TTS\b)/i;
+const VOICE_PRIVATE_KEY_PATTERN = /(?:transcript|input|text|response|audio|pcm|buffer|sample|samples)/i;
 
 function dateStamp(date = new Date()) {
   return date.toISOString().slice(0, 10);
@@ -378,7 +437,7 @@ class Logger {
   _log(level, message, data) {
     if (this.levels[level] > this.levels[this.level]) return;
     const redactedData = this._redact(data || null);
-    const suffix = this._formatData(redactedData);
+    const suffix = this._formatData(redactedData, message);
     const entry = {
       timestamp: new Date().toISOString(),
       level,
@@ -395,13 +454,18 @@ class Logger {
     this._writeEntry(level === 'error' ? 'error' : 'app', entry);
   }
 
-  _formatData(data) {
+  _formatData(data, message = '') {
     if (data === undefined || data === null || data === '') {
       return '';
     }
 
     if (typeof data === 'string') {
       return ` ${data}`;
+    }
+
+    if (this._shouldHumanizeVoiceData(message, data)) {
+      const summary = this._formatHumanData(data);
+      if (summary) return ` | ${summary}`;
     }
 
     try {
@@ -413,6 +477,111 @@ class Logger {
     } catch (error) {
       return ` ${String(data)}`;
     }
+  }
+
+  _shouldHumanizeVoiceData(message, data) {
+    return typeof message === 'string' &&
+      HUMAN_VOICE_LOG_PATTERN.test(message) &&
+      data &&
+      typeof data === 'object' &&
+      !Array.isArray(data);
+  }
+
+  _formatHumanData(data) {
+    const pairs = [];
+    const push = (key, value) => {
+      if (pairs.length >= 14 || value === undefined || value === null || value === '') return;
+      pairs.push(`${key}=${this._formatHumanValue(key, value)}`);
+    };
+
+    const preferredKeys = [
+      'state',
+      'from',
+      'to',
+      'reason',
+      'phase',
+      'runId',
+      'sessionId',
+      'recognitionCycleId',
+      'frameIndex',
+      'audioFrames',
+      'processedFrames',
+      'sttFrames',
+      'partialTranscripts',
+      'finalTranscripts',
+      'endpointDetections',
+      'droppedFrames',
+      'error'
+    ];
+
+    for (const key of preferredKeys) {
+      if (Object.prototype.hasOwnProperty.call(data, key)) push(this._humanKey(key), data[key]);
+    }
+
+    if (data.session && typeof data.session === 'object') {
+      push('session', data.session.sessionId || data.session.id || data.session.state || 'active');
+    }
+    if (data.recognitionCycle && typeof data.recognitionCycle === 'object') {
+      push('cycle', data.recognitionCycle.id || data.recognitionCycle.phase || 'active');
+    }
+    if (data.counters && typeof data.counters === 'object') {
+      const counters = data.counters;
+      const compactCounters = [
+        ['audio', counters.audioFrames],
+        ['processed', counters.processedFrames],
+        ['stt', counters.sttFrames],
+        ['partial', counters.partialTranscripts],
+        ['final', counters.finalTranscripts],
+        ['busy', counters.audioFramesWhileBusy],
+        ['stale', counters.staleAudioFrames],
+        ['endpoints', counters.endpointDetections]
+      ]
+        .filter(([, value]) => Number(value) > 0)
+        .map(([name, value]) => `${name}:${value}`)
+        .join(',');
+      push('pipeline', compactCounters || 'idle');
+    }
+
+    for (const [key, value] of Object.entries(data)) {
+      if (pairs.length >= 14) break;
+      if (preferredKeys.includes(key) || ['session', 'recognitionCycle', 'counters'].includes(key)) continue;
+      if (value && typeof value === 'object' && !Array.isArray(value)) {
+        const id = value.id || value.sessionId || value.deviceId || value.name || value.state || value.message;
+        push(this._humanKey(key), id || '[object]');
+      } else {
+        push(this._humanKey(key), value);
+      }
+    }
+
+    return pairs.join(' | ');
+  }
+
+  _formatHumanValue(key, value) {
+    const normalizedKey = String(key || '');
+    if (VOICE_PRIVATE_KEY_PATTERN.test(normalizedKey)) {
+      if (typeof value === 'string') return `[${value.length} chars]`;
+      if (Array.isArray(value)) return `[${value.length} items]`;
+      if (Buffer.isBuffer(value)) return `[${value.length} bytes]`;
+      return '[redacted]';
+    }
+    if (value instanceof Error) return value.message;
+    if (typeof value === 'boolean') return value ? 'yes' : 'no';
+    if (typeof value === 'number') return Number.isInteger(value) ? String(value) : value.toFixed(3);
+    if (typeof value === 'string') {
+      const normalized = value.replace(/\s+/g, ' ').trim();
+      if (!normalized) return 'empty';
+      return /[\s|=]/.test(normalized) ? `"${normalized.slice(0, 120)}"` : normalized.slice(0, 120);
+    }
+    if (Array.isArray(value)) return `[${value.length} items]`;
+    if (value && typeof value === 'object') return value.message || value.name || value.id || '[object]';
+    return String(value);
+  }
+
+  _humanKey(key) {
+    return String(key || '')
+      .replace(/([a-z0-9])([A-Z])/g, '$1-$2')
+      .replace(/[_\s]+/g, '-')
+      .toLowerCase();
   }
 
   _redact(value, depth = 0) {

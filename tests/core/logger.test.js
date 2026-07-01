@@ -88,4 +88,33 @@ describe('Structured Logger', function() {
     assert.equal(errorEntry.data.message, 'executable missing');
     assert.match(errorEntry.data.stack, /executable missing/);
   });
+
+  it('should print voice logs as compact human-readable summaries', function() {
+    const logger = new Logger({ directory, file: false });
+    const originalLog = console.log;
+    let output = '';
+    console.log = value => { output += value; };
+    try {
+      logger.info('[Voice] Runtime pipeline: audio frame received', {
+        state: 'LISTENING',
+        recognitionCycleId: 'cycle-2',
+        text: 'open private file',
+        counters: {
+          audioFrames: 50,
+          processedFrames: 49,
+          sttFrames: 48,
+          partialTranscripts: 2,
+          finalTranscripts: 0
+        }
+      });
+    } finally {
+      console.log = originalLog;
+    }
+
+    assert.match(output, /state=LISTENING/);
+    assert.match(output, /recognition-cycle-id=cycle-2/);
+    assert.match(output, /pipeline=audio:50,processed:49,stt:48,partial:2/);
+    assert.match(output, /text=\[17 chars\]/);
+    assert.doesNotMatch(output, /open private file/);
+  });
 });

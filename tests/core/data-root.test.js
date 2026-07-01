@@ -18,10 +18,15 @@ describe('Assistant Data Root', function() {
     assert.equal(paths.learningPath, path.join(paths.root, 'learning.json'));
     assert.equal(paths.schedulesPath, path.join(paths.root, 'schedules.json'));
     assert.equal(paths.plannerPath, path.join(paths.root, 'planner.json'));
+    assert.equal(paths.screenshotsDir, path.join(paths.root, 'screenshots'));
     assert.equal(paths.learningDir, path.join(paths.root, 'learning'));
     assert.equal(paths.logsDir, path.join(paths.root, 'logs'));
     assert.equal(paths.mediaProfileDir, path.join(paths.root, 'runtime', 'chrome-media-profile'));
+    assert.equal(paths.voiceDir, path.join(paths.root, 'voice'));
+    assert.equal(paths.voiceDiagnosticsDir, path.join(paths.voiceDir, 'diagnostics'));
     assert.equal(paths.phoneDir, path.join(paths.root, 'phone'));
+    assert.equal(paths.phoneReceivedDir, path.join(paths.phoneDir, 'received'));
+    assert.equal(paths.phoneTempDir, path.join(paths.root, 'runtime', 'phone-transfer'));
     assert.equal(paths.phoneDevicesPath, path.join(paths.phoneDir, 'devices.json'));
     assert.equal(paths.phonePairingPath, path.join(paths.phoneDir, 'pairing.json'));
     assert.equal(paths.phonePermissionsPath, path.join(paths.phoneDir, 'permissions.json'));
@@ -39,7 +44,11 @@ describe('Assistant Data Root', function() {
     assert.ok(fs.existsSync(paths.runtimeDir));
     assert.ok(fs.existsSync(paths.cacheDir));
     assert.ok(fs.existsSync(paths.mediaProfileDir));
+    assert.ok(fs.existsSync(paths.screenshotsDir));
+    assert.ok(fs.existsSync(paths.voiceDiagnosticsDir));
     assert.ok(fs.existsSync(paths.phoneDir));
+    assert.ok(fs.existsSync(paths.phoneReceivedDir));
+    assert.ok(fs.existsSync(paths.phoneTempDir));
   });
 
   it('should purge deprecated contact-store files from managed data', function() {
@@ -58,6 +67,8 @@ describe('Assistant Data Root', function() {
     const legacyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openx-data-legacy-'));
     fs.writeFileSync(path.join(legacyDir, 'settings.json'), '{"assistant":{"displayName":"Old"}}', 'utf8');
     fs.writeFileSync(path.join(legacyDir, 'learning.json'), '{"version":1}', 'utf8');
+    fs.writeFileSync(path.join(legacyDir, 'schedules.json'), '[]', 'utf8');
+    fs.writeFileSync(path.join(legacyDir, 'planner.json'), '[]', 'utf8');
 
     const result = dataRoot.migrateLegacyData({
       app: {
@@ -67,9 +78,11 @@ describe('Assistant Data Root', function() {
       }
     });
 
-    assert.equal(result.migrated.length, 2);
+    assert.equal(result.migrated.length, 4);
     assert.ok(fs.existsSync(path.join(dataDir, 'settings.json')));
     assert.ok(fs.existsSync(path.join(dataDir, 'learning.json')));
+    assert.ok(fs.existsSync(path.join(dataDir, 'schedules.json')));
+    assert.ok(fs.existsSync(path.join(dataDir, 'planner.json')));
 
     fs.writeFileSync(path.join(legacyDir, 'settings.json'), '{"assistant":{"displayName":"Changed"}}', 'utf8');
     const second = dataRoot.migrateLegacyData({
@@ -82,6 +95,27 @@ describe('Assistant Data Root', function() {
 
     assert.equal(second.migrated.length, 0);
     assert.match(fs.readFileSync(path.join(dataDir, 'settings.json'), 'utf8'), /Old/);
+  });
+
+  it('should merge accidental root JSON arrays into managed data and remove the source', function() {
+    const sourceDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openx-source-json-'));
+    const targetDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openx-target-json-'));
+    const sourcePath = path.join(sourceDir, 'schedules.json');
+    const targetPath = path.join(targetDir, 'schedules.json');
+    dataRoot.writeJsonAtomic(targetPath, [{ id: 'existing' }], { backup: false });
+    fs.writeFileSync(sourcePath, JSON.stringify([{ id: 'legacy' }, { id: '' }]), 'utf8');
+
+    const result = dataRoot.migrateJsonArrayFile(sourcePath, targetPath, {
+      limit: 5,
+      normalizeItem: item => item?.id ? item : null
+    });
+
+    assert.equal(result.migrated.length, 1);
+    assert.equal(fs.existsSync(sourcePath), false);
+    assert.deepEqual(JSON.parse(fs.readFileSync(targetPath, 'utf8')), [
+      { id: 'existing' },
+      { id: 'legacy' }
+    ]);
   });
 
   it('should recover JSON files from backup when the primary file is corrupt', function() {

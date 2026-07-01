@@ -1,8 +1,7 @@
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
-const Logger = require('../assistant/Data').Logger;
+const { buildDataPaths, Logger } = require('../assistant/Data');
 
 function escapePowerShell(value) {
   return String(value ?? '').replace(/'/g, "''");
@@ -11,7 +10,8 @@ function escapePowerShell(value) {
 class ScreenshotController {
   constructor(config) {
     this.logger = new Logger(config?.logging || { level: 'info' });
-    this.outputDirectory = config?.screenshots?.directory || path.join(os.homedir(), 'Pictures', 'Screenshots');
+    const dataPaths = config?.app?.dataPaths || buildDataPaths(config);
+    this.outputDirectory = config?.screenshots?.directory || dataPaths.screenshotsDir;
   }
 
   capture() {
