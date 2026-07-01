@@ -2,9 +2,11 @@ const path = require('path');
 const TransferIntegrity = require('./TransferIntegrity');
 
 const MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024;
+const DEFAULT_CHUNK_BYTES = 256 * 1024;
 const MAX_BASE64_LENGTH = Math.ceil(MAX_FILE_SIZE_BYTES / 3) * 4;
 const MAX_WEBSOCKET_PAYLOAD_BYTES = MAX_BASE64_LENGTH + 64 * 1024;
 const DEVICE_ID_PATTERN = /^[A-Za-z0-9._-]{1,128}$/;
+const TRANSFER_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 const RESERVED_WINDOWS_NAMES = /^(con|prn|aux|nul|com[1-9]|lpt[1-9])(?:\.|$)/i;
 
 class FileTransferProtocolError extends Error {
@@ -41,7 +43,7 @@ class FileTransferProtocol {
     const data = this.decodeBase64(payload.data, fileSize);
     let sha256;
     try {
-      sha256 = this.integrity.validateHash(payload.sha256);
+      sha256 = this.validateHash(payload.sha256 || payload.hash);
     } catch (_) {
       throw new FileTransferProtocolError('Missing or invalid file hash.', 'hash_invalid');
     }
@@ -55,14 +57,58 @@ class FileTransferProtocol {
       throw new FileTransferProtocolError('File data must be a buffer.');
     }
     const fileSize = this.validateFileSize(data.length);
+    const sha256 = this.integrity.createHash(data);
     return {
       type: 'file-transfer',
       deviceId: normalizedDeviceId,
       fileName: normalizedFileName,
       fileSize,
-      sha256: this.integrity.createHash(data),
+      sha256,
+      hash: sha256,
       data: data.toString('base64')
     };
+  }
+
+  validateTransferId(transferId) {
+    const normalized = typeof transferId === 'string' ? transferId.trim() : '';
+    if (!TRANSFER_ID_PATTERN.test(normalized)) {
+      throw new FileTransferProtocolError('Invalid transfer ID.');
+    }
+    return normalized;
+  }
+
+  validateHash(hash) {
+    try {
+      return this.integrity.validateHash(hash);
+    } catch (_) {
+      throw new FileTransferProtocolError('Missing or invalid file hash.', 'hash_invalid');
+    }
+  }
+
+  validateChunkIndex(chunkIndex) {
+    const normalized = Number(chunkIndex);
+    if (!Number.isSafeInteger(normalized) || normalized < 0) {
+      throw new FileTransferProtocolError('Invalid file chunk.', 'invalid_chunk');
+    }
+    return normalized;
+  }
+
+  validateChunkCount(chunkCount) {
+    const normalized = Number(chunkCount);
+    if (!Number.isSafeInteger(normalized) || normalized < 1) {
+      throw new FileTransferProtocolError('Invalid file chunk count.', 'invalid_chunk');
+    }
+    return normalized;
+  }
+
+  decodeChunk(value) {
+    if (typeof value !== 'string' || value.length === 0 || value.length > this.maxBase64Length) {
+      throw new FileTransferProtocolError('Malformed file chunk.', 'invalid_chunk');
+    }
+    if (value.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(value)) {
+      throw new FileTransferProtocolError('Malformed file chunk.', 'invalid_chunk');
+    }
+    return Buffer.from(value, 'base64');
   }
 
   validateFileName(fileName) {
@@ -113,6 +159,7 @@ class FileTransferProtocol {
 }
 
 FileTransferProtocol.MAX_FILE_SIZE_BYTES = MAX_FILE_SIZE_BYTES;
+FileTransferProtocol.DEFAULT_CHUNK_BYTES = DEFAULT_CHUNK_BYTES;
 FileTransferProtocol.MAX_WEBSOCKET_PAYLOAD_BYTES = MAX_WEBSOCKET_PAYLOAD_BYTES;
 FileTransferProtocol.Error = FileTransferProtocolError;
 

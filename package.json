@@ -1,6 +1,6 @@
 {
   "name": "openx",
-  "version": "2.5.0",
+  "version": "3.1.0",
   "private": true,
   "productName": "OpenX",
   "description": "Deterministic, local-first Windows desktop assistant",
@@ -34,8 +34,8 @@
     "test:learning": "mocha \"tests/core/active-learning-v2.test.js\" \"tests/core/learning.test.js\" \"tests/core/learning-repair.test.js\"",
     "test:ui": "mocha \"tests/ui/**/*.test.js\"",
     "validate": "npm run lint && npm test",
-    "build": "electron-builder --dir --win --x64",
-    "package": "electron-builder --win nsis --x64"
+    "build": "electron-builder --dir --win --x64 --publish never",
+    "package": "electron-builder --win nsis --x64 --publish never"
   },
   "dependencies": {
     "active-win": "8.2.1",
@@ -59,6 +59,9 @@
     "productName": "OpenX",
     "copyright": "Copyright (c) 2024-2026 RAKESH",
     "asar": true,
+    "asarUnpack": [
+      "node_modules/sherpa-onnx-node/**/*"
+    ],
     "compression": "maximum",
     "directories": {
       "output": "dist",
@@ -76,6 +79,29 @@
       "!**/.DS_Store",
       "!**/Thumbs.db"
     ],
+    "extraFiles": [
+      {
+        "from": "models/parakeet",
+        "to": "models/parakeet",
+        "filter": [
+          "encoder.int8.onnx",
+          "decoder.int8.onnx",
+          "joiner.int8.onnx",
+          "tokens.txt"
+        ]
+      },
+      {
+        "from": "build/openx-chrome-host.exe",
+        "to": "build/openx-chrome-host.exe"
+      }
+    ],
+    "extraResources": [
+      {
+        "from": "build/openx-chrome-host.exe",
+        "to": "native-messaging/openx-chrome-host.exe"
+      }
+    ],
+    "publish": null,
     "win": {
       "icon": "build/icon.ico",
       "artifactName": "OpenX-Setup-${version}-${arch}.${ext}",

@@ -96,6 +96,21 @@ describe('Phone file transfer', function() {
     assert.deepEqual(new TransferHistory({ filePath: historyPath }).list(), [result.record]);
   });
 
+  it('accepts the mobile hash alias for incoming transfers', async function() {
+    const content = Buffer.from('mobile hash alias');
+    const result = await manager.receiveFile({
+      type: 'file-transfer',
+      deviceId: 'phone001',
+      fileName: 'alias.txt',
+      fileSize: content.length,
+      hash: new TransferIntegrity().createHash(content),
+      data: content.toString('base64')
+    });
+
+    assert.deepEqual(fs.readFileSync(result.filePath), content);
+    assert.equal(result.record.status, 'completed');
+  });
+
   it('rejects transfers from untrusted devices before decoding file data', async function() {
     await assert.rejects(
       () => manager.receiveFile({
@@ -228,5 +243,93 @@ describe('Phone file transfer', function() {
 
     assert.deepEqual(await responsePromise, { type: 'file-transfer-success' });
     assert.deepEqual(fs.readFileSync(path.join(receiveDirectory, 'socket.txt')), content);
+  });
+
+  it('handles chunked mobile uploads through the WebSocket protocol', async function() {
+    const pairingService = new PairingService({
+      deviceRegistry: registry,
+      identityVerificationService: { verifyIdentity: async () => ({ success: true }) },
+      pairingPath: path.join(tempDir, 'pairing.json'),
+      permissionsPath: path.join(tempDir, 'permissions.json')
+    });
+    const session = pairingService.sessionManager.createSession('phone001');
+    server = new PhoneServer({
+      port: 0,
+      commandRouter: new PhoneCommandRouter({ processCommand: async () => ({ success: true }) }),
+      pairingService,
+      fileTransferManager: manager,
+      logger: quietLogger()
+    });
+    const address = await server.start();
+    socket = new WebSocket(`ws://127.0.0.1:${address.port}?deviceId=phone001`);
+    const statusPromise = nextJson(socket);
+    await once(socket, 'open');
+    await statusPromise;
+
+    const transferId = 'chunk-transfer-1';
+    const content = Buffer.concat([
+      Buffer.from('first chunk|'),
+      Buffer.alloc(64 * 1024, 7),
+      Buffer.from('|last chunk')
+    ]);
+    const encoded = content.toString('base64');
+    const midpoint = Math.ceil(encoded.length / 8) * 4;
+    const chunks = [
+      encoded.slice(0, midpoint),
+      encoded.slice(midpoint)
+    ];
+
+    const startedPromise = nextJson(socket);
+    socket.send(JSON.stringify({
+      type: 'file-transfer-start',
+      deviceId: 'phone001',
+      sessionToken: session.sessionToken,
+      requestId: transferId,
+      transferId,
+      timestamp: Date.now(),
+      fileName: 'chunked.bin',
+      fileSize: content.length,
+      hash: new TransferIntegrity().createHash(content),
+      chunkCount: chunks.length
+    }));
+    assert.deepEqual(await startedPromise, {
+      type: 'file-transfer-started',
+      transferId,
+      fileName: 'chunked.bin',
+      fileSize: content.length
+    });
+
+    const progressPromise = nextJson(socket);
+    for (let index = 0; index < chunks.length; index += 1) {
+      socket.send(JSON.stringify({
+        type: 'file-transfer-chunk',
+        deviceId: 'phone001',
+        sessionToken: session.sessionToken,
+        requestId: `${transferId}:${index}`,
+        transferId,
+        timestamp: Date.now(),
+        chunkIndex: index,
+        data: chunks[index]
+      }));
+    }
+
+    assert.equal((await progressPromise).type, 'file-transfer-progress');
+    const successPromise = nextJson(socket);
+    socket.send(JSON.stringify({
+      type: 'file-transfer-complete',
+      deviceId: 'phone001',
+      sessionToken: session.sessionToken,
+      requestId: `${transferId}:complete`,
+      transferId,
+      timestamp: Date.now()
+    }));
+
+    assert.deepEqual(await successPromise, {
+      type: 'file-transfer-success',
+      transferId,
+      fileName: 'chunked.bin',
+      fileSize: content.length
+    });
+    assert.deepEqual(fs.readFileSync(path.join(receiveDirectory, 'chunked.bin')), content);
   });
 });

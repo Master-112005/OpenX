@@ -22,6 +22,7 @@ class FileTransferManager {
     this.logger = options.logger || { info() {}, error() {} };
     this.now = options.now || (() => Date.now());
     this.reservedPaths = new Set();
+    this.incomingTransfers = new Map();
     fs.mkdirSync(this.receiveDirectory, { recursive: true });
     fs.mkdirSync(this.tempDirectory, { recursive: true });
   }
@@ -133,6 +134,155 @@ class FileTransferManager {
     }
   }
 
+  async startIncomingTransfer(payload) {
+    let metadata = null;
+    let reservedDestination = null;
+    let tempPath = null;
+    try {
+      const deviceId = this.protocol.getDeviceId(payload);
+      this._assertTrusted(deviceId);
+      this._assertPermission(deviceId, 'fileTransfer', 'File transfer disabled.');
+      this._assertPermission(deviceId, 'receiveFiles', 'Receiving files disabled.');
+      const transferId = this.protocol.validateTransferId(payload.transferId || payload.requestId);
+      if (this.incomingTransfers.has(transferId)) {
+        throw new FileTransferProtocol.Error('Transfer already exists.', 'duplicate_transfer');
+      }
+      const fileName = this.protocol.validateFileName(payload.fileName);
+      const fileSize = this.protocol.validateFileSize(payload.fileSize);
+      const sha256 = this.protocol.validateHash(payload.sha256 || payload.hash);
+      const chunkCount = this.protocol.validateChunkCount(payload.chunkCount);
+      const destination = this._reserveDestination(fileName);
+      reservedDestination = destination;
+      tempPath = this._temporaryTransferPath(destination, transferId);
+      metadata = { deviceId, fileName, fileSize, sha256 };
+
+      await fs.promises.mkdir(this.tempDirectory, { recursive: true });
+      await fs.promises.writeFile(tempPath, Buffer.alloc(0), { flag: 'wx', mode: 0o600 });
+      this.incomingTransfers.set(transferId, {
+        transferId,
+        deviceId,
+        fileName,
+        fileSize,
+        sha256,
+        chunkCount,
+        destination,
+        tempPath,
+        receivedBytes: 0,
+        nextChunkIndex: 0,
+        hash: crypto.createHash('sha256'),
+        writePromise: Promise.resolve(),
+        startedAt: this.now()
+      });
+
+      this.logger.info('[PHONE] Chunked transfer started', {
+        deviceId,
+        fileName,
+        fileSize,
+        chunkCount,
+        direction: 'phone-to-desktop'
+      });
+      return { transferId, fileName, fileSize, chunkCount };
+    } catch (error) {
+      if (reservedDestination) this.reservedPaths.delete(reservedDestination);
+      if (tempPath) await fs.promises.rm(tempPath, { force: true });
+      if (metadata) this._record(metadata, 'phone-to-desktop', 'failed');
+      this.logger.error('[PHONE] Chunked transfer failed to start', {
+        deviceId: metadata?.deviceId || payload?.deviceId || null,
+        fileName: metadata?.fileName || payload?.fileName || null,
+        error: error.message
+      });
+      throw error;
+    }
+  }
+
+  async receiveFileChunk(payload) {
+    const transferId = this.protocol.validateTransferId(payload.transferId);
+    const state = this.incomingTransfers.get(transferId);
+    if (!state) throw new FileTransferProtocol.Error('Transfer was not started.', 'transfer_not_found');
+
+    try {
+      const deviceId = this.protocol.getDeviceId(payload);
+      if (deviceId !== state.deviceId) {
+        throw new FileTransferProtocol.Error('Transfer device mismatch.', 'device_mismatch');
+      }
+      const chunkIndex = this.protocol.validateChunkIndex(payload.chunkIndex);
+      if (chunkIndex !== state.nextChunkIndex) {
+        throw new FileTransferProtocol.Error('File chunks arrived out of order.', 'invalid_chunk_order');
+      }
+      const chunk = this.protocol.decodeChunk(payload.data);
+      if (state.receivedBytes + chunk.length > state.fileSize) {
+        throw new FileTransferProtocol.Error('File chunk exceeds declared file size.', 'file_size_mismatch');
+      }
+
+      state.writePromise = state.writePromise.then(async () => {
+        await fs.promises.appendFile(state.tempPath, chunk);
+        state.hash.update(chunk);
+      });
+      await state.writePromise;
+      state.receivedBytes += chunk.length;
+      state.nextChunkIndex += 1;
+
+      return {
+        transferId,
+        receivedBytes: state.receivedBytes,
+        fileSize: state.fileSize,
+        complete: state.receivedBytes === state.fileSize
+      };
+    } catch (error) {
+      await this._failIncomingTransfer(transferId, state, error);
+      throw error;
+    }
+  }
+
+  async completeIncomingTransfer(payload) {
+    const transferId = this.protocol.validateTransferId(payload.transferId);
+    const state = this.incomingTransfers.get(transferId);
+    if (!state) throw new FileTransferProtocol.Error('Transfer was not started.', 'transfer_not_found');
+
+    try {
+      const deviceId = this.protocol.getDeviceId(payload);
+      if (deviceId !== state.deviceId) {
+        throw new FileTransferProtocol.Error('Transfer device mismatch.', 'device_mismatch');
+      }
+      await state.writePromise;
+      if (state.nextChunkIndex !== state.chunkCount || state.receivedBytes !== state.fileSize) {
+        throw new FileTransferProtocol.Error('Incomplete file transfer.', 'incomplete_transfer');
+      }
+      const actualHash = state.hash.digest('hex');
+      if (actualHash !== state.sha256) {
+        throw new FileTransferProtocol.Error('File integrity verification failed.', 'hash_mismatch');
+      }
+      await fs.promises.rename(state.tempPath, state.destination);
+      this.incomingTransfers.delete(transferId);
+      this.reservedPaths.delete(state.destination);
+      const metadata = {
+        deviceId: state.deviceId,
+        fileName: state.fileName,
+        fileSize: state.fileSize
+      };
+      const record = this._record(metadata, 'phone-to-desktop', 'completed');
+      this.deviceRegistry.updateLastSeen(state.deviceId);
+      this.logger.info('[PHONE] Chunked transfer completed', {
+        deviceId: state.deviceId,
+        fileName: state.fileName,
+        fileSize: state.fileSize,
+        direction: 'phone-to-desktop'
+      });
+      return { record, filePath: state.destination };
+    } catch (error) {
+      await this._failIncomingTransfer(transferId, state, error);
+      throw error;
+    }
+  }
+
+  async abortIncomingTransfer(transferId, reason = 'transfer_aborted') {
+    const normalizedTransferId = this.protocol.validateTransferId(transferId);
+    const state = this.incomingTransfers.get(normalizedTransferId);
+    if (!state) return false;
+    await this._failIncomingTransfer(normalizedTransferId, state, new FileTransferProtocol.Error('Transfer aborted.', reason));
+    return true;
+  }
+
   async zipFolder(folderPath) {
     const resolvedFolder = path.resolve(String(folderPath || ''));
     const stats = await fs.promises.stat(resolvedFolder);
@@ -217,6 +367,34 @@ class FileTransferManager {
       await fs.promises.rm(tempPath, { force: true });
       throw error;
     }
+  }
+
+  _temporaryTransferPath(destination, transferId) {
+    const safeTransferId = String(transferId).replace(/[^A-Za-z0-9._-]/g, '_');
+    return path.join(
+      this.tempDirectory,
+      `.${path.basename(destination)}.${process.pid}.${safeTransferId}.${crypto.randomBytes(8).toString('hex')}.part`
+    );
+  }
+
+  async _failIncomingTransfer(transferId, state, error) {
+    this.incomingTransfers.delete(transferId);
+    this.reservedPaths.delete(state.destination);
+    try {
+      await state.writePromise;
+    } catch (_) {}
+    await fs.promises.rm(state.tempPath, { force: true });
+    this._record({
+      deviceId: state.deviceId,
+      fileName: state.fileName,
+      fileSize: state.fileSize
+    }, 'phone-to-desktop', 'failed');
+    this.logger.error('[PHONE] Chunked transfer failed', {
+      deviceId: state.deviceId,
+      fileName: state.fileName,
+      transferId,
+      error: error.message
+    });
   }
 }
 

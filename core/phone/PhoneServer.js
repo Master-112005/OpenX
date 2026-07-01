@@ -43,6 +43,8 @@ class PhoneServer {
     });
     this.connectionManager = options.connectionManager || new PhoneConnectionManager();
     this.clients = this.connectionManager.clients;
+    this.activeTransfersByClient = new Map();
+    this.messageQueues = new Map();
     this.server = null;
     this.startPromise = null;
   }
@@ -94,7 +96,11 @@ class PhoneServer {
     this.server = null;
     this.startPromise = null;
     if (!server) {
+      for (const clientId of this.activeTransfersByClient.keys()) {
+        this._abortClientTransfers(clientId, 'server_stopped');
+      }
       this.connectionManager.clear();
+      this.messageQueues.clear();
       this.pairingService.destroy?.();
       return;
     }
@@ -107,7 +113,12 @@ class PhoneServer {
         client.socket.terminate?.();
       }
     }
+    for (const clientId of this.activeTransfersByClient.keys()) {
+      this._abortClientTransfers(clientId, 'server_stopped');
+    }
     this.connectionManager.clear();
+    this.activeTransfersByClient.clear();
+    this.messageQueues.clear();
     this.pairingService.destroy?.();
 
     await new Promise((resolve, reject) => {
@@ -212,18 +223,32 @@ class PhoneServer {
     this.logger.info('[PHONE] Connected', { clientId, ...metadata });
     this.sendToClient(clientId, { type: 'status', status: 'connected' });
 
-    socket.on('message', data => {
-      this._handleMessage(clientId, data).catch(error => {
-        this.logger.error('[PHONE] Command Error', { clientId, error: error.message });
-        this.sendToClient(clientId, { type: 'error', message: 'Unable to execute command' });
-      });
-    });
+    socket.on('message', data => this._enqueueClientMessage(clientId, data));
     socket.on('close', () => {
+      this._abortClientTransfers(clientId, 'connection_closed');
+      this.messageQueues.delete(clientId);
       this.connectionManager.remove(clientId);
       this.logger.info('[PHONE] Disconnected', { clientId, deviceName: metadata.deviceName });
     });
     socket.on('error', error => {
       this.logger.error('[PHONE] Connection Error', { clientId, error: error.message });
+    });
+  }
+
+  _enqueueClientMessage(clientId, data) {
+    const previous = this.messageQueues.get(clientId) || Promise.resolve();
+    const next = previous
+      .catch(() => {})
+      .then(() => this._handleMessage(clientId, data))
+      .catch(error => {
+        this.logger.error('[PHONE] Command Error', { clientId, error: error.message });
+        this.sendToClient(clientId, { type: 'error', message: 'Unable to execute command' });
+      });
+    this.messageQueues.set(clientId, next);
+    next.finally(() => {
+      if (this.messageQueues.get(clientId) === next) {
+        this.messageQueues.delete(clientId);
+      }
     });
   }
 
@@ -246,6 +271,15 @@ class PhoneServer {
 
     if (payload?.type === 'file-transfer') {
       await this._handleFileTransfer(clientId, payload);
+      return;
+    }
+
+    if (
+      payload?.type === 'file-transfer-start' ||
+      payload?.type === 'file-transfer-chunk' ||
+      payload?.type === 'file-transfer-complete'
+    ) {
+      await this._handleChunkedFileTransfer(clientId, payload);
       return;
     }
 
@@ -335,6 +369,87 @@ class PhoneServer {
       this.sendToClient(clientId, {
         type: 'error',
         message: error.publicMessage || 'File transfer failed'
+      });
+    }
+  }
+
+  async _handleChunkedFileTransfer(clientId, payload) {
+    const client = this.connectionManager.get(clientId);
+    const authentication = this._authenticateRequest(clientId, client, payload);
+    if (!authentication) return;
+    const deviceId = authentication.deviceId;
+    if (!this.fileTransferManager) {
+      this.sendToClient(clientId, { type: 'error', message: 'File transfer unavailable' });
+      return;
+    }
+
+    try {
+      if (payload.type === 'file-transfer-start') {
+        const result = await this.fileTransferManager.startIncomingTransfer({ ...payload, deviceId });
+        this._trackClientTransfer(clientId, result.transferId);
+        this.sendToClient(clientId, {
+          type: 'file-transfer-started',
+          transferId: result.transferId,
+          fileName: result.fileName,
+          fileSize: result.fileSize
+        });
+        return;
+      }
+
+      if (payload.type === 'file-transfer-chunk') {
+        const progress = await this.fileTransferManager.receiveFileChunk({ ...payload, deviceId });
+        if (progress.complete || progress.receivedBytes % (1024 * 1024) === 0) {
+          this.sendToClient(clientId, {
+            type: 'file-transfer-progress',
+            transferId: progress.transferId,
+            receivedBytes: progress.receivedBytes,
+            fileSize: progress.fileSize
+          });
+        }
+        return;
+      }
+
+      const result = await this.fileTransferManager.completeIncomingTransfer({ ...payload, deviceId });
+      this._untrackClientTransfer(clientId, payload.transferId);
+      const device = this.pairingService.deviceRegistry.getDevice(deviceId);
+      if (device) this.connectionManager.setDevice(clientId, device);
+      this.sendToClient(clientId, {
+        type: 'file-transfer-success',
+        transferId: payload.transferId,
+        fileName: result.record.fileName,
+        fileSize: result.record.size
+      });
+    } catch (error) {
+      if (payload.transferId) this._untrackClientTransfer(clientId, payload.transferId);
+      this.sendToClient(clientId, {
+        type: 'error',
+        message: error.publicMessage || 'File transfer failed'
+      });
+    }
+  }
+
+  _trackClientTransfer(clientId, transferId) {
+    const id = String(transferId || '').trim();
+    if (!id) return;
+    const transfers = this.activeTransfersByClient.get(clientId) || new Set();
+    transfers.add(id);
+    this.activeTransfersByClient.set(clientId, transfers);
+  }
+
+  _untrackClientTransfer(clientId, transferId) {
+    const transfers = this.activeTransfersByClient.get(clientId);
+    if (!transfers) return;
+    transfers.delete(String(transferId || '').trim());
+    if (transfers.size === 0) this.activeTransfersByClient.delete(clientId);
+  }
+
+  _abortClientTransfers(clientId, reason) {
+    const transfers = this.activeTransfersByClient.get(clientId);
+    if (!transfers || !this.fileTransferManager) return;
+    this.activeTransfersByClient.delete(clientId);
+    for (const transferId of transfers) {
+      this.fileTransferManager.abortIncomingTransfer?.(transferId, reason).catch(error => {
+        this.logger.warn('[PHONE] Transfer cleanup failed', { clientId, transferId, error: error.message });
       });
     }
   }
