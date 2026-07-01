@@ -7,8 +7,8 @@ const LEGACY_DATA_DIR = path.join(os.homedir(), '.jarvis');
 
 const CONFIG = {
   app: {
-    name: 'JARVIS',
-    version: '1.0.0',
+    name: 'OpenX',
+    version: '2.5.0',
     dataDir: DATA_PATHS.root,
     dataPaths: DATA_PATHS,
     legacyDataDir: LEGACY_DATA_DIR,
@@ -29,7 +29,7 @@ const CONFIG = {
   },
 
   assistant: {
-    displayName: 'JARVIS',
+    displayName: 'OpenX',
     title: 'Desktop Assistant',
     honorific: 'sir',
     userProfile: {

@@ -8,7 +8,7 @@
 
 **Runtime:** Electron 28 and Node.js
 
-**Report date:** 2026-06-30
+**Report date:** 2026-07-01
 
 ## 1. Executive summary
 
@@ -18,7 +18,7 @@ The previous directory-per-controller architecture has been removed. Implementat
 
 The assistant processes commands through NLP, NLU, parsing, language relations, entity extraction, intent resolution, validation, permissions, Natural Language Execution (NLE), automation, verification, confirmation, response generation, context, and active learning. The language regression corpus contains **2,102 commands**, all of which are classified by the sandbox corpus test.
 
-Recent implementation work added a glass-themed calendar/timetable planner window, a persistent timer/stopwatch widget, daily reminder and alarm recurrence, snooze actions, phone pairing and file transfer support, stronger crash recovery and renderer security, and tighter reminder parsing for flexible time phrases such as `after 30 min`, `after 1hr`, and misspelled `tommrow`.
+Recent implementation work added a glass-themed calendar/timetable planner window, a persistent timer/stopwatch widget, daily reminder and alarm recurrence, snooze actions, phone pairing and file transfer support, stronger crash recovery and renderer security, tighter reminder parsing for flexible time phrases such as `after 30 min`, `after 1hr`, and misspelled `tommrow`, and a local voice subsystem with continuous voice sessions, Sherpa-ONNX/Parakeet STT, RNNoise/VAD processing, voice UI, assistant integration, diagnostics, and TTS-synchronized turn-taking.
 
 Classification does not mean every requested operating-system feature is implemented. OpenX explicitly distinguishes successful execution, clarification, and recognized-but-unconnected capabilities.
 
@@ -35,7 +35,7 @@ The implementation is designed to provide:
 - permission-aware confirmation for sensitive actions;
 - bounded context and privacy-conscious active learning;
 - external integrations through isolated, restricted plugins;
-- one consistent response contract across chat and voice-derived text;
+- one consistent response contract across chat, phone, and voice-derived text;
 - testable routing without real desktop side effects.
 
 ## 3. Current architecture
@@ -245,7 +245,7 @@ OpenX/
 └── RULES.md
 ```
 
-Current source additions beyond the older generated tree include `apps/desktop/renderer/planner/`, `apps/desktop/renderer/timer-widget/`, `apps/desktop/phone-verification.js`, `core/phone/`, `core/automation/planner.js`, and `core/assistant/language.js`.
+Current source additions beyond the older generated tree include `apps/desktop/renderer/planner/`, `apps/desktop/renderer/timer-widget/`, `apps/desktop/renderer/voice-capture/`, the full `apps/desktop/voice/` subsystem, `apps/desktop/phone-verification.js`, `core/phone/`, `core/automation/planner.js`, and `core/assistant/language.js`.
 
 ### 3.2 Assistant layer
 
@@ -506,7 +506,7 @@ Desktop renderer surfaces now include chat/activity/settings, the alert window, 
 `config.js` contains runtime defaults for:
 
 - OpenX data paths;
-- JARVIS display name and honorific;
+- OpenX display name and honorific;
 - TTS voice, rate, volume, and naturalization;
 - active learning and feedback;
 - permission levels;

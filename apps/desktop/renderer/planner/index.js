@@ -159,7 +159,7 @@ function applySettingsTheme(snapshot) {
 }
 
 async function loadTheme() {
-  const snapshot = await window.jarvis?.getSettings?.();
+  const snapshot = await window.openx?.getSettings?.();
   applySettingsTheme(snapshot);
 }
 
@@ -299,7 +299,7 @@ function renderAgenda() {
       remove.type = 'button';
       remove.textContent = 'Delete';
       remove.addEventListener('click', async () => {
-        await window.jarvis?.deletePlannerEntry?.(entry.id);
+        await window.openx?.deletePlannerEntry?.(entry.id);
         await refreshEntries();
       });
       actions.appendChild(remove);
@@ -327,7 +327,7 @@ function scheduleRender() {
 }
 
 async function refreshEntries() {
-  const result = await window.jarvis?.getPlannerEntries?.();
+  const result = await window.openx?.getPlannerEntries?.();
   entries = Array.isArray(result?.data?.entries) ? result.data.entries : [];
   scheduleRender();
 }
@@ -343,7 +343,7 @@ quickAddEl.addEventListener('submit', async event => {
   quickAddSubmitEl.setAttribute('aria-busy', 'true');
   const type = currentView === 'timetable' ? 'timetable' : 'calendar';
   try {
-    const result = await window.jarvis?.addPlannerEntry?.({
+    const result = await window.openx?.addPlannerEntry?.({
       type,
       title,
       date: entryDateEl.value || getSelectedDateKey(),
@@ -386,10 +386,10 @@ timetableDateEl?.addEventListener('change', () => {
   shellEl.classList.add('date-selected');
   scheduleRender();
 });
-closeWindowEl.addEventListener('click', () => window.jarvis?.closePlanner?.());
+closeWindowEl.addEventListener('click', () => window.openx?.closePlanner?.());
 
-window.jarvis?.onPlannerView?.(view => setView(view));
-window.jarvis?.onPlannerEntriesChanged?.(payload => {
+window.openx?.onPlannerView?.(view => setView(view));
+window.openx?.onPlannerEntriesChanged?.(payload => {
   entries = Array.isArray(payload?.entries) ? payload.entries : entries;
   if (payload?.view) setView(payload.view);
   scheduleRender();
@@ -398,5 +398,5 @@ window.jarvis?.onPlannerEntriesChanged?.(payload => {
 const todayKey = localDateKey(new Date());
 setSelectedDateKey(todayKey);
 loadTheme();
-window.jarvis?.onSettingsChanged?.(snapshot => applySettingsTheme(snapshot));
+window.openx?.onSettingsChanged?.(snapshot => applySettingsTheme(snapshot));
 refreshEntries();

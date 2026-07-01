@@ -17,7 +17,7 @@ class ScreenshotController {
   capture() {
     try {
       fs.mkdirSync(this.outputDirectory, { recursive: true });
-      const filePath = path.join(this.outputDirectory, `JARVIS-${this._timestamp()}.png`);
+      const filePath = path.join(this.outputDirectory, `OpenX-${this._timestamp()}.png`);
       const script = this._buildCaptureScript(filePath);
 
       execFileSync('powershell.exe', [

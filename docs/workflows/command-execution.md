@@ -3,7 +3,7 @@
 ## Voice Mode
 
 ```
-User says "Jarvis"
+User activates OpenX by hotkey, chat, phone, or voice UI
   → Wake word detected
   → Orb glows blue (listening)
   → Assistant captures audio

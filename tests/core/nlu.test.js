@@ -78,7 +78,7 @@ describe('Natural Language Router', function() {
   });
 
   it('should store compact routing evidence for active learning', function() {
-    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-nlu-learning-'));
+    const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openx-nlu-learning-'));
     const store = new ActiveLearningStore({
       activeLearning: { enabled: true },
       app: { dataDir }

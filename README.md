@@ -2,7 +2,7 @@
 
 OpenX is a Windows desktop assistant built with Electron and Node.js. It provides deterministic, local-first natural-language routing for desktop automation, browser control, files and folders, media, scheduling, communications, system information, and external application plugins.
 
-The product name is **OpenX**. The default configurable assistant display name remains **JARVIS**.
+The product name and default configurable assistant display name are **OpenX**.
 
 ## Current status
 
@@ -15,12 +15,13 @@ The product name is **OpenX**. The default configurable assistant display name r
 - Reminders, timers, alarms, daily recurrence, snooze, stopwatch controls, calendar, and daily timetable commands are routed through connected controllers and UI surfaces.
 - Calendar and timetable entries share the assistant planner window; reminders and alarms are reflected in the timetable/calendar view.
 - The desktop app includes a persistent timer/stopwatch widget, alert window, crash recovery, readable glass themes, and phone pairing/file-transfer support.
+- The local voice subsystem uses Sherpa-ONNX/Parakeet STT, RNNoise/VAD preprocessing, transcript normalization, a voice orb overlay, and TTS-synchronized turn-taking so recognition pauses while OpenX speaks and resumes inside the same voice session.
 - Chrome, YouTube, Discord, forms, and communication adapters are isolated under `plugins/`.
 
 ## Command pipeline
 
 ```text
-Chat or voice-derived text
+Chat, phone, or voice-derived text
   -> NLP normalization and spelling/noise repair
   -> NLU and context interpretation
   -> parser and entity extraction
@@ -146,7 +147,7 @@ The Electron application lives in `apps/desktop/`:
 - `settings.js`: settings, profiles, themes, and modes.
 - `permissions.js`: permission levels, throttling, and confirmation requirements.
 - `phone-verification.js`: Windows identity check before phone pairing.
-- `voice/tts.js`: Windows SAPI text-to-speech output.
+- `voice/`: local capture, audio preprocessing, STT, transcript normalization, voice UI, assistant bridge, diagnostics, and Windows SAPI text-to-speech output.
 - `renderer/chat/`: primary chat, activity, settings, theme, and phone-management interface.
 - `renderer/alert/`: dedicated timer/reminder alert window.
 - `renderer/planner/`: glass-themed calendar and timetable window.

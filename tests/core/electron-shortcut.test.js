@@ -94,7 +94,7 @@ describe('Electron Chat Shortcut', function() {
     assert.match(script, /registerIpcHandler\('voice:start'/);
     assert.match(chatHtml, /id="voice-start-btn"/);
     assert.match(chatScript, /const voiceStartBtn = document\.getElementById\('voice-start-btn'\)/);
-    assert.match(chatScript, /window\.jarvis\.startVoice\(\)/);
+    assert.match(chatScript, /window\.openx\.startVoice\(\)/);
     assert.match(chatScript, /voiceStartBtn\.addEventListener\('click', startVoiceFromChat\)/);
     assert.match(chatScript, /processCommand\(text, 'chat'\)/);
   });

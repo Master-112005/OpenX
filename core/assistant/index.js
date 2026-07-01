@@ -1995,7 +1995,7 @@ class Assistant extends EventEmitter {
     const expanded = Normalizer.expandContractions(String(text || '').trim());
     return Normalizer.normalizeText(expanded)
       .replace(/\bplease\b/g, ' ')
-      .replace(/\b(?:assistant|jarvis|hey)\b/g, ' ')
+      .replace(/\b(?:assistant|openx|jarvis|hey)\b/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
   }

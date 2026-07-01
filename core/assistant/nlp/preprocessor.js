@@ -24,6 +24,7 @@ const FILLER_WORDS = new Set([
   'for',
   'hey',
   'i',
+  'openx',
   'jarvis',
   'just',
   'kindly',
@@ -68,7 +69,7 @@ const LEAD_IN_PATTERNS = [
   /^(?:would\s+you\s+mind\s+)+/i,
   /^(?:i\s+need\s+you\s+to|i\s+want\s+you\s+to|i\s+am\s+telling\s+you\s+to)\s+/i,
   /^(?:go\s+ahead\s+and|kindly|just)\s+/i,
-  /^(?:hey\s+)?(?:jarvis|assistant)\s+/i
+  /^(?:hey\s+)?(?:openx|jarvis|assistant)\s+/i
 ];
 
 const PHRASE_REPLACEMENTS = [

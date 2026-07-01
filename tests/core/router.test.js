@@ -523,7 +523,7 @@ describe('Action Router', function() {
     const stubEngine = {
       execute(actionId, entities) {
         executed.push({ actionId, entities });
-        return { success: true, data: { filePath: 'C:\\Users\\user\\Pictures\\Screenshots\\JARVIS-test.png' } };
+        return { success: true, data: { filePath: 'C:\\Users\\user\\Pictures\\Screenshots\\OpenX-test.png' } };
       }
     };
     const router = new ActionRouter(config, stubEngine);
@@ -709,11 +709,11 @@ describe('Action Router', function() {
     };
     const router = new ActionRouter(config, stubEngine);
 
-    const image = await router.process('open C:\\Users\\rakes\\Pictures\\Screenshots\\JARVIS-test.png', 'chat');
+    const image = await router.process('open C:\\Users\\rakes\\Pictures\\Screenshots\\OpenX-test.png', 'chat');
     const video = await router.process('play The_Gray_Man.mkv on vlc', 'chat');
 
     assert.equal(image.intent, 'file.open');
-    assert.equal(image.entities.filename, 'C:\\Users\\rakes\\Pictures\\Screenshots\\JARVIS-test.png');
+    assert.equal(image.entities.filename, 'C:\\Users\\rakes\\Pictures\\Screenshots\\OpenX-test.png');
     assert.equal(video.intent, 'file.open');
     assert.equal(video.entities.filename, 'The_Gray_Man.mkv');
     assert.equal(video.entities.path, null);
@@ -2416,14 +2416,14 @@ describe('Action Router', function() {
     };
     const stubEngine = {
       execute(actionId) {
-        return { success: true, data: { actionId, name: 'JARVIS' } };
+        return { success: true, data: { actionId, name: 'OpenX' } };
       }
     };
     const router = new ActionRouter(config, stubEngine);
     const result = await router.process('what is your name', 'chat');
 
     assert.equal(result.intent, 'assistant.identity');
-    assert.match(result.response, /JARVIS/);
+    assert.match(result.response, /OpenX/);
   });
 
   it('should route send file, folder, and image requests to the phone transfer action', async function() {
@@ -2480,7 +2480,7 @@ describe('Action Router', function() {
     };
     const stubEngine = {
       execute(actionId) {
-        return { success: true, data: { actionId, name: actionId === 'assistant.identity' ? 'JARVIS' : '' } };
+        return { success: true, data: { actionId, name: actionId === 'assistant.identity' ? 'OpenX' : '' } };
       }
     };
     const router = new ActionRouter(config, stubEngine);
@@ -2491,7 +2491,7 @@ describe('Action Router', function() {
     assert.equal(personal.intent, 'assistant.userName');
     assert.match(personal.response, /do not know your name/i);
     assert.equal(assistantTypo.intent, 'assistant.identity');
-    assert.match(assistantTypo.response, /JARVIS/);
+    assert.match(assistantTypo.response, /OpenX/);
   });
 
   it('should reject incomplete commands instead of inventing targets', async function() {
@@ -2593,7 +2593,7 @@ describe('Action Router', function() {
     };
     const learningStore = new ActiveLearningStore({
       activeLearning: { enabled: true },
-      app: { dataDir: require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'jarvis-router-learning-')) }
+      app: { dataDir: require('fs').mkdtempSync(require('path').join(require('os').tmpdir(), 'openx-router-learning-')) }
     });
     learningStore.rememberPreference('photoLibrary', 'googlePhotos');
     const router = new ActionRouter({ ...config, learningStore }, {

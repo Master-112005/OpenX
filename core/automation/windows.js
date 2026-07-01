@@ -10,7 +10,7 @@ class WindowsController {
 
   shutdown() {
     try {
-      execSync('shutdown /s /t 5 /c "JARVIS initiated shutdown"', { timeout: 3000 });
+      execSync('shutdown /s /t 5 /c "OpenX initiated shutdown"', { timeout: 3000 });
       return { success: true, data: { action: 'shutdown', delay: 5 } };
     } catch (err) {
       return { success: false, error: err.message };
@@ -19,7 +19,7 @@ class WindowsController {
 
   restart() {
     try {
-      execSync('shutdown /r /t 5 /c "JARVIS initiated restart"', { timeout: 3000 });
+      execSync('shutdown /r /t 5 /c "OpenX initiated restart"', { timeout: 3000 });
       return { success: true, data: { action: 'restart', delay: 5 } };
     } catch (err) {
       return { success: false, error: err.message };

@@ -2,7 +2,7 @@
 
 ## Overview
 
-Plugins extend JARVIS with new commands and capabilities. Each plugin lives in its own directory under `plugins/` and consists of:
+Plugins extend OpenX with new commands and capabilities. Each plugin lives in its own directory under `plugins/` and consists of:
 
 - `plugin.json` - Manifest file
 - `index.js` - Plugin implementation

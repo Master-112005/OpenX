@@ -213,7 +213,7 @@ class AutomationEngine {
         : this.system.getProcessCount(),
       'system.insight': (entities) => this.system.getInsight(entities.insightType),
       'system.bluetooth': (entities) => this.system.bluetooth(entities.enabled),
-      'assistant.identity': () => ({ success: true, data: { name: this.config?.assistant?.displayName || 'JARVIS' } }),
+      'assistant.identity': () => ({ success: true, data: { name: this.config?.assistant?.displayName || 'OpenX' } }),
       'assistant.userName': () => ({ success: true, data: { known: false } }),
       'assistant.capability': (entities) => ({
         success: true,

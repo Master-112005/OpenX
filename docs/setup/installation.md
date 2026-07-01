@@ -50,7 +50,7 @@ npm run package
 ## Directory Structure
 
 ```
-jarvis/
+OpenX/
 ├── apps/           # Desktop application (Electron)
 ├── core/           # Core engine
 │   ├── assistant/  # Input processing, intent matching

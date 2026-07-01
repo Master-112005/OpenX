@@ -11,14 +11,14 @@ describe('Settings Service', function() {
   });
 
   function createService() {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-settings-'));
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openx-settings-'));
     const config = {
       app: {
-        name: 'JARVIS',
+        name: 'OpenX',
         dataDir: tempDir
       },
       assistant: {
-        displayName: 'JARVIS',
+        displayName: 'OpenX',
         title: 'Desktop Assistant',
         honorific: 'sir',
         userProfile: {}
@@ -51,7 +51,7 @@ describe('Settings Service', function() {
     const { service, tempDir } = createService();
     const snapshot = service.getSnapshot();
 
-    assert.equal(snapshot.settings.assistant.displayName, 'JARVIS');
+    assert.equal(snapshot.settings.assistant.displayName, 'OpenX');
     assert.equal(snapshot.settings.voice.activationShortcut, 'Alt+Space');
     assert.equal(snapshot.settings.chat.activationShortcut, 'Control+Space');
     assert.equal(snapshot.settings.chat.themeId, 'graphite');
@@ -212,7 +212,7 @@ describe('Settings Service', function() {
     });
 
     const reset = service.resetSettings();
-    assert.equal(reset.assistant.displayName, 'JARVIS');
+    assert.equal(reset.assistant.displayName, 'OpenX');
     assert.equal(reset.chat.themeId, 'graphite');
   });
 });

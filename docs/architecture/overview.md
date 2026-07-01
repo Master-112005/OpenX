@@ -2,7 +2,7 @@
 
 ## System Architecture
 
-JARVIS follows a layered, event-driven architecture with clear separation of concerns:
+OpenX follows a layered, event-driven architecture with clear separation of concerns:
 
 ```
 Wake Word / Chat Input

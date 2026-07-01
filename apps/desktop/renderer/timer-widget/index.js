@@ -81,7 +81,7 @@ function render(state) {
   const previousKey = latestState?.visible ? `${latestState.mode}:${latestState.id || latestState.taskName}` : '';
   latestState = state;
   if (!state?.visible) {
-    window.jarvis?.closeTimerWidget?.();
+    window.openx?.closeTimerWidget?.();
     return;
   }
 
@@ -109,9 +109,9 @@ function render(state) {
 }
 
 async function refresh() {
-  if (!window.jarvis?.getTimerWidgetState) return;
+  if (!window.openx?.getTimerWidgetState) return;
   try {
-    render(await window.jarvis.getTimerWidgetState());
+    render(await window.openx.getTimerWidgetState());
   } catch (_) {}
 }
 
@@ -121,7 +121,7 @@ function tick() {
 }
 
 closeBtn.addEventListener('click', () => {
-  window.jarvis?.closeTimerWidget?.();
+  window.openx?.closeTimerWidget?.();
 });
 
 stopwatchFaceEl.addEventListener('click', async () => {
@@ -130,9 +130,9 @@ stopwatchFaceEl.addEventListener('click', async () => {
   widgetEl.dataset.stopping = 'true';
   try {
     if (latestState.status === 'paused') {
-      await window.jarvis?.resumeStopwatchFromWidget?.();
+      await window.openx?.resumeStopwatchFromWidget?.();
     } else {
-      await window.jarvis?.stopStopwatchFromWidget?.();
+      await window.openx?.stopStopwatchFromWidget?.();
     }
     await refresh();
   } finally {
@@ -145,7 +145,7 @@ resetBtn.addEventListener('click', async () => {
   if (latestState?.mode !== 'stopwatch') return;
   resetBtn.disabled = true;
   try {
-    await window.jarvis?.resetStopwatchFromWidget?.();
+    await window.openx?.resetStopwatchFromWidget?.();
     await refresh();
   } finally {
     resetBtn.disabled = false;
@@ -155,7 +155,7 @@ resetBtn.addEventListener('click', async () => {
 timerProgressEl.style.strokeDasharray = String(RING_LENGTH);
 timerProgressEl.style.strokeDashoffset = '0';
 
-window.jarvis?.onTimerWidgetState?.(render);
+window.openx?.onTimerWidgetState?.(render);
 refresh();
 pollHandle = setInterval(refresh, 1000);
 tickHandle = setInterval(tick, 500);

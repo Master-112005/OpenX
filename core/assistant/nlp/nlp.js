@@ -581,7 +581,7 @@ class NlpProcessor {
       if (index === 0) {
         return true;
       }
-      if (['uh', 'um', 'please', 'ok', 'okay', 'sir', 'assistant', 'jarvis'].includes(token)) {
+      if (['uh', 'um', 'please', 'ok', 'okay', 'sir', 'assistant', 'openx', 'jarvis'].includes(token)) {
         return false;
       }
       return true;

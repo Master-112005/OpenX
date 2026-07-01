@@ -48,7 +48,7 @@ class WhatsAppDesktopController {
   _dispatch({ mode, contactName, messageText = '' }) {
     const resultFile = path.join(
       os.tmpdir(),
-      `jarvis-wa-${Date.now()}-${Math.random().toString(36).slice(2)}.json`
+      `openx-wa-${Date.now()}-${Math.random().toString(36).slice(2)}.json`
     );
 
     const script = this._buildScript({ mode, contactName, messageText, resultFile });

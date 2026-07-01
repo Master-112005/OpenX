@@ -1006,7 +1006,7 @@ const RESPONSE_BUILDERS = {
       return status ? `${name} status is ${status}.` : 'Bluetooth status is not available.';
     },
     'assistant.identity': context => {
-      const name = valueFromContext(context, 'name', 'JARVIS');
+      const name = valueFromContext(context, 'name', 'OpenX');
       return `My name is ${name}.`;
     },
     'assistant.userName': context => {

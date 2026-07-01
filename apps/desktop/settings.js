@@ -276,7 +276,7 @@ class SettingsService {
     this.settingsPath = this.dataPaths.settingsPath;
     this.defaults = {
       assistant: {
-        displayName: String(this.baseConfig?.assistant?.displayName || this.baseConfig?.app?.name || 'JARVIS').trim(),
+        displayName: String(this.baseConfig?.assistant?.displayName || this.baseConfig?.app?.name || 'OpenX').trim(),
         title: String(this.baseConfig?.assistant?.title || 'Desktop Assistant').trim(),
         honorific: String(this.baseConfig?.assistant?.honorific || 'sir').trim().toLowerCase()
       },

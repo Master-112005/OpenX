@@ -110,7 +110,7 @@ const fieldIds = {
 };
 
 function getAssistantDisplayName() {
-  return settingsSnapshot?.settings?.assistant?.displayName || 'JARVIS';
+  return settingsSnapshot?.settings?.assistant?.displayName || 'OpenX';
 }
 
 function getHonorific() {
@@ -468,7 +468,7 @@ function addScheduleFromResult(result) {
   };
   scheduleItems = [item, ...scheduleItems.filter(entry => entry.id !== item.id)].slice(0, 50);
   saveStoredList(SCHEDULE_STORAGE_KEY, scheduleItems);
-  if (!window.jarvis) armSchedule(item);
+  if (!window.openx) armSchedule(item);
   renderActivity();
   const tone = scheduleTone(kind, item.category, item.message).tone;
   showToast(`${kind} scheduled`, `${message} · ${formatDueDate(data.dueAt)}`, tone);
@@ -581,7 +581,7 @@ function updateSchedule(id, changes) {
   if (!item) return;
   Object.assign(item, changes);
   saveStoredList(SCHEDULE_STORAGE_KEY, scheduleItems);
-  if (item.status === 'scheduled' && !window.jarvis) armSchedule(item);
+  if (item.status === 'scheduled' && !window.openx) armSchedule(item);
   renderActivity();
 }
 
@@ -593,7 +593,7 @@ function snoozeSchedule(id, minutes = 5) {
     status: 'scheduled',
     dueAt: new Date(Date.now() + (minutes * 60 * 1000)).toISOString()
   });
-  window.jarvis?.handleScheduleAlert?.(id, 'snooze', minutes);
+  window.openx?.handleScheduleAlert?.(id, 'snooze', minutes);
   showToast(`${item.kind} snoozed`, `It will return in ${minutes} minutes.`, 'info');
 }
 
@@ -646,7 +646,7 @@ function renderSchedules() {
       snooze.addEventListener('click', () => snoozeSchedule(item.id));
       actions.appendChild(snooze);
     }
-    if (item.status === 'due' && !window.jarvis) {
+    if (item.status === 'due' && !window.openx) {
       const open = document.createElement('button');
       open.className = 'mini-btn';
       open.type = 'button';
@@ -659,7 +659,7 @@ function renderSchedules() {
     dismiss.type = 'button';
     dismiss.textContent = item.status === 'completed' ? 'Remove' : 'Stop';
     dismiss.addEventListener('click', () => {
-      window.jarvis?.handleScheduleAlert?.(item.id, 'stop');
+      window.openx?.handleScheduleAlert?.(item.id, 'stop');
       updateSchedule(item.id, { status: 'dismissed' });
     });
     actions.appendChild(dismiss);
@@ -744,8 +744,8 @@ function addConfirmationPrompt(result) {
 
 function speakAssistantResponse(text) {
   const spokenText = String(text || '').trim();
-  if (!isAssistantMuted && spokenText && window.jarvis?.speak) {
-    window.jarvis.speak(spokenText);
+  if (!isAssistantMuted && spokenText && window.openx?.speak) {
+    window.openx.speak(spokenText);
   }
 }
 
@@ -761,8 +761,8 @@ async function toggleAssistantMute() {
   isAssistantMuted = !isAssistantMuted;
   localStorage.setItem(ASSISTANT_MUTED_STORAGE_KEY, String(isAssistantMuted));
   updateAssistantMuteButton();
-  if (isAssistantMuted && window.jarvis?.stopSpeaking) {
-    await window.jarvis.stopSpeaking();
+  if (isAssistantMuted && window.openx?.stopSpeaking) {
+    await window.openx.stopSpeaking();
   }
   showToast(
     isAssistantMuted ? 'Assistant voice muted' : 'Assistant voice on',
@@ -772,11 +772,11 @@ async function toggleAssistantMute() {
 }
 
 async function startVoiceFromChat() {
-  if (!window.jarvis?.startVoice) return;
+  if (!window.openx?.startVoice) return;
   voiceStartBtn.disabled = true;
   voiceStartBtn.classList.add('active');
   try {
-    await window.jarvis.startVoice();
+    await window.openx.startVoice();
   } catch (error) {
     addMessage(error?.message || 'Voice could not start.', 'system', `${getAssistantDisplayName()} - voice`);
   } finally {
@@ -797,7 +797,7 @@ async function sendCommand(text) {
     showTyping();
 
     try {
-      const result = await window.jarvis.processCommand(text, 'chat');
+      const result = await window.openx.processCommand(text, 'chat');
       hideTyping();
       handleCommandResult(result);
       if (result.requiresConfirmation) {
@@ -827,7 +827,7 @@ async function sendCommand(text) {
   showTyping();
 
   try {
-    const result = await window.jarvis.processCommand(text, 'chat');
+    const result = await window.openx.processCommand(text, 'chat');
     hideTyping();
     handleCommandResult(result);
 
@@ -1482,7 +1482,7 @@ function initializeCompactSettingsLayout() {
 async function saveSettings() {
   try {
     setSettingsStatus('Saving settings...', 'info');
-    const snapshot = await window.jarvis.saveSettings(collectSettingsPayload());
+    const snapshot = await window.openx.saveSettings(collectSettingsPayload());
     applySnapshot(snapshot);
     setSettingsStatus('Settings saved successfully.', 'success');
     addMessage(`Settings updated. ${getAssistantDisplayName()} is ready, ${getHonorific()}.`, 'system', assistantMeta('settings'));
@@ -1494,7 +1494,7 @@ async function saveSettings() {
 async function resetSettings() {
   try {
     setSettingsStatus('Resetting settings...', 'info');
-    const snapshot = await window.jarvis.resetSettings();
+    const snapshot = await window.openx.resetSettings();
     setActiveSettingsSection(null);
     applySnapshot(snapshot);
     setSettingsStatus('Settings reset to defaults.', 'success');
@@ -1544,7 +1544,7 @@ async function generatePairingQR() {
   phonePairingQrEl.classList.remove('expired');
   phonePairingStatusEl.textContent = 'Waiting for Windows identity verification...';
   try {
-    const result = await window.jarvis.generatePairingQR();
+    const result = await window.openx.generatePairingQR();
     if (result?.success !== true) {
       phonePairingStatusEl.textContent = result?.message || 'Identity verification required.';
       return;
@@ -1633,7 +1633,7 @@ function renderPhoneDevices(devices) {
         updates[input.dataset.permission] = input.checked;
       });
       try {
-        await window.jarvis.updatePhonePermissions(device.deviceId, updates);
+        await window.openx.updatePhonePermissions(device.deviceId, updates);
         setSettingsStatus(`Permissions saved for ${device.deviceName}.`, 'success');
       } catch (_) {
         setSettingsStatus('Unable to save device permissions.', 'error');
@@ -1645,7 +1645,7 @@ function renderPhoneDevices(devices) {
     disconnect.className = 'secondary-btn';
     disconnect.textContent = 'Disconnect Device';
     disconnect.addEventListener('click', async () => {
-      await window.jarvis.disconnectPhoneDevice(device.deviceId);
+      await window.openx.disconnectPhoneDevice(device.deviceId);
       setSettingsStatus(`${device.deviceName} disconnected.`, 'success');
       await loadPhoneDevices();
     });
@@ -1656,7 +1656,7 @@ function renderPhoneDevices(devices) {
     remove.textContent = 'Remove Device';
     remove.addEventListener('click', async () => {
       if (!window.confirm(`Remove ${device.deviceName} from trusted devices?`)) return;
-      await window.jarvis.removePhoneDevice(device.deviceId);
+      await window.openx.removePhoneDevice(device.deviceId);
       setSettingsStatus(`${device.deviceName} removed.`, 'success');
       await loadPhoneDevices();
     });
@@ -1668,9 +1668,9 @@ function renderPhoneDevices(devices) {
 }
 
 async function loadPhoneDevices() {
-  if (!window.jarvis?.getPhoneDevices) return;
+  if (!window.openx?.getPhoneDevices) return;
   try {
-    renderPhoneDevices(await window.jarvis.getPhoneDevices());
+    renderPhoneDevices(await window.openx.getPhoneDevices());
   } catch (_) {
     renderPhoneDevices([]);
     setSettingsStatus('Unable to load trusted phones.', 'error');
@@ -1678,9 +1678,9 @@ async function loadPhoneDevices() {
 }
 
 async function loadPhoneServerStatus() {
-  if (!window.jarvis?.getPhoneServerStatus) return;
+  if (!window.openx?.getPhoneServerStatus) return;
   try {
-    renderPhoneServerStatus(await window.jarvis.getPhoneServerStatus());
+    renderPhoneServerStatus(await window.openx.getPhoneServerStatus());
   } catch (_) {
     renderPhoneServerStatus({ serverStatus: 'stopped', currentVersion: 1, connectedDevices: [] });
     setSettingsStatus('Unable to load phone server status.', 'error');
@@ -1710,7 +1710,7 @@ activityCalendarBtn.addEventListener('click', async () => {
   activityCalendarBtn.classList.add('opening');
   activityCalendarBtn.setAttribute('aria-busy', 'true');
   try {
-    await window.jarvis?.openPlanner?.('calendar');
+    await window.openx?.openPlanner?.('calendar');
   } finally {
     window.setTimeout(() => {
       activityCalendarBtn.classList.remove('opening');
@@ -1793,11 +1793,11 @@ settingsOverlay.addEventListener('click', (event) => {
   }
 });
 
-if (window.jarvis) {
-  window.jarvis.onSettingsChanged((snapshot) => {
+if (window.openx) {
+  window.openx.onSettingsChanged((snapshot) => {
     applySnapshot(snapshot);
   });
-  window.jarvis.onOpenSettings?.(openSettingsPanel);
+  window.openx.onOpenSettings?.(openSettingsPanel);
 }
 
 async function initialize() {
@@ -1808,7 +1808,7 @@ async function initialize() {
     document.body.classList.add('settings-only');
     document.title = 'Assistant Settings';
   }
-  if (!window.jarvis) {
+  if (!window.openx) {
     settingsSnapshot = {
       settings: {
         assistant: { displayName: 'Jaanu', title: 'Desktop Assistant', honorific: 'sir' },
@@ -1826,9 +1826,9 @@ async function initialize() {
     if (settingsOnly) openSettingsPanel();
     return;
   }
-  const snapshot = await window.jarvis.getSettings();
+  const snapshot = await window.openx.getSettings();
   applySnapshot(snapshot);
-  if (!window.jarvis) {
+  if (!window.openx) {
     scheduleItems.forEach(item => {
       if (item.status === 'scheduled') armSchedule(item);
     });

@@ -11,7 +11,7 @@ describe('Active Learning Store', function() {
   });
 
   function createStore() {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-learning-'));
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openx-learning-'));
     return {
       tempDir,
       store: new ActiveLearningStore({

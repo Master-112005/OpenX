@@ -29,7 +29,7 @@ describe('File Management Automation', function() {
   }
 
   beforeEach(function() {
-    tempProfile = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-files-'));
+    tempProfile = fs.mkdtempSync(path.join(os.tmpdir(), 'openx-files-'));
     process.env.USERPROFILE = tempProfile;
 
     ['Desktop', 'Documents', 'Downloads', 'Pictures', 'Music', 'Videos'].forEach(folder => {
@@ -363,7 +363,7 @@ describe('File Management Automation', function() {
   });
 
   it('should block deleting absolute files outside the user profile', function() {
-    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-outside-file-'));
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openx-outside-file-'));
     const outsideFile = path.join(outsideDir, 'do-not-delete.txt');
     fs.writeFileSync(outsideFile, 'keep', 'utf8');
 
@@ -379,7 +379,7 @@ describe('File Management Automation', function() {
   });
 
   it('should block recursive folder deletion outside the user profile', function() {
-    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-outside-folder-'));
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openx-outside-folder-'));
     fs.writeFileSync(path.join(outsideDir, 'do-not-delete.txt'), 'keep', 'utf8');
 
     try {

@@ -1107,7 +1107,7 @@ function createTray() {
   const icon = nativeImage.createEmpty();
   tray = new Tray(icon);
 
-  tray.setToolTip(`${runtimeConfig?.assistant?.displayName || 'JARVIS'} Assistant`);
+  tray.setToolTip(`${runtimeConfig?.assistant?.displayName || 'OpenX'} Assistant`);
 
   const contextMenu = Menu.buildFromTemplate([
     { label: 'Open Chat', click: () => createChatWindow() },
@@ -1685,7 +1685,7 @@ async function initializeAssistant() {
 
   registerChatShortcut();
   mainLogger.info('Assistant initialized', {
-    name: runtimeConfig?.assistant?.displayName || 'JARVIS'
+    name: runtimeConfig?.assistant?.displayName || 'OpenX'
   });
 }
 
@@ -1774,7 +1774,7 @@ async function reloadRuntimeServices() {
   startStatusPolling();
 
   if (tray) {
-    tray.setToolTip(`${runtimeConfig?.assistant?.displayName || 'JARVIS'} Assistant`);
+    tray.setToolTip(`${runtimeConfig?.assistant?.displayName || 'OpenX'} Assistant`);
   }
 
   if (chatWindow?.webContents) {

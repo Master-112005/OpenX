@@ -353,7 +353,7 @@ describe('Automation Engine', function() {
   });
 
   it('should attach validation and verification evidence to file actions', async function() {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-verify-'));
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openx-verify-'));
     const originalUserProfile = process.env.USERPROFILE;
     process.env.USERPROFILE = tmpDir;
     const engine = new AutomationEngine({});
@@ -376,7 +376,7 @@ describe('Automation Engine', function() {
   });
 
   it('should execute smart file discovery by type, recency, and size', async function() {
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-smart-find-'));
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openx-smart-find-'));
     const originalUserProfile = process.env.USERPROFILE;
     process.env.USERPROFILE = tempDir;
     const oldFile = path.join(tempDir, 'old-notes.txt');

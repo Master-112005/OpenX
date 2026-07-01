@@ -122,8 +122,8 @@ async function act(action) {
   if (!currentSchedule) return;
   stopAlertSound();
   const id = currentSchedule.id || currentSchedule.taskName;
-  if (window.jarvis?.handleScheduleAlert) {
-    await window.jarvis.handleScheduleAlert(id, action, 5);
+  if (window.openx?.handleScheduleAlert) {
+    await window.openx.handleScheduleAlert(id, action, 5);
   } else {
     window.close();
   }
@@ -132,4 +132,4 @@ async function act(action) {
 snoozeBtn.addEventListener('click', () => act('snooze'));
 stopBtn.addEventListener('click', () => act('stop'));
 window.addEventListener('beforeunload', stopAlertSound);
-window.jarvis?.onScheduleDue?.(renderSchedule);
+window.openx?.onScheduleDue?.(renderSchedule);

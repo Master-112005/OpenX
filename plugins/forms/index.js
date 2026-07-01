@@ -509,7 +509,7 @@ class FormAutomation {
       const request = client.request(parsed, {
         method,
         headers: {
-          'User-Agent': 'Mozilla/5.0 JarvisAssistant/1.0'
+          'User-Agent': 'Mozilla/5.0 OpenXAssistant/2.5'
         },
         timeout: 9000
       }, response => {

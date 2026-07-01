@@ -75,7 +75,7 @@ describe('Chat Renderer UI', function() {
   it('should provide a dedicated assistant-only voice mute control', function() {
     assert.match(html, /id="assistant-mute-btn"/);
     assert.match(script, /ASSISTANT_MUTED_STORAGE_KEY/);
-    assert.match(script, /window\.jarvis\?\.stopSpeaking/);
+    assert.match(script, /window\.openx\?\.stopSpeaking/);
     assert.match(script, /if \(!isAssistantMuted && spokenText/);
   });
 
@@ -111,7 +111,7 @@ describe('Chat Renderer UI', function() {
     assert.match(html, /id="phone-generate-token-btn"/);
     assert.match(html, /id="phone-pairing-qr"/);
     assert.match(html, /id="phone-pairing-token"/);
-    assert.match(script, /window\.jarvis\.generatePairingQR\(\)/);
+    assert.match(script, /window\.openx\.generatePairingQR\(\)/);
     assert.match(script, /Identity verification required\./);
     assert.match(script, /Generate New QR/);
     assert.match(script, /function formatPairingCountdown\(/);

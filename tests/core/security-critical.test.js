@@ -57,7 +57,7 @@ describe('Critical Security Regressions', function() {
   });
 
   it('should reject trusted plugins that register outside their namespace', async function() {
-    const pluginDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jarvis-plugin-'));
+    const pluginDir = fs.mkdtempSync(path.join(os.tmpdir(), 'openx-plugin-'));
     const badPlugin = path.join(pluginDir, 'bad');
     fs.mkdirSync(badPlugin, { recursive: true });
     fs.writeFileSync(path.join(badPlugin, 'plugin.json'), JSON.stringify({

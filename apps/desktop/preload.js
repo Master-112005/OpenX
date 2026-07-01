@@ -67,7 +67,7 @@ contextBridge.exposeInMainWorld('openxVoiceCapture', {
   }
 });
 
-contextBridge.exposeInMainWorld('jarvis', {
+const openxApi = {
   processCommand: (input, source) =>
     ipcRenderer.invoke('command:process', { input, source }),
 
@@ -211,4 +211,7 @@ contextBridge.exposeInMainWorld('jarvis', {
     ipcRenderer.on('planner:entriesChanged', handler);
     return () => ipcRenderer.removeListener('planner:entriesChanged', handler);
   }
-});
+};
+
+contextBridge.exposeInMainWorld('openx', openxApi);
+contextBridge.exposeInMainWorld('jarvis', openxApi);

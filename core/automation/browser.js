@@ -473,7 +473,7 @@ class BrowserController {
     return new Promise((resolve) => {
       const request = https.get(url, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 JarvisAssistant/1.0'
+          'User-Agent': 'Mozilla/5.0 OpenXAssistant/2.5'
         },
         timeout: 6000
       }, (response) => {
@@ -505,7 +505,7 @@ class BrowserController {
     return new Promise((resolve) => {
       const request = https.get(url, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 JarvisAssistant/1.0'
+          'User-Agent': 'Mozilla/5.0 OpenXAssistant/2.5'
         },
         timeout: 4500
       }, (response) => {
@@ -585,7 +585,7 @@ class BrowserController {
     return new Promise((resolve) => {
       const request = https.get(url, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 JarvisAssistant/1.0'
+          'User-Agent': 'Mozilla/5.0 OpenXAssistant/2.5'
         },
         timeout: 6000
       }, (response) => {
