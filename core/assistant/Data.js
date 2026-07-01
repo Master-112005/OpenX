@@ -29,6 +29,7 @@ function buildDataPaths(config = {}) {
   const runtimeDir = path.join(root, 'runtime');
   const phoneDir = path.join(root, 'phone');
   const voiceDir = path.join(root, 'voice');
+  const phoneReceivedDir = path.join(os.homedir(), 'Downloads', 'OpenX Received');
 
   return {
     root,
@@ -50,7 +51,7 @@ function buildDataPaths(config = {}) {
     voiceDir,
     voiceDiagnosticsDir: path.join(voiceDir, 'diagnostics'),
     phoneDir,
-    phoneReceivedDir: path.join(phoneDir, 'received'),
+    phoneReceivedDir,
     phoneTempDir: path.join(runtimeDir, 'phone-transfer'),
     phoneDevicesPath: path.join(phoneDir, 'devices.json'),
     phonePairingPath: path.join(phoneDir, 'pairing.json'),

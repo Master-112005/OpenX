@@ -211,6 +211,81 @@ describe('Automation Engine', function() {
     assert.equal(sent[0].sourcePath, downloads);
   });
 
+  it('should choose the only connected phone for chat-origin file transfers', async function() {
+    const tempDir = fs.mkdtempSync(path.join(path.join(os.homedir(), 'Documents'), 'openx-phone-send-'));
+    const source = path.join(tempDir, 'report.pdf');
+    fs.writeFileSync(source, 'hello', 'utf8');
+
+    const sent = [];
+    const engine = new AutomationEngine({
+      fileTransferManager: {
+        getConnectedDevices() {
+          return [{ deviceId: 'phone001', deviceName: 'Galaxy S25' }];
+        },
+        async sendFileToDevice(deviceId, sourcePath) {
+          sent.push({ deviceId, sourcePath });
+          return { record: { deviceId, fileName: path.basename(sourcePath) } };
+        }
+      }
+    });
+
+    const result = await engine.execute('phone.sendFile', {
+      path: source,
+      transferKind: 'file'
+    });
+
+    assert.equal(result.success, true);
+    assert.deepEqual(sent, [{ deviceId: 'phone001', sourcePath: source }]);
+    assert.equal(result.data.deviceName, 'Galaxy S25');
+
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it('should explain phone transfer when no phone or multiple phones are connected', async function() {
+    const noPhone = new AutomationEngine({
+      fileTransferManager: {
+        getConnectedDevices() {
+          return [];
+        },
+        async sendFileToDevice() {
+          throw new Error('should not send');
+        }
+      }
+    });
+
+    const noPhoneResult = await noPhone.execute('phone.sendFile', {
+      path: 'report.pdf',
+      transferKind: 'file'
+    });
+
+    assert.equal(noPhoneResult.success, false);
+    assert.match(noPhoneResult.error, /No phone is connected/i);
+
+    const multiplePhones = new AutomationEngine({
+      fileTransferManager: {
+        getConnectedDevices() {
+          return [
+            { deviceId: 'phone001', deviceName: 'Galaxy S25' },
+            { deviceId: 'phone002', deviceName: 'Pixel 10' }
+          ];
+        },
+        async sendFileToDevice() {
+          throw new Error('should not send');
+        }
+      }
+    });
+
+    const multipleResult = await multiplePhones.execute('phone.sendFile', {
+      path: 'report.pdf',
+      transferKind: 'file'
+    });
+
+    assert.equal(multipleResult.success, false);
+    assert.equal(multipleResult.needsClarification, true);
+    assert.match(multipleResult.error, /Galaxy S25/);
+    assert.match(multipleResult.error, /Pixel 10/);
+  });
+
   it('should return error for unknown action', async function() {
     const engine = new AutomationEngine({});
     const result = await engine.execute('nonexistent.action', {});

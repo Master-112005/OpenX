@@ -25,7 +25,7 @@ describe('Assistant Data Root', function() {
     assert.equal(paths.voiceDir, path.join(paths.root, 'voice'));
     assert.equal(paths.voiceDiagnosticsDir, path.join(paths.voiceDir, 'diagnostics'));
     assert.equal(paths.phoneDir, path.join(paths.root, 'phone'));
-    assert.equal(paths.phoneReceivedDir, path.join(paths.phoneDir, 'received'));
+    assert.equal(paths.phoneReceivedDir, path.join(os.homedir(), 'Downloads', 'OpenX Received'));
     assert.equal(paths.phoneTempDir, path.join(paths.root, 'runtime', 'phone-transfer'));
     assert.equal(paths.phoneDevicesPath, path.join(paths.phoneDir, 'devices.json'));
     assert.equal(paths.phonePairingPath, path.join(paths.phoneDir, 'pairing.json'));

@@ -10,6 +10,7 @@
   let sourceNode = null;
   let analyserNode = null;
   let samplingTimer = null;
+  let nextFrameAt = 0;
   let analysisBuffer = null;
   let frameIndex = 0;
   let streaming = false;
@@ -36,11 +37,12 @@
     framesSent = 0;
     bytesSent = 0;
     lastStatsAt = performance.now();
+    nextFrameAt = 0;
   }
 
   function closeAudioGraph() {
     if (samplingTimer) {
-      clearInterval(samplingTimer);
+      clearTimeout(samplingTimer);
       samplingTimer = null;
     }
     if (analyserNode) {
@@ -144,6 +146,24 @@
     }
   }
 
+  function scheduleNextFrame() {
+    if (!streaming) return;
+    const now = performance.now();
+    if (!nextFrameAt) nextFrameAt = now + FRAME_DURATION_MS;
+    const delay = Math.max(0, nextFrameAt - now);
+    samplingTimer = setTimeout(() => {
+      samplingTimer = null;
+      if (!streaming) return;
+      sendCurrentFrame();
+      const afterSend = performance.now();
+      nextFrameAt += FRAME_DURATION_MS;
+      if (nextFrameAt < afterSend) {
+        nextFrameAt = afterSend + FRAME_DURATION_MS;
+      }
+      scheduleNextFrame();
+    }, delay);
+  }
+
   async function startCapture(options) {
     const requestedRunId = Math.max(currentRunId + 1, Number(options && options.runId) || 0);
     currentRunId = requestedRunId;
@@ -201,7 +221,8 @@
       sourceNode.connect(analyserNode);
       streaming = true;
       activeRunId = requestedRunId;
-      samplingTimer = setInterval(sendCurrentFrame, FRAME_DURATION_MS);
+      nextFrameAt = performance.now() + FRAME_DURATION_MS;
+      scheduleNextFrame();
       for (const track of activeStream.getAudioTracks()) {
         track.addEventListener('ended', () => {
           if (activeStream && activeStream.getAudioTracks().every(item => item.readyState === 'ended')) {

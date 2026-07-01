@@ -19,6 +19,7 @@ const CONFIDENCE_THRESHOLD = 0.5;
 const PHONE_TRANSFER_ACTION_PATTERN = /^(?:send|share|transfer|copy|export|push|move|send\s+over|send\s+across)\b/i;
 const PHONE_TRANSFER_TRAILING_TARGET_PATTERN = /\s+(?:to|with|onto|on|into|over\s+to|across\s+to)\s+(?:my\s+)?(?:phone|mobile|iphone|android|device|smartphone|cell|cellphone|tablet|handset|this\s+phone)\s*$/i;
 const PHONE_TRANSFER_TARGET_WORD_PATTERN = /\b(?:phone|mobile|iphone|android|device|smartphone|cell|cellphone|tablet|handset)\b/i;
+const PHONE_TRANSFER_FILE_EVIDENCE_PATTERN = /\b(?:file|files|folder|folders|directory|document|documents|pdf|pdfs|docx?|xlsx?|pptx?|csv|json|zip|rar|image|images|photo|photos|picture|pictures|pic|pics|screenshot|screenshots|video|videos|audio|music|downloads?|documents?|desktop|resume|report)\b|[^\s]+\.[a-z0-9]{1,10}\b/i;
 
 const WEBSITE_URL_MAP = {
   'github': 'https://github.com',
@@ -597,7 +598,7 @@ class ActionRouter {
       /\b(?:open|show|launch|start|find|locate|search|move|copy|rename|delete|create)\b/.test(text);
     const phoneTransferCommand = PHONE_TRANSFER_ACTION_PATTERN.test(text) &&
       PHONE_TRANSFER_TARGET_WORD_PATTERN.test(text) &&
-      /\b(?:file|files|folder|folders|directory|document|documents|pdf|docx?|xlsx?|pptx?|csv|json|zip|image|images|photo|photos|picture|pictures|screenshot|screenshots|video|videos|audio|music|downloads?|desktop|it|that|this)\b/i.test(text);
+      PHONE_TRANSFER_FILE_EVIDENCE_PATTERN.test(text);
     const scheduleCommand = /\b(?:timer|countdown|pomodoro|alarm|reminder|remind)\b/.test(text) &&
       /\b(?:set|start|create|add|pause|resume|reset|stop|cancel|delete|show|list|snooze|wake|remind)\b/.test(text);
     const networkCommand = /\b(?:wifi|wi\s*fi|bluetooth|blue\s*tooth)\b/.test(text) &&
@@ -2760,9 +2761,11 @@ class ActionRouter {
       return null;
     }
 
-    const phoneTargetMatch = raw.match(PHONE_TRANSFER_TRAILING_TARGET_PATTERN) ||
-      input.match(PHONE_TRANSFER_TRAILING_TARGET_PATTERN);
-    if (!phoneTargetMatch) {
+    const rawPhoneTargetMatch = raw.match(PHONE_TRANSFER_TRAILING_TARGET_PATTERN);
+    const inputPhoneTargetMatch = input.match(PHONE_TRANSFER_TRAILING_TARGET_PATTERN);
+    const phoneTargetMatch = rawPhoneTargetMatch || inputPhoneTargetMatch;
+    const sourceIsPhone = source === 'phone';
+    if (!phoneTargetMatch && !sourceIsPhone) {
       return null;
     }
 
@@ -2771,10 +2774,15 @@ class ActionRouter {
       return null;
     }
 
-    const sourceCandidate = raw.match(PHONE_TRANSFER_TRAILING_TARGET_PATTERN)
-      ? raw.slice(0, raw.match(PHONE_TRANSFER_TRAILING_TARGET_PATTERN).index).trim()
-      : input.slice(0, input.match(PHONE_TRANSFER_TRAILING_TARGET_PATTERN).index).trim();
+    const sourceCandidate = rawPhoneTargetMatch
+      ? raw.slice(0, rawPhoneTargetMatch.index).trim()
+      : inputPhoneTargetMatch
+        ? input.slice(0, inputPhoneTargetMatch.index).trim()
+        : raw || input;
     const sourceText = this._cleanPhoneTransferSource(sourceCandidate);
+    if (!phoneTargetMatch && !PHONE_TRANSFER_FILE_EVIDENCE_PATTERN.test(sourceText)) {
+      return null;
+    }
     const sourceForKind = `${sourceText} ${raw} ${input}`;
 
     const transferKind = /\b(?:folder|folders|directory|directories)\b/i.test(sourceForKind)

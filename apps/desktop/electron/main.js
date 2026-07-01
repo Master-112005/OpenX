@@ -164,6 +164,9 @@ let voiceCaptureShouldRun = false;
 let voiceCaptureRunId = 0;
 let voiceCaptureStartOptions = null;
 let voiceCaptureFrameReceiver = null;
+let voiceCaptureWarmupTimer = null;
+let voiceStartInFlight = false;
+let voiceLastStartAt = 0;
 let voiceCaptureFrameStats = {
   received: 0,
   delivered: 0,
@@ -191,6 +194,8 @@ let phoneDeviceRegistry = null;
 const rendererCrashHistory = new Map();
 const recoveryTimeouts = new Set();
 const unresponsiveTimeouts = new Map();
+const VOICE_SHORTCUT_DEBOUNCE_MS = 450;
+const VOICE_CAPTURE_WARMUP_DELAY_MS = 350;
 const IPC_CHANNELS = [
   'command:process',
   'command:confirm',
@@ -681,7 +686,38 @@ function createVoiceCaptureWindow() {
   return voiceCaptureWindow;
 }
 
+function prewarmVoiceRuntime(reason = 'startup') {
+  if (cleanupFinished || cleanupPromise) return false;
+  try {
+    createVoiceCaptureWindow();
+    voiceOverlay?.windowController?.createWindow?.();
+    mainLogger.info('Voice runtime prewarmed', { reason, captureReady: voiceCaptureReady });
+    return true;
+  } catch (error) {
+    mainLogger.warn('Voice runtime prewarm failed', { reason, error: error.message });
+    return false;
+  }
+}
+
+function scheduleVoiceRuntimePrewarm(reason = 'startup') {
+  if (voiceCaptureWarmupTimer) {
+    clearTimeout(voiceCaptureWarmupTimer);
+    voiceCaptureWarmupTimer = null;
+  }
+  voiceCaptureWarmupTimer = setTimeout(() => {
+    voiceCaptureWarmupTimer = null;
+    prewarmVoiceRuntime(reason);
+  }, VOICE_CAPTURE_WARMUP_DELAY_MS);
+  if (typeof voiceCaptureWarmupTimer.unref === 'function') {
+    voiceCaptureWarmupTimer.unref();
+  }
+}
+
 function destroyVoiceCaptureWindow() {
+  if (voiceCaptureWarmupTimer) {
+    clearTimeout(voiceCaptureWarmupTimer);
+    voiceCaptureWarmupTimer = null;
+  }
   stopVoiceCaptureStream('runtime-cleanup');
   if (voiceCaptureWindow && !voiceCaptureWindow.isDestroyed()) {
     voiceCaptureWindow.destroy();
@@ -690,6 +726,7 @@ function destroyVoiceCaptureWindow() {
   voiceCaptureReady = false;
   voiceCaptureShouldRun = false;
   voiceCaptureStartOptions = null;
+  voiceStartInFlight = false;
 }
 
 function createDesktopMicrophoneBackend() {
@@ -1578,14 +1615,27 @@ function startVoiceListeningFromShortcut(shortcut = '') {
       return { success: true, cancelled: true, state: cancelled.state };
     }
 
+    const now = Date.now();
+    if (voiceStartInFlight || (now - voiceLastStartAt) < VOICE_SHORTCUT_DEBOUNCE_MS) {
+      mainLogger.info('Voice shortcut ignored while startup is settling', {
+        shortcut,
+        inFlight: voiceStartInFlight,
+        elapsedMs: now - voiceLastStartAt
+      });
+      return { success: false, ignored: true, reason: 'voice-startup-in-flight' };
+    }
+
+    voiceStartInFlight = true;
+    voiceLastStartAt = now;
     if (chatWindow && !chatWindow.isDestroyed() && chatWindow.isVisible()) {
       chatWindow.hide();
     }
 
+    prewarmVoiceRuntime('voice-shortcut');
     const started = voiceSessionManager.startSession({ id: `voice-shortcut-${Date.now()}` });
     try {
-      voiceSessionManager.startAudioCapture();
       voiceSessionManager.startSpeechToText();
+      voiceSessionManager.startAudioCapture();
     } catch (captureError) {
       mainLogger.warn('Voice shortcut started session but capture could not start', {
         shortcut,
@@ -1598,7 +1648,14 @@ function startVoiceListeningFromShortcut(shortcut = '') {
     return { success: true, state: started.state };
   } catch (error) {
     mainLogger.error('Voice shortcut failed', { shortcut, error: error.message });
+    try {
+      voiceSessionManager?.reset?.();
+    } catch (resetError) {
+      mainLogger.warn('Voice shortcut recovery reset failed', { error: resetError.message });
+    }
     return { success: false, error: error.message };
+  } finally {
+    voiceStartInFlight = false;
   }
 }
 
@@ -1653,11 +1710,10 @@ async function initializeAssistant() {
   );
 
   textToSpeech = new TextToSpeech(runtimeConfig);
-  try {
-    await textToSpeech.initialize();
-  } catch (err) {
-    mainLogger.warn('TTS initialization failed (non-fatal)', { error: err.message });
-  }
+  textToSpeech.initialize()
+    .catch(err => {
+      mainLogger.warn('TTS initialization failed (non-fatal)', { error: err.message });
+    });
 
   const voiceResources = createDesktopVoiceResources();
   voiceSessionManager = new VoiceSessionManager({
@@ -1682,6 +1738,15 @@ async function initializeAssistant() {
     sessionManager: voiceSessionManager,
     resources: { sessionManager: voiceSessionManager, ...voiceResources }
   });
+  scheduleVoiceRuntimePrewarm('assistant-initialized');
+  setTimeout(() => {
+    if (!voiceSessionManager || cleanupFinished || cleanupPromise) return;
+    try {
+      voiceSessionManager.warmUpResources('post-startup');
+    } catch (error) {
+      mainLogger.warn('Voice resource warm-up failed', { error: error.message });
+    }
+  }, VOICE_CAPTURE_WARMUP_DELAY_MS * 2).unref?.();
 
   registerChatShortcut();
   mainLogger.info('Assistant initialized', {
@@ -1716,6 +1781,7 @@ async function initializePhoneServer() {
     history: transferHistory,
     dataPaths: runtimeConfig.app.dataPaths,
     logger: mainLogger,
+    connectedDevicesProvider: () => phoneServer?.getStatus?.().connectedDevices || [],
     sendToDevice: (deviceId, payload) => phoneServer?.sendToDevice(deviceId, payload) === true
   });
   if (assistant?.automation) {

@@ -19,6 +19,7 @@ class FileTransferManager {
     this.receiveDirectory = options.receiveDirectory || dataPaths.phoneReceivedDir;
     this.tempDirectory = options.tempDirectory || dataPaths.phoneTempDir;
     this.sendToDevice = options.sendToDevice || (async () => false);
+    this.connectedDevicesProvider = options.connectedDevicesProvider || (() => []);
     this.logger = options.logger || { info() {}, error() {} };
     this.now = options.now || (() => Date.now());
     this.reservedPaths = new Set();
@@ -132,6 +133,22 @@ class FileTransferManager {
     } finally {
       if (temporaryZip) await fs.promises.rm(temporaryZip, { force: true });
     }
+  }
+
+  getConnectedDevices() {
+    const devices = typeof this.connectedDevicesProvider === 'function'
+      ? this.connectedDevicesProvider()
+      : [];
+    return Array.isArray(devices)
+      ? devices
+          .map(device => ({
+            deviceId: String(device?.deviceId || '').trim(),
+            deviceName: String(device?.deviceName || 'Unknown phone').trim() || 'Unknown phone',
+            connectedAt: device?.connectedAt || null,
+            lastSeen: device?.lastSeen || null
+          }))
+          .filter(device => device.deviceId && this.deviceRegistry.isTrusted(device.deviceId))
+      : [];
   }
 
   async startIncomingTransfer(payload) {

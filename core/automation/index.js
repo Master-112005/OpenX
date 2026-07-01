@@ -269,9 +269,31 @@ class AutomationEngine {
     }
 
     const phoneContext = context?.phoneContext || {};
-    const deviceId = String(entities.deviceId || phoneContext.deviceId || '').trim();
+    let deviceId = String(entities.deviceId || phoneContext.deviceId || '').trim();
+    let deviceName = String(phoneContext.deviceName || '').trim();
     if (!deviceId) {
-      return { success: false, error: 'Phone device context is missing' };
+      const connectedDevices = typeof this.fileTransferManager.getConnectedDevices === 'function'
+        ? this.fileTransferManager.getConnectedDevices()
+        : [];
+      if (connectedDevices.length === 0) {
+        return {
+          success: false,
+          error: 'No phone is connected. Connect OpenX Mobile first, then try sending the file again.'
+        };
+      }
+      if (connectedDevices.length > 1) {
+        const names = connectedDevices
+          .slice(0, 5)
+          .map(device => device.deviceName || device.deviceId)
+          .join(', ');
+        return {
+          success: false,
+          needsClarification: true,
+          error: `More than one phone is connected: ${names}. Please say which phone should receive the file.`
+        };
+      }
+      deviceId = connectedDevices[0].deviceId;
+      deviceName = connectedDevices[0].deviceName;
     }
 
     const resolved = await this._resolvePhoneTransferSource(entities);
@@ -287,7 +309,7 @@ class AutomationEngine {
       success: true,
       data: {
         deviceId,
-        deviceName: phoneContext.deviceName || 'your phone',
+        deviceName: deviceName || phoneContext.deviceName || 'your phone',
         path: resolved.path,
         transferKind: resolved.transferKind,
         transferredName: transfer?.record?.fileName || path.basename(resolved.path),

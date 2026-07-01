@@ -65,6 +65,7 @@ class VoiceWindowController {
         }
       });
       this.ipc.attach(this.window.webContents);
+      this._attachWindowRecovery(this.window);
       this._loadRenderer();
       this.position();
       this._log('Overlay Window Created');
@@ -210,6 +211,34 @@ class VoiceWindowController {
   }
 
   /**
+   * Keep overlay renderer failures from leaving stale voice UI state behind.
+   * @param {object} win Electron BrowserWindow-like object.
+   * @returns {void}
+   * @private
+   */
+  _attachWindowRecovery(win) {
+    if (!win?.webContents || typeof win.webContents.on !== 'function') return;
+    win.webContents.on('render-process-gone', (_event, details = {}) => {
+      this._log('Overlay Renderer Exited', { reason: details.reason || 'unknown' });
+      this.visible = false;
+      this.window = null;
+      if (typeof win.destroy === 'function' && !this._isDestroyed(win)) {
+        win.destroy();
+      }
+    });
+    if (typeof win.on === 'function') {
+      win.on('unresponsive', () => {
+        this._log('Overlay Renderer Unresponsive');
+        try {
+          win.webContents.reloadIgnoringCache?.();
+        } catch (error) {
+          this._log('Overlay Renderer Reload Failed', { error: error.message });
+        }
+      });
+    }
+  }
+
+  /**
    * Create the built-in overlay HTML shell.
    * @returns {string}
    * @private
@@ -221,14 +250,14 @@ class VoiceWindowController {
 <meta charset="utf-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'self';">
 <style>
-:root { --voice-bg: rgba(17,22,36,.82); --voice-text: #f4f7ff; --voice-muted: rgba(244,247,255,.68); --voice-accent: #4488ff; --voice-border: rgba(255,255,255,.16); --voice-blur: 34px; --voice-ease: cubic-bezier(.2,.8,.2,1); }
+:root { --voice-bg: rgba(17,22,36,.84); --voice-text: #f4f7ff; --voice-muted: rgba(244,247,255,.72); --voice-accent: #4488ff; --voice-border: rgba(255,255,255,.18); --voice-blur: 32px; --voice-ease: cubic-bezier(.2,.8,.2,1); }
 html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; font-family: Segoe UI, system-ui, sans-serif; color: var(--voice-text); }
 body { animation: overlay-in 240ms var(--voice-ease) both; }
-#voice-overlay { box-sizing: border-box; height: 100vh; padding: 18px 20px; border: 1px solid var(--voice-border); border-radius: 24px; background: var(--voice-bg); backdrop-filter: blur(var(--voice-blur)) saturate(160%); box-shadow: 0 24px 80px rgba(0,0,0,.35), inset 0 1px 1px rgba(255,255,255,.16); display: grid; grid-template-columns: 54px 1fr; gap: 14px; align-items: center; contain: layout paint style; transform: translateZ(0); }
-#icon { width: 50px; height: 50px; border-radius: 16px; display: grid; place-items: center; background: color-mix(in srgb, var(--voice-accent) 22%, transparent); border: 1px solid color-mix(in srgb, var(--voice-accent) 42%, transparent); font-weight: 700; transform: translateZ(0); will-change: transform, opacity; }
+#voice-overlay { box-sizing: border-box; height: 100vh; padding: 18px 20px; border: 1px solid var(--voice-border); border-radius: 24px; background: var(--voice-bg); backdrop-filter: blur(var(--voice-blur)) saturate(160%); box-shadow: 0 24px 80px rgba(0,0,0,.35), inset 0 1px 1px rgba(255,255,255,.16); display: grid; grid-template-columns: 54px minmax(0,1fr); gap: 14px; align-items: center; contain: layout paint style; transform: translate3d(0,0,0); transition: background-color 180ms var(--voice-ease), border-color 180ms var(--voice-ease), box-shadow 180ms var(--voice-ease); will-change: transform, opacity; }
+#icon { width: 50px; height: 50px; border-radius: 16px; display: grid; place-items: center; background: color-mix(in srgb, var(--voice-accent) 22%, transparent); border: 1px solid color-mix(in srgb, var(--voice-accent) 42%, transparent); font-weight: 700; transform: translate3d(0,0,0); transition: transform 180ms var(--voice-ease), opacity 180ms var(--voice-ease), border-color 180ms var(--voice-ease); will-change: transform, opacity; }
 #title { font-size: 15px; font-weight: 650; line-height: 1.25; }
 #status { color: var(--voice-muted); font-size: 13px; margin-top: 3px; }
-#transcript { margin-top: 10px; min-height: 20px; font-size: 14px; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transition: opacity 180ms var(--voice-ease), transform 180ms var(--voice-ease); }
+#transcript { margin-top: 10px; min-height: 20px; max-width: 100%; font-size: 14px; line-height: 1.35; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transform: translate3d(0,0,0); transition: opacity 160ms var(--voice-ease), transform 160ms var(--voice-ease); will-change: opacity, transform; }
 .listening #icon { animation: pulse 1.4s var(--voice-ease) infinite; }
 .processing #icon { animation: pulse 1.7s var(--voice-ease) infinite; }
 .error #icon { color: #ffb1b1; border-color: rgba(255,120,120,.45); }

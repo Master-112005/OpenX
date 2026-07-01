@@ -315,6 +315,41 @@ describe('Voice Subsystem Architecture', function() {
     assert.equal(manager.isBusy(), false);
   });
 
+  it('should warm voice resources without opening a voice session', function() {
+    const { VoiceSessionManager, VoiceStateMachine } = require('../../apps/desktop/voice');
+    const calls = [];
+    const manager = new VoiceSessionManager({
+      resources: {
+        audioProcessor: {
+          on() {},
+          initialize() { calls.push('audioProcessor'); return { initialized: true }; },
+          reset() {},
+          getStatus() { return { initialized: true }; }
+        },
+        sttEngine: {
+          on() {},
+          initialize() { calls.push('sttEngine'); return { initialized: true }; },
+          getStatus() { return { initialized: false }; },
+          cancel() {}
+        },
+        transcriptProcessor: {
+          on() {},
+          getStatus() { calls.push('transcriptProcessor'); return { initialized: true }; },
+          reset() {}
+        }
+      },
+      setTimeout: () => ({ unref() {} }),
+      clearTimeout: () => {}
+    });
+
+    const warmed = manager.warmUpResources('test-warm');
+
+    assert.equal(warmed.success, true);
+    assert.equal(manager.getSession(), null);
+    assert.equal(manager.getCurrentState(), VoiceStateMachine.STATES.READY);
+    assert.deepEqual(calls, ['audioProcessor', 'sttEngine', 'transcriptProcessor']);
+  });
+
   it('should schedule and clear lifecycle timeout placeholders only', function() {
     const { VoiceSessionManager } = require('../../apps/desktop/voice');
     const scheduled = [];

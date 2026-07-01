@@ -170,6 +170,45 @@ class VoiceSessionManager {
   }
 
   /**
+   * Warm non-microphone resources so the first Alt+Space press does less work.
+   * This never opens the microphone and never creates a Voice session.
+   * @param {string} reason Warm-up reason for diagnostics.
+   * @returns {{success: boolean, state: string, warmed: string[], failed: object[]}}
+   */
+  warmUpResources(reason = 'warm-up') {
+    if (this.currentSession) {
+      return { success: false, state: this.currentState, warmed: [], failed: [{ resource: 'session', error: 'Voice session is active.' }] };
+    }
+    if (this.currentState === VoiceStateMachine.STATES.IDLE) {
+      this.initialize();
+    }
+
+    const warmed = [];
+    const failed = [];
+    const warm = (resource, action) => {
+      try {
+        action();
+        warmed.push(resource);
+      } catch (error) {
+        failed.push({ resource, error: error.message });
+        this._publish(SESSION_EVENTS.VOICE_ERROR, this._buildEventPayload(null, {
+          error: this._normalizeError(error)
+        }));
+      }
+    };
+
+    warm('audioProcessor', () => this._getAudioProcessor().initialize());
+    warm('sttEngine', () => {
+      const sttEngine = this._getSTTEngine();
+      if (!sttEngine.getStatus?.().initialized) sttEngine.initialize();
+    });
+    warm('transcriptProcessor', () => this._getTranscriptProcessor().getStatus());
+
+    this._log('Resources Warmed', { reason, warmed, failed });
+    return { success: failed.length === 0, state: this.currentState, warmed, failed };
+  }
+
+  /**
    * Create a session and immediately begin listening through the validated lifecycle.
    * @param {{id?: string, sessionId?: string, transcript?: string}} options Session options.
    * @returns {{success: boolean, state: string, session: object}}

@@ -361,10 +361,15 @@ class PhoneServer {
     }
 
     try {
-      await this.fileTransferManager.receiveFile({ ...payload, deviceId });
+      const result = await this.fileTransferManager.receiveFile({ ...payload, deviceId });
       const device = this.pairingService.deviceRegistry.getDevice(deviceId);
       if (device) this.connectionManager.setDevice(clientId, device);
-      this.sendToClient(clientId, { type: 'file-transfer-success' });
+      this.sendToClient(clientId, {
+        type: 'file-transfer-success',
+        fileName: result.record.fileName,
+        fileSize: result.record.size,
+        savedTo: result.filePath
+      });
     } catch (error) {
       this.sendToClient(clientId, {
         type: 'error',
@@ -417,7 +422,8 @@ class PhoneServer {
         type: 'file-transfer-success',
         transferId: payload.transferId,
         fileName: result.record.fileName,
-        fileSize: result.record.size
+        fileSize: result.record.size,
+        savedTo: result.filePath
       });
     } catch (error) {
       if (payload.transferId) this._untrackClientTransfer(clientId, payload.transferId);

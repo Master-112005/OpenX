@@ -27,6 +27,8 @@ describe('Electron Chat Shortcut', function() {
     assert.match(script, /voiceSessionManager\.startSession/);
     assert.match(script, /voiceSessionManager\.startAudioCapture\(\)/);
     assert.match(script, /voiceSessionManager\.startSpeechToText\(\)/);
+    assert.match(script, /VOICE_SHORTCUT_DEBOUNCE_MS/);
+    assert.match(script, /voiceStartInFlight/);
     assert.match(script, /Registered voice shortcut/);
     assert.match(script, /Registered chat shortcut/);
     assert.doesNotMatch(script, /global chat shortcuts are disabled/i);
@@ -54,6 +56,9 @@ describe('Electron Chat Shortcut', function() {
     assert.match(script, /function isVoiceCaptureRendererUrl\(url\)/);
     assert.match(script, /canGrantVoiceCapturePermission\(webContents, permission, requestingUrl\)/);
     assert.match(script, /function createVoiceCaptureWindow\(\)/);
+    assert.match(script, /function prewarmVoiceRuntime\(reason = 'startup'\)/);
+    assert.match(script, /function scheduleVoiceRuntimePrewarm\(reason = 'startup'\)/);
+    assert.match(script, /scheduleVoiceRuntimePrewarm\('assistant-initialized'\)/);
     assert.match(script, /function createDesktopMicrophoneBackend\(\)/);
     assert.match(script, /voiceCapture:start/);
     assert.match(script, /voiceCapture:stop/);
@@ -68,7 +73,9 @@ describe('Electron Chat Shortcut', function() {
     assert.match(captureHtml, /Content-Security-Policy/);
     assert.match(captureScript, /navigator\.mediaDevices\.getUserMedia/);
     assert.match(captureScript, /createAnalyser/);
-    assert.match(captureScript, /setInterval\(sendCurrentFrame, FRAME_DURATION_MS\)/);
+    assert.match(captureScript, /function scheduleNextFrame\(\)/);
+    assert.match(captureScript, /setTimeout\(\(\) =>/);
+    assert.match(captureScript, /clearTimeout\(samplingTimer\)/);
     assert.match(captureScript, /currentRunId !== requestedRunId/);
     assert.match(captureScript, /stale-start-ignored/);
     assert.match(captureScript, /runId: activeRunId/);

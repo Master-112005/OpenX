@@ -65,7 +65,7 @@ describe('Phone file transfer', function() {
       logger: quietLogger()
     });
 
-    assert.equal(defaultManager.receiveDirectory, path.join(dataDir, 'phone', 'received'));
+    assert.equal(defaultManager.receiveDirectory, path.join(os.homedir(), 'Downloads', 'OpenX Received'));
     assert.equal(defaultManager.tempDirectory, path.join(dataDir, 'runtime', 'phone-transfer'));
     assert.equal(fs.existsSync(defaultManager.receiveDirectory), true);
     assert.equal(fs.existsSync(defaultManager.tempDirectory), true);
@@ -241,7 +241,12 @@ describe('Phone file transfer', function() {
       data: content.toString('base64')
     }));
 
-    assert.deepEqual(await responsePromise, { type: 'file-transfer-success' });
+    assert.deepEqual(await responsePromise, {
+      type: 'file-transfer-success',
+      fileName: 'socket.txt',
+      fileSize: content.length,
+      savedTo: path.join(receiveDirectory, 'socket.txt')
+    });
     assert.deepEqual(fs.readFileSync(path.join(receiveDirectory, 'socket.txt')), content);
   });
 
@@ -328,7 +333,8 @@ describe('Phone file transfer', function() {
       type: 'file-transfer-success',
       transferId,
       fileName: 'chunked.bin',
-      fileSize: content.length
+      fileSize: content.length,
+      savedTo: path.join(receiveDirectory, 'chunked.bin')
     });
     assert.deepEqual(fs.readFileSync(path.join(receiveDirectory, 'chunked.bin')), content);
   });
