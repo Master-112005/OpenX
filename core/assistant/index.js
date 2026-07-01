@@ -118,11 +118,11 @@ class Assistant extends EventEmitter {
 
   async processCommand(input, source = 'chat', options = {}) {
     if (!input || typeof input !== 'string' || input.trim().length === 0) {
-      return {
+      return this._finalizeAssistantResult({
         success: false,
         response: this.responses.generate('error', 'noCommand'),
         source
-      };
+      }, { input, source });
     }
 
     await this.pluginsReady;
@@ -134,27 +134,27 @@ class Assistant extends EventEmitter {
     try {
       const confirmationResult = await this._handlePendingConfirmation(input, source);
       if (confirmationResult) {
-        return confirmationResult;
+        return this._finalizeAssistantResult(confirmationResult, { input, source });
       }
 
       const clarificationResult = await this._handlePendingClarification(input, source);
       if (clarificationResult) {
-        return clarificationResult;
+        return this._finalizeAssistantResult(clarificationResult, { input, source });
       }
 
       const scheduleCompletion = await this._handlePendingScheduleCompletion(input, source);
       if (scheduleCompletion) {
-        return scheduleCompletion;
+        return this._finalizeAssistantResult(scheduleCompletion, { input, source });
       }
 
       const learningResult = await this._handleLearningInput(input, source);
       if (learningResult) {
-        return learningResult;
+        return this._finalizeAssistantResult(learningResult, { input, source });
       }
 
       const newScheduleClarification = this._startScheduleClarification(input, source);
       if (newScheduleClarification) {
-        return newScheduleClarification;
+        return this._finalizeAssistantResult(newScheduleClarification, { input, source });
       }
 
       const sessionContextResult = this._answerSessionContextQuestion(input, source) ||
@@ -162,12 +162,12 @@ class Assistant extends EventEmitter {
         this._answerUnsupportedPersonalIntegration(input, source);
       if (sessionContextResult) {
         this.context.record(input, {}, sessionContextResult);
-        return sessionContextResult;
+        return this._finalizeAssistantResult(sessionContextResult, { input, source });
       }
 
       const memoryResult = this._answerPersonalMemoryQuestion(input, source);
       if (memoryResult) {
-        return memoryResult;
+        return this._finalizeAssistantResult(memoryResult, { input, source });
       }
 
       const routedInput = this._buildRoutedInput(input);
@@ -264,7 +264,7 @@ class Assistant extends EventEmitter {
         response
       });
       this.emit('result', { ...result, response, source });
-      return { ...result, response, source };
+      return this._finalizeAssistantResult({ ...result, response, source }, { input, source });
     } catch (err) {
       const timedOut = err?.code === 'command_timeout';
       this.logger.error(timedOut ? 'Command processing timed out' : 'Command processing error', err);
@@ -289,7 +289,7 @@ class Assistant extends EventEmitter {
         intent: null,
         response
       });
-      return { success: false, response, source, error: err.message };
+      return this._finalizeAssistantResult({ success: false, response, source, error: err.message }, { input, source });
     } finally {
       this.isProcessing = false;
     }
@@ -330,10 +330,10 @@ class Assistant extends EventEmitter {
     if (result.success && pending?.multiCommand) {
       return this._continuePendingMultiCommand(pending, result, pending.source || 'chat');
     }
-    return {
+    return this._finalizeAssistantResult({
       ...result,
       response: this.personality.applyToResponse(result.response || '')
-    };
+    }, { source: pending.source || 'confirmation', result });
   }
 
   expirePendingConfirmation(reason = 'timeout', source = 'voice') {
@@ -343,7 +343,7 @@ class Assistant extends EventEmitter {
 
     this.pendingConfirmation = null;
     const templateId = reason === 'cancelled' ? 'cancelled' : 'timedOut';
-    return {
+    return this._finalizeAssistantResult({
       success: false,
       expired: reason === 'timeout',
       cancelled: reason === 'cancelled',
@@ -351,7 +351,7 @@ class Assistant extends EventEmitter {
       response: this.personality.applyToResponse(
         this.responses.generate('confirmation', templateId)
       )
-    };
+    }, { source });
   }
 
   getContext() {
@@ -2153,6 +2153,25 @@ class Assistant extends EventEmitter {
       data: { type: 'conversation-summary', summary: digest.summaryText },
       source,
       response: this.personality.applyToResponse('I will remember this chat summary.')
+    };
+  }
+
+  _finalizeAssistantResult(result = {}, context = {}) {
+    const response = String(result.response || result.message || '').trim();
+    const source = result.source || context.source || 'chat';
+    const responseStyle = this.learning?.getPreference?.('responseStyle')?.value || '';
+    const spokenStyle = this.learning?.getPreference?.('spokenResponseStyle')?.value || responseStyle || '';
+    const spokenResponse = result.spokenResponse || this.responses.createSpokenResponse(response, {
+      ...context,
+      source,
+      responseStyle,
+      spokenStyle,
+      result
+    });
+    return {
+      ...result,
+      source,
+      ...(spokenResponse ? { spokenResponse } : {})
     };
   }
 }

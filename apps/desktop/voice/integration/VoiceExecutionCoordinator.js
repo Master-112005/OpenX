@@ -4,6 +4,7 @@ const EventEmitter = require('events');
 const VoiceIntegrationConfiguration = require('./VoiceIntegrationConfiguration');
 const EVENTS = require('./VoiceIntegrationEvents');
 const { SESSION_EVENTS } = require('../session/SessionEvents');
+const ResponseGenerator = require('../../../../core/assistant/responses');
 
 /**
  * Purpose: Coordinates voice execution lifecycle around assistant dispatch.
@@ -253,7 +254,15 @@ class VoiceExecutionCoordinator extends EventEmitter {
    * @private
    */
   _extractSpokenResponse(result = {}) {
-    return String(result?.response || result?.message || '').trim();
+    const explicit = String(result?.spokenResponse || '').trim();
+    if (explicit) return explicit;
+    const response = String(result?.response || result?.message || '').trim();
+    if (!response) return '';
+    return new ResponseGenerator().createSpokenResponse(response, {
+      source: 'voice',
+      result,
+      force: true
+    });
   }
 
   /**

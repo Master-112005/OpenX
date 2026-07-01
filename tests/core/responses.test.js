@@ -491,4 +491,48 @@ describe('Response Generator', function() {
     });
     assert.ok(result.includes('YouTube'));
   });
+
+  it('should create compact spoken responses for long result cards', function() {
+    const gen = new ResponseGenerator();
+    const spoken = gen.createSpokenResponse(
+      'I found 4 matching local items: Resume.docx (file, Documents); Resume Backup.pdf (file, Downloads); Resume old.docx (file, Desktop). Search was time-limited, so there may be more matches, sir.',
+      {
+        source: 'voice',
+        result: {
+          intent: 'file.search',
+          data: {
+            count: 4,
+            entries: [
+              { name: 'Resume.docx' },
+              { name: 'Resume Backup.pdf' },
+              { name: 'Resume old.docx' }
+            ]
+          }
+        }
+      }
+    );
+
+    assert.equal(spoken, 'I found 4: Resume.docx, Resume Backup.pdf, and 2 more.');
+  });
+
+  it('should shorten source-backed web answers for TTS', function() {
+    const gen = new ResponseGenerator();
+    const spoken = gen.createSpokenResponse(
+      'Most relevant result for "node": Node.js is a JavaScript runtime built on Chrome V8. Source: Node.js guide, sir.',
+      {
+        source: 'voice',
+        result: {
+          intent: 'browser.search',
+          data: {
+            searchSummary: {
+              text: 'Node.js is a JavaScript runtime built on Chrome V8.',
+              sourceTitle: 'Node.js guide'
+            }
+          }
+        }
+      }
+    );
+
+    assert.equal(spoken, 'Node.js is a JavaScript runtime built on Chrome V8.');
+  });
 });

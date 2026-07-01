@@ -40,11 +40,14 @@ describe('Active Learning Store', function() {
 
     const correction = store.learnFromText('when I say maps open google maps');
     const preference = store.learnFromText('remember that I prefer web searches in chrome');
+    const replyPreference = store.learnFromText('remember that I prefer short replies');
 
     assert.equal(correction.type, 'correction');
     assert.equal(store.findCorrection('maps').correction, 'open google maps');
     assert.equal(preference.type, 'preference');
+    assert.equal(replyPreference.type, 'preference');
     assert.equal(store.getSnapshot().preferences.searchOpenMode.value, 'browser');
+    assert.equal(store.getSnapshot().preferences.responseStyle.value, 'concise');
   });
 
   it('should reuse learned corrections for close typos without blocking persistence', function() {

@@ -131,6 +131,53 @@ function partialSearchNote(searchStats) {
   return ' Search was partial, so there may be more matches.';
 }
 
+function sentenceSplit(text) {
+  return String(text || '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .split(/(?<=[.!?])\s+/)
+    .map(sentence => sentence.trim())
+    .filter(Boolean);
+}
+
+function clampText(text, maxLength = 220) {
+  const value = String(text || '').replace(/\s+/g, ' ').trim();
+  if (value.length <= maxLength) return value;
+  const truncated = value.slice(0, maxLength - 3).trim();
+  return `${truncated.replace(/[,:;.\s]+$/g, '')}...`;
+}
+
+function stripTechnicalSpeechNoise(text) {
+  return String(text || '')
+    .replace(/\bSource:\s*[^.]+\.?/gi, '')
+    .replace(/\bhttps?:\/\/\S+/gi, '')
+    .replace(/\b[A-Z]:\\(?:[^\\/:*?"<>|\r\n]+\\)*[^\\/:*?"<>|\r\n]*/g, match => basenameOrValue(match) || 'that file')
+    .replace(/\s*;\s*/g, ', ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function buildReadableSearchSummary({ count, entries, query, searchStats, kind = 'item' }) {
+  const numericCount = Number(count || 0);
+  if (!numericCount) {
+    return query
+      ? `I could not find a matching local ${kind} for "${query}".`
+      : `I could not find a matching local ${kind}.`;
+  }
+
+  const safeEntries = Array.isArray(entries) ? entries : [];
+  const names = safeEntries
+    .slice(0, 3)
+    .map(formatSearchEntry)
+    .join('; ');
+  const remaining = Math.max(0, numericCount - Math.min(safeEntries.length, 3));
+  const label = numericCount === 1 ? kind : `${kind}s`;
+  const suffix = remaining > 0 ? `, plus ${remaining} more` : '';
+  return names
+    ? `I found ${numericCount} matching local ${label}: ${names}${suffix}.${partialSearchNote(searchStats)}`
+    : `I found ${numericCount} matching local ${label}.${partialSearchNote(searchStats)}`;
+}
+
 function humanizeError(error) {
   const message = String(error || '').trim();
   if (!message) {
@@ -396,19 +443,13 @@ const RESPONSE_BUILDERS = {
       const entries = valueFromContext(context, 'entries', context.result?.data?.entries || []);
       const query = valueFromContext(context, 'query', context.entities?.query || '');
       const searchStats = valueFromContext(context, 'searchStats', context.result?.data?.searchStats || null);
-      if (count === 0) {
-        return query
-          ? `I couldn't find a matching local file or folder for "${query}".`
-          : `I couldn't find a matching local file or folder.`;
-      }
-
-      const names = Array.isArray(entries)
-        ? entries.slice(0, 5).map(formatSearchEntry).join('; ')
-        : '';
-      const label = count === 1 ? 'item' : 'items';
-      return names
-        ? `I found ${count} matching local ${label}: ${names}.${partialSearchNote(searchStats)}`
-        : `I found ${count} matching local ${label}.${partialSearchNote(searchStats)}`;
+      return buildReadableSearchSummary({
+        count,
+        entries,
+        query,
+        searchStats,
+        kind: 'item'
+      });
     },
     'file.smartFind': context => {
       const count = valueFromContext(context, 'count', context.result?.data?.count || 0);
@@ -518,13 +559,13 @@ const RESPONSE_BUILDERS = {
       const entries = valueFromContext(context, 'entries', context.result?.data?.entries || []);
       const query = valueFromContext(context, 'query', context.entities?.query || '');
       const searchStats = valueFromContext(context, 'searchStats', context.result?.data?.searchStats || null);
-      if (!count || !Array.isArray(entries) || entries.length === 0) {
-        return query
-          ? `I could not find a matching local folder for "${query}".`
-          : 'I could not find a matching local folder.';
-      }
-      const names = entries.slice(0, 5).map(formatSearchEntry).join('; ');
-      return `I found ${count} matching local ${count === 1 ? 'folder' : 'folders'}: ${names}.${partialSearchNote(searchStats)}`;
+      return buildReadableSearchSummary({
+        count,
+        entries,
+        query,
+        searchStats,
+        kind: 'folder'
+      });
     },
     'browser.open': context => {
       const url = valueFromContext(context, 'url');
@@ -1105,14 +1146,14 @@ const RESPONSE_BUILDERS = {
       const userInput = input || '';
 
       if (userInput.includes('?')) {
-        return 'I can help with that. Please give me a little more detail so I can answer it properly.';
+        return 'I can answer that, but I need one clearer subject or target. Ask it as a direct question, or tell me what app, file, person, or topic you mean.';
       }
 
       if (suggestions.length > 0) {
-        return `I am not fully sure what you meant. The closest options I found are: ${suggestions.join(', ')}.`;
+        return `I am not fully sure what you meant. I can try: ${suggestions.slice(0, 3).join(', ')}.`;
       }
 
-      return 'I did not understand that command clearly. Try saying it another way with the app, file, time, or action you want.';
+      return 'I did not understand that clearly. Say the action first, then the target. For example: open Chrome, find my resume, play a song, or remind me at 6 PM.';
     },
     executionFailed: context => humanizeError(context?.error),
     permissionDenied: () => 'I cannot do that with the current permission setting, but I can still help with other tasks.',
@@ -1208,6 +1249,69 @@ class ResponseGenerator {
     const result = String(text || '').replace(/\s+/g, ' ').trim();
     if (!result) return '';
     return applyFormalAddress(result, this.config);
+  }
+
+  createSpokenResponse(response, context = {}) {
+    const source = String(context.source || '').toLowerCase();
+    const intent = String(context.intent || context.result?.intent || '').trim();
+    const style = String(context.spokenStyle || context.responseStyle || this.config?.assistant?.spokenResponseStyle || '').trim().toLowerCase();
+    let text = stripTechnicalSpeechNoise(response);
+    if (!text) return '';
+
+    if (source !== 'voice' && context.force !== true) {
+      return text;
+    }
+
+    const data = context.result?.data || {};
+    const entities = context.result?.entities || {};
+
+    if (/^(?:file|folder)\.search$/.test(intent)) {
+      const count = Number(data.count ?? entities.count ?? 0);
+      const query = data.query || entities.query || '';
+      if (!count) {
+        return query ? `I could not find "${query}".` : 'I could not find a matching item.';
+      }
+      const entries = Array.isArray(data.entries) ? data.entries : [];
+      const names = entries.slice(0, 2).map(entry => entry.name || basenameOrValue(entry.path)).filter(Boolean);
+      const more = count > names.length ? `, and ${count - names.length} more` : '';
+      return names.length
+        ? `I found ${count}: ${names.join(', ')}${more}.`
+        : `I found ${count} matching item${count === 1 ? '' : 's'}.`;
+    }
+
+    if (intent === 'browser.search') {
+      const answer = data.answer?.text || data.searchSummary?.text || data.results?.[0]?.snippet || '';
+      if (answer) return clampText(stripTechnicalSpeechNoise(answer), 180);
+    }
+
+    if (/^browser\.listTabs$/.test(intent)) {
+      const count = Number(data.count || 0);
+      return count ? `You have ${count} open browser tab${count === 1 ? '' : 's'}.` : text;
+    }
+
+    if (/^(?:media\.play|media\.search)$/.test(intent)) {
+      const query = data.query || data.mediaQuery || entities.mediaQuery || '';
+      const platform = data.platform || data.mediaPlatform || entities.mediaPlatform || 'media';
+      return query ? `${query} is ready on ${platform}.` : text;
+    }
+
+    const sentences = sentenceSplit(text);
+    if (style !== 'detailed' && sentences.length > 1) {
+      const important = sentences.find(sentence =>
+        /\b(?:found|opened|opening|set|added|sent|done|ready|could not|need|confirm|cancelled|remind|alarm|timer|playing|verified)\b/i.test(sentence)
+      ) || sentences[0];
+      text = important;
+    }
+
+    if (style === 'concise') {
+      return clampText(text, 140);
+    }
+
+    if (style === 'detailed') {
+      return clampText(text, 320);
+    }
+
+    return clampText(text, 220);
   }
 
   getTemplate(type, templateId) {

@@ -344,6 +344,12 @@ class ActiveLearningStore {
       if (/\b(?:local|pictures?|photos? folder|computer|pc|laptop)\b/.test(normalized)) return 'localPictures';
       return '';
     }
+    if (kind === 'responseStyle' || kind === 'spokenResponseStyle') {
+      if (/\b(?:short|brief|concise|quick|small|less|compact)\b/.test(normalized)) return 'concise';
+      if (/\b(?:detail|detailed|explain|full|complete|more)\b/.test(normalized)) return 'detailed';
+      if (/\b(?:natural|human|friendly|normal)\b/.test(normalized)) return 'natural';
+      return '';
+    }
     return cleanCommand(replacement).slice(0, 200);
   }
 
@@ -925,6 +931,29 @@ class ActiveLearningStore {
     }
 
     if (/\b(?:remember|learn)\b/.test(normalized) && /\b(?:prefer|preference|preferred)\b/.test(normalized)) {
+      const responsePreferenceMatch = /\b(?:reply|replies|response|responses|answer|answers|speak|voice|tts)\b/.test(normalized);
+      if (responsePreferenceMatch) {
+        const style = /\b(?:short|brief|concise|quick|small|less|compact)\b/.test(normalized)
+          ? 'concise'
+          : /\b(?:detail|detailed|explain|full|complete|more)\b/.test(normalized)
+            ? 'detailed'
+            : /\b(?:natural|human|friendly|normal)\b/.test(normalized)
+              ? 'natural'
+              : '';
+        if (style) {
+          const key = /\b(?:speak|voice|tts)\b/.test(normalized)
+            ? 'spokenResponseStyle'
+            : 'responseStyle';
+          this.rememberPreference(key, style, { source: 'explicit-learning' });
+          return {
+            type: 'preference',
+            response: key === 'spokenResponseStyle'
+              ? `I learned that you prefer ${style} voice replies.`
+              : `I learned that you prefer ${style} replies.`
+          };
+        }
+      }
+
       if (/\b(?:search|web|google)\b/.test(normalized) && /\b(?:chrome|browser|new tab)\b/.test(normalized)) {
         this.rememberPreference('searchOpenMode', 'browser', { source: 'explicit-learning' });
         return {

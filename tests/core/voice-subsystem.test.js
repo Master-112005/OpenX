@@ -2005,6 +2005,68 @@ describe('Voice Subsystem Architecture', function() {
     bridge.detach();
   });
 
+  it('should speak the assistant spokenResponse instead of the full chat response', async function() {
+    const { VoiceAssistantBridge, VoiceSessionManager, TranscriptResult } = require('../../apps/desktop/voice');
+    let sttRunning = false;
+    let spokenText = null;
+    const manager = new VoiceSessionManager({
+      resources: {
+        sttEngine: {
+          on() {},
+          initialize: () => ({ initialized: true }),
+          start: () => {
+            sttRunning = true;
+            return { started: true, state: 'DECODING' };
+          },
+          isRunning: () => sttRunning,
+          cancel: () => {
+            sttRunning = false;
+            return { cancelled: true, state: 'STOPPED' };
+          },
+          getStatus: () => ({ running: sttRunning })
+        },
+        audioProcessor: {
+          on() {},
+          reset: () => ({ reset: true }),
+          getStatus: () => ({ initialized: true })
+        }
+      },
+      setTimeout: () => ({ unref() {} }),
+      clearTimeout: () => {}
+    });
+    const bridge = new VoiceAssistantBridge({
+      manager,
+      assistant: {
+        processCommand: async () => ({
+          success: true,
+          response: 'I found 4 matching local files: Resume.docx, Resume Backup.pdf, Resume old.docx, and one more.',
+          spokenResponse: 'I found four resume files.'
+        })
+      },
+      textToSpeech: {
+        speakAsync: text => {
+          spokenText = text;
+          return Promise.resolve({ outcome: 'completed' });
+        },
+        stop: () => {}
+      }
+    });
+
+    manager.startSession({ id: 'spoken-response-session' });
+    manager.startSpeechToText();
+    sttRunning = false;
+    manager.beginProcessing();
+    manager.processTranscript(new TranscriptResult({
+      finalTranscript: 'find my resume',
+      confidence: 0.9,
+      partial: false
+    }));
+    await new Promise(resolve => setImmediate(resolve));
+
+    assert.equal(spokenText, 'I found four resume files.');
+    bridge.detach();
+  });
+
   it('should stop TTS and not resume listening when a speaking voice session is cancelled', async function() {
     const { VoiceAssistantBridge, VoiceSessionManager, VoiceStateMachine, TranscriptResult } = require('../../apps/desktop/voice');
     let sttRunning = false;
