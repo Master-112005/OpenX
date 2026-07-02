@@ -1827,8 +1827,8 @@ describe('Voice Subsystem Architecture', function() {
       },
       configuration: {
         size: { width: 256, height: 50 },
-        mediumSize: { width: 360, height: 118 },
-        expandedSize: { width: 440, height: 236 },
+        mediumSize: { width: 320, height: 148 },
+        expandedSize: { width: 360, height: 360 },
         position: { vertical: 'top', yOffset: 12 }
       }
     });
@@ -1837,7 +1837,7 @@ describe('Voice Subsystem Architecture', function() {
     controller.updateAssistantResult({
       response: 'Opening screenshots.'
     });
-    await new Promise(resolve => setTimeout(resolve, 190));
+    await new Promise(resolve => setTimeout(resolve, 520));
     controller.updateAssistantResult({
       response: 'I found 2 matching folders. Choose a number.',
       choices: [
@@ -1845,17 +1845,17 @@ describe('Voice Subsystem Architecture', function() {
         { index: 2, title: 'Screenshots - C:\\B\\Screenshots', path: 'C:\\B\\Screenshots' }
       ]
     });
-    await new Promise(resolve => setTimeout(resolve, 190));
+    await new Promise(resolve => setTimeout(resolve, 520));
     controller.updateState({ state: 'LISTENING', statusText: 'Listening' });
-    await new Promise(resolve => setTimeout(resolve, 210));
+    await new Promise(resolve => setTimeout(resolve, 560));
     controller.updateTranscript({ transcript: 'open visual', partial: true });
     controller.hide();
 
     assert.equal(shown.visible, true);
     assert.equal(controller.getStatus().created, true);
     assert.deepEqual(bounds[0], { x: 382, y: 32, width: 256, height: 50 });
-    assert.ok(bounds.some(entry => entry.x === 330 && entry.y === 32 && entry.width === 360 && entry.height === 118));
-    assert.ok(bounds.some(entry => entry.x === 295 && entry.y === 32 && entry.width === 430 && entry.height === 204));
+    assert.ok(bounds.some(entry => entry.x === 350 && entry.y === 32 && entry.width === 320 && entry.height === 148));
+    assert.ok(bounds.some(entry => entry.x === 330 && entry.y === 32 && entry.width === 360 && entry.height === 248));
     assert.deepEqual(bounds[bounds.length - 1], { x: 382, y: 32, width: 256, height: 50 });
     assert.ok(sent.some(message => message.operation === 'showOverlay'));
     assert.ok(sent.some(message => message.operation === 'displayAssistantResult'));

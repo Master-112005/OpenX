@@ -1,6 +1,9 @@
 const { contextBridge, ipcRenderer } = require('electron');
 
 let voiceAssistantResultClearTimer = null;
+let voiceAlertAudioContext = null;
+let voiceAlertSoundInterval = null;
+let voiceAlertActiveTones = [];
 
 function voiceResultNameFromPath(pathValue, fallback) {
   return String(pathValue || '').split(/[\\/]/).filter(Boolean).pop() || fallback;
@@ -41,6 +44,100 @@ function appendVoiceCard(list, entry, options = {}) {
   list.appendChild(item);
 }
 
+function getVoiceAlertAudioContext() {
+  if (!voiceAlertAudioContext) {
+    const Context = window.AudioContext || window.webkitAudioContext;
+    if (!Context) return null;
+    voiceAlertAudioContext = new Context();
+  }
+  if (voiceAlertAudioContext.state === 'suspended') {
+    voiceAlertAudioContext.resume().catch(() => {});
+  }
+  return voiceAlertAudioContext;
+}
+
+function stopVoiceAlertSound() {
+  if (voiceAlertSoundInterval) {
+    clearInterval(voiceAlertSoundInterval);
+    voiceAlertSoundInterval = null;
+  }
+  for (const tone of voiceAlertActiveTones) {
+    try {
+      tone.stop();
+    } catch (_) {}
+  }
+  voiceAlertActiveTones = [];
+}
+
+function playVoiceAlertTone(frequency, delay, duration, gainValue = 0.08) {
+  const context = getVoiceAlertAudioContext();
+  if (!context) return;
+  const oscillator = context.createOscillator();
+  const gain = context.createGain();
+  const startAt = context.currentTime + delay;
+  const stopAt = startAt + duration;
+  oscillator.type = 'sine';
+  oscillator.frequency.setValueAtTime(frequency, startAt);
+  gain.gain.setValueAtTime(0.0001, startAt);
+  gain.gain.exponentialRampToValueAtTime(gainValue, startAt + 0.02);
+  gain.gain.exponentialRampToValueAtTime(0.0001, stopAt);
+  oscillator.connect(gain);
+  gain.connect(context.destination);
+  oscillator.start(startAt);
+  oscillator.stop(stopAt + 0.03);
+  voiceAlertActiveTones.push(oscillator);
+  oscillator.onended = () => {
+    voiceAlertActiveTones = voiceAlertActiveTones.filter(tone => tone !== oscillator);
+  };
+}
+
+function playVoiceScheduleSound(kind) {
+  const normalized = String(kind || '').toLowerCase();
+  const pattern = normalized === 'alarm'
+    ? [[880, 0, 0.16], [660, 0.22, 0.16], [880, 0.44, 0.22]]
+    : normalized === 'timer'
+      ? [[640, 0, 0.14], [820, 0.18, 0.18]]
+      : normalized === 'reminder'
+        ? [[560, 0, 0.12], [760, 0.18, 0.16]]
+        : null;
+  if (!pattern) return;
+  stopVoiceAlertSound();
+  const playPattern = () => pattern.forEach(([frequency, delay, duration]) => playVoiceAlertTone(frequency, delay, duration));
+  playPattern();
+  voiceAlertSoundInterval = setInterval(playPattern, normalized === 'alarm' ? 1200 : 2200);
+}
+
+function appendVoiceActions(fragment, payload = {}) {
+  const actions = Array.isArray(payload.actions) ? payload.actions : [];
+  if (actions.length === 0) return;
+  const row = document.createElement('div');
+  row.className = 'voice-action-row';
+  for (const action of actions.slice(0, 3)) {
+    const button = document.createElement('button');
+    button.className = `voice-action${action.primary ? ' primary' : ''}`;
+    button.type = 'button';
+    button.textContent = String(action.label || action.id || 'Action');
+    button.setAttribute('aria-label', button.textContent);
+    button.title = button.textContent;
+    button.addEventListener('click', async () => {
+      button.disabled = true;
+      stopVoiceAlertSound();
+      try {
+        await ipcRenderer.invoke('schedule:alertAction', {
+          id: action.scheduleId,
+          action: action.kind || action.id,
+          minutes: action.minutes || 5
+        });
+        renderVoiceAssistantResult({});
+      } catch (_) {
+        button.disabled = false;
+      }
+    });
+    row.appendChild(button);
+  }
+  fragment.appendChild(row);
+}
+
 function renderVoiceAssistantResult(payload = {}) {
   const responseEl = document.getElementById('assistant-response');
   if (!responseEl) return;
@@ -52,8 +149,10 @@ function renderVoiceAssistantResult(payload = {}) {
   const hasPayload = Boolean(String(payload.response || '').trim()) ||
     Boolean(String(payload.heading || '').trim()) ||
     (Array.isArray(payload.resultEntries) && payload.resultEntries.length > 0) ||
-    (Array.isArray(payload.choices) && payload.choices.length > 0);
+    (Array.isArray(payload.choices) && payload.choices.length > 0) ||
+    (Array.isArray(payload.actions) && payload.actions.length > 0);
   if (!hasPayload) {
+    stopVoiceAlertSound();
     if (root) root.classList.remove('expanded', 'medium', 'large');
     responseEl.classList.remove('visible');
     voiceAssistantResultClearTimer = setTimeout(() => {
@@ -102,7 +201,12 @@ function renderVoiceAssistantResult(payload = {}) {
     }
     fragment.appendChild(list);
   }
+  appendVoiceActions(fragment, payload);
   responseEl.appendChild(fragment);
+  if (String(payload.intent || '') === 'schedule.due') {
+    const scheduleKind = payload.scheduleKind || payload.resultEntries?.[0]?.type || '';
+    playVoiceScheduleSound(scheduleKind);
+  }
   requestAnimationFrame(() => responseEl.classList.add('visible'));
 }
 

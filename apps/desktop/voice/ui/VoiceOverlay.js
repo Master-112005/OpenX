@@ -298,7 +298,13 @@ class VoiceOverlay extends EventEmitter {
       intent,
       success: Boolean(result?.success),
       choices: this._normalizeChoices(result?.data?.choices),
-      resultEntries: this._normalizeResultEntries(result, intent)
+      resultEntries: this._normalizeResultEntries(result, intent),
+      actions: this._normalizeActions(result),
+      scheduleKind: String(result?.data?.schedule?.kind || '').slice(0, 40),
+      icon: String(result?.ui?.icon || result?.data?.icon || '').slice(0, 3),
+      previewStatus: String(result?.ui?.previewStatus || '').slice(0, 80),
+      preExpandDelayMs: Number(result?.ui?.preExpandDelayMs) || 0,
+      autoHideMs: Number(result?.ui?.autoHideMs) || 0
     });
   }
 
@@ -317,6 +323,7 @@ class VoiceOverlay extends EventEmitter {
     if (/^folder\./.test(intent)) return 'Folder';
     if (/^file\./.test(intent)) return 'Files';
     if (intent === 'browser.search') return 'Search';
+    if (intent === 'schedule.due') return 'Due now';
     if (/^(?:timer|alarm|reminder)\./.test(intent)) return 'Schedule';
     if (/^media\./.test(intent)) return 'Media';
     if (result?.success === false) return 'Needs attention';
@@ -351,6 +358,28 @@ class VoiceOverlay extends EventEmitter {
         snippet: String(entry?.snippet || '').slice(0, 180)
       }));
     }
+    if (Array.isArray(result?.data?.resultEntries)) {
+      return result.data.resultEntries.slice(0, 6).map((entry, index) => Object.freeze({
+        index: Number(entry?.index) || index + 1,
+        name: String(entry?.name || entry?.title || `Item ${index + 1}`).slice(0, 160),
+        type: String(entry?.type || '').slice(0, 40),
+        path: String(entry?.path || '').slice(0, 260),
+        location: String(entry?.location || '').slice(0, 120),
+        snippet: String(entry?.snippet || '').slice(0, 180),
+        sizeMB: Number(entry?.sizeMB || 0),
+        matchScore: Number(entry?.matchScore || 0)
+      }));
+    }
+    if (intent === 'schedule.due') {
+      const schedule = result?.data?.schedule || {};
+      return [Object.freeze({
+        index: 1,
+        name: String(schedule.message || schedule.title || 'Scheduled item').slice(0, 160),
+        type: String(schedule.kind || 'schedule').toLowerCase(),
+        location: String(schedule.dueLabel || schedule.dueAt || '').slice(0, 120),
+        snippet: String(schedule.category || '').slice(0, 120)
+      })];
+    }
     if (!['file.search', 'folder.search', 'file.smartFind', 'file.list'].includes(intent)) {
       return [];
     }
@@ -364,6 +393,22 @@ class VoiceOverlay extends EventEmitter {
       sizeMB: Number(entry?.sizeMB || 0),
       matchScore: Number(entry?.matchScore || 0)
     }));
+  }
+
+  _normalizeActions(result = {}) {
+    const actions = Array.isArray(result?.data?.actions) ? result.data.actions : [];
+    return actions.slice(0, 3).map(action => Object.freeze({
+      id: String(action?.id || '').slice(0, 80),
+      label: String(action?.label || '').slice(0, 80),
+      kind: String(action?.kind || '').slice(0, 40),
+      scheduleId: String(action?.scheduleId || '').slice(0, 140),
+      minutes: Math.max(1, Math.min(180, Number(action?.minutes) || 5)),
+      primary: action?.primary === true
+    })).filter(action => {
+      if (!action.id || !action.label) return false;
+      if (['snooze', 'stop'].includes(action.kind || action.id)) return Boolean(action.scheduleId);
+      return true;
+    });
   }
 
   /**

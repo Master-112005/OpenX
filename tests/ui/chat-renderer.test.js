@@ -9,9 +9,11 @@ describe('Chat Renderer UI', function() {
   const glassCss = fs.readFileSync(path.join(rendererRoot, 'index.css'), 'utf8');
   const script = fs.readFileSync(path.join(rendererRoot, 'index.js'), 'utf8');
 
-  it('should provide dedicated chat, activity, notification, and alarm surfaces', function() {
-    ['conversation-view', 'activity-view', 'toast-region', 'alarm-overlay', 'schedule-list', 'notification-list', 'activity-calendar-btn']
+  it('should provide dedicated chat, activity, notification, and calendar surfaces', function() {
+    ['conversation-view', 'activity-view', 'toast-region', 'schedule-list', 'notification-list', 'activity-calendar-btn']
       .forEach(id => assert.match(html, new RegExp(`id="${id}"`)));
+    assert.doesNotMatch(html, /id="alarm-overlay"/);
+    assert.doesNotMatch(script, /alarmOverlay|alarm-dismiss-btn|alarm-snooze-btn/);
     assert.match(html, /id="activity-view-btn"[\s\S]*id="activity-calendar-btn"[\s\S]*id="assistant-mute-btn"/);
     assert.doesNotMatch(html, /Upcoming alarms, timers, reminders, and recent assistant notices\./);
     assert.match(script, /openPlanner\?\.\('calendar'\)/);
@@ -65,11 +67,11 @@ describe('Chat Renderer UI', function() {
     assert.match(script, /function showToast\(/);
     assert.match(script, /SCHEDULE_STORAGE_KEY/);
     assert.match(script, /NOTIFICATION_STORAGE_KEY/);
-    assert.match(html, /id="alarm-symbol"/);
     assert.match(script, /handleScheduleAlert/);
-    assert.match(script, /function playScheduleSound\(kind\)/);
-    assert.match(script, /function stopScheduleSound\(\)/);
-    assert.match(glassCss, /Dedicated timer and reminder alert/);
+    assert.doesNotMatch(html, /id="alarm-symbol"/);
+    assert.doesNotMatch(script, /function playScheduleSound\(kind\)/);
+    assert.doesNotMatch(script, /function stopScheduleSound\(\)/);
+    assert.doesNotMatch(glassCss, /Dedicated timer and reminder alert/);
   });
 
   it('should provide a dedicated assistant-only voice mute control', function() {

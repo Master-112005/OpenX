@@ -156,7 +156,6 @@ const crashRecoveryPolicy = new CrashRecoveryPolicy({
 });
 
 let chatWindow = null;
-let alertWindow = null;
 let timerWidgetWindow = null;
 let timerWidgetMode = null;
 let plannerWindow = null;
@@ -1129,44 +1128,73 @@ function createPlannerWindow(initialView = 'calendar', options = {}) {
   });
 }
 
-function presentScheduleAlert(schedule) {
-  if (alertWindow && !alertWindow.isDestroyed()) {
-    alertWindow.show();
-    alertWindow.focus();
-    alertWindow.webContents.send('schedule:due', schedule);
-    return;
-  }
+function formatScheduleDueLabel(schedule = {}) {
+  const due = new Date(schedule.dueAt || Date.now());
+  if (Number.isNaN(due.getTime())) return 'Due now';
+  return due.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+}
 
-  alertWindow = new BrowserWindow({
-    width: 420,
-    height: 440,
-    transparent: true,
-    frame: false,
-    resizable: false,
-    alwaysOnTop: true,
-    skipTaskbar: false,
-    hasShadow: true,
-    webPreferences: createSecureWebPreferences(PRELOAD_PATH)
-  });
-  const alertFile = path.join(RENDERER_ROOT, 'alert', 'index.html');
-  secureWindow(alertWindow, {
-    windowType: 'schedule-alert',
-    expectedFile: alertFile,
-    createWindow: () => presentScheduleAlert(schedule)
-  });
-  alertWindow.loadFile(alertFile).then(() => {
-    if (alertWindow && !alertWindow.isDestroyed()) {
-      alertWindow.center();
-      alertWindow.webContents.send('schedule:due', schedule);
-      alertWindow.show();
-      alertWindow.focus();
+function scheduleActionId(schedule = {}) {
+  return String(schedule.id || schedule.taskName || '').trim();
+}
+
+function buildScheduleDynamicIslandActions(schedule = {}) {
+  const scheduleId = scheduleActionId(schedule);
+  if (!scheduleId) return [];
+  return [
+    {
+      id: 'snooze',
+      label: 'Snooze 5 min',
+      kind: 'snooze',
+      scheduleId,
+      minutes: 5
+    },
+    {
+      id: 'stop',
+      label: 'Stop',
+      kind: 'stop',
+      scheduleId,
+      primary: true
     }
-  }).catch(error => {
-    mainLogger.error('Failed to load schedule alert renderer', { error: error.message });
-  });
-  alertWindow.on('closed', () => {
-    alertWindow = null;
-  });
+  ];
+}
+
+function presentScheduleInDynamicIsland(schedule = {}) {
+  if (!voiceOverlay || typeof voiceOverlay.displayAssistantResult !== 'function') return false;
+  const kind = String(schedule.kind || 'Schedule').trim() || 'Schedule';
+  const message = String(schedule.message || schedule.title || `${kind} is due`).trim();
+  const dueLabel = formatScheduleDueLabel(schedule);
+  try {
+    voiceOverlay.displayAssistantResult({
+      success: true,
+      intent: 'schedule.due',
+      response: `${kind}: ${message}`,
+      data: {
+        schedule: {
+          ...schedule,
+          dueLabel
+        },
+        actions: buildScheduleDynamicIslandActions(schedule),
+        resultEntries: [{
+          index: 1,
+          name: message,
+          type: kind.toLowerCase(),
+          location: dueLabel,
+          snippet: schedule.recurrence ? `Repeats ${String(schedule.recurrence).replace(/-/g, ' ')}` : ''
+        }]
+      },
+      ui: {
+        icon: kind.slice(0, 2).toUpperCase(),
+        previewStatus: `${kind} due`,
+        preExpandDelayMs: 1000,
+        autoHideMs: 14000
+      }
+    });
+    return true;
+  } catch (error) {
+    mainLogger.warn('Dynamic Island schedule popup failed', { error: error.message });
+    return false;
+  }
 }
 
 function getTimerWidgetState(preferredId = null, options = {}) {
@@ -1500,7 +1528,13 @@ function setupIPC() {
       if (action === 'snooze') showTimerWidget(result.data.id || result.data.taskName || id);
       if (action === 'stop') hideTimerWidget();
     }
-    if (alertWindow && !alertWindow.isDestroyed()) alertWindow.close();
+    if (result?.success) {
+      try {
+        voiceOverlay?.windowController?.updateAssistantResult?.({});
+      } catch (error) {
+        mainLogger.warn('Dynamic Island schedule action collapse failed', { error: error.message });
+      }
+    }
     return result || { success: false, error: 'Scheduler unavailable' };
   });
 
@@ -1689,7 +1723,6 @@ async function cleanupRuntime() {
     await destroyAssistantInstance();
     eventBus?.removeAllListeners?.();
     if (chatWindow && !chatWindow.isDestroyed()) chatWindow.destroy();
-    if (alertWindow && !alertWindow.isDestroyed()) alertWindow.destroy();
     if (timerWidgetWindow && !timerWidgetWindow.isDestroyed()) timerWidgetWindow.destroy();
     if (plannerWindow && !plannerWindow.isDestroyed()) plannerWindow.destroy();
     destroyVoiceCaptureWindow();
@@ -2225,7 +2258,7 @@ app.whenReady().then(async () => {
   eventBus = new AssistantEventBus();
   eventBus.subscribe(EVENTS.SCHEDULE_DUE, envelope => {
     if (String(envelope.payload?.kind || '').toLowerCase() === 'timer') showTimerWidget();
-    presentScheduleAlert(envelope.payload);
+    presentScheduleInDynamicIsland(envelope.payload);
     sendPlannerEntries('calendar');
   });
   eventBus.subscribe(EVENTS.COMMAND_EXECUTED, envelope => handleTimerWidgetCommand(envelope.payload));

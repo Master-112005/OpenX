@@ -808,7 +808,6 @@
 }
 
 .toast,
-.alarm-card,
 .schedule-card,
 .notice-item,
 .empty-state {
@@ -1141,8 +1140,7 @@
 .schedule-card,
 .notice-item,
 .empty-state,
-.toast,
-.alarm-card {
+.toast {
   background: rgba(255, 255, 255, 0.085);
   backdrop-filter: blur(30px) saturate(140%);
   -webkit-backdrop-filter: blur(30px) saturate(140%);
@@ -1153,8 +1151,7 @@
 .schedule-card::before { background: rgba(255, 255, 255, 0.78); }
 .schedule-kind,
 .eyebrow,
-.section-kicker,
-.alarm-kind { color: rgba(255, 255, 255, 0.82); }
+.section-kicker { color: rgba(255, 255, 255, 0.82); }
 
 .schedule-actions { flex-wrap: wrap; }
 .mini-btn,
@@ -1263,7 +1260,6 @@ body.settings-only #chat-shell { background: transparent; border: 0; border-radi
 body.settings-only #header,
 body.settings-only #workspace,
 body.settings-only #toast-region,
-body.settings-only #alarm-overlay { display: none !important; }
 body.settings-only #settings-overlay { display: flex; inset: 0; position: fixed; }
 body.settings-only #settings-panel { height: calc(100vh - 36px); max-width: 1180px; width: calc(100vw - 36px); }
 
@@ -2202,8 +2198,7 @@ body {
 #composer-hint,
 .activity-section-heading,
 .schedule-card-top,
-.notice-item,
-.alarm-actions {
+.notice-item {
   min-width: 0;
 }
 
@@ -2647,8 +2642,7 @@ body {
 }
 
 .eyebrow,
-.section-kicker,
-.alarm-kind {
+.section-kicker {
   color: color-mix(in srgb, var(--accent-color) 72%, white);
   font-size: 9px;
   font-weight: 800;
@@ -2899,85 +2893,6 @@ body {
   width: 24px;
 }
 
-#alarm-overlay {
-  align-items: center;
-  background: rgba(4, 7, 13, 0.78);
-  backdrop-filter: blur(18px);
-  display: flex;
-  inset: 0;
-  justify-content: center;
-  padding: 24px;
-  position: absolute;
-  z-index: 60;
-}
-
-#alarm-overlay[hidden] {
-  display: none;
-}
-
-.alarm-card {
-  background:
-    radial-gradient(circle at top, color-mix(in srgb, var(--accent-color) 19%, transparent), transparent 45%),
-    rgba(18, 23, 36, 0.98);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 24px;
-  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.5);
-  max-width: 360px;
-  padding: 30px 24px 22px;
-  text-align: center;
-  width: 100%;
-}
-
-.alarm-pulse {
-  align-items: center;
-  background: color-mix(in srgb, var(--accent-color) 14%, transparent);
-  border: 1px solid color-mix(in srgb, var(--accent-color) 23%, transparent);
-  border-radius: 50%;
-  display: inline-flex;
-  height: 68px;
-  justify-content: center;
-  margin-bottom: 16px;
-  width: 68px;
-}
-
-.alarm-pulse span {
-  animation: alarm-ring 1.4s ease-in-out infinite;
-  background: var(--accent-color);
-  border-radius: 50%;
-  box-shadow: 0 0 0 9px color-mix(in srgb, var(--accent-color) 13%, transparent);
-  height: 18px;
-  width: 18px;
-}
-
-.alarm-card h2 {
-  font-size: 24px;
-  letter-spacing: -0.04em;
-  margin-top: 5px;
-}
-
-.alarm-card p {
-  color: var(--muted-color);
-  font-size: 12px;
-  line-height: 1.55;
-  margin: 9px auto 0;
-  max-width: 280px;
-  overflow-wrap: anywhere;
-}
-
-.alarm-time {
-  color: var(--text-color);
-  font-size: 12px;
-  font-weight: 700;
-  margin-top: 14px;
-}
-
-.alarm-actions {
-  display: grid;
-  gap: 8px;
-  grid-template-columns: 1fr 1fr;
-  margin-top: 22px;
-}
-
 #settings-overlay {
   background: rgba(4, 7, 13, 0.78);
   backdrop-filter: blur(18px);
@@ -3036,11 +2951,6 @@ textarea:focus-visible {
   to { opacity: 1; transform: none; }
 }
 
-@keyframes alarm-ring {
-  0%, 100% { transform: scale(0.92); }
-  50% { transform: scale(1.08); }
-}
-
 @media (max-width: 460px) {
   #header {
     padding-left: 10px;
@@ -3085,10 +2995,6 @@ textarea:focus-visible {
   .activity-date {
     text-align: left;
     white-space: normal;
-  }
-
-  .alarm-actions {
-    grid-template-columns: 1fr;
   }
 }
 
@@ -3208,7 +3114,7 @@ textarea:focus-visible {
 .composer-field { background: rgba(255,255,255,.09); border-color: rgba(255,255,255,.16); border-radius: 20px; box-shadow: 0 10px 32px rgba(0,0,0,.12), inset 0 1px 0 rgba(255,255,255,.12); }
 .composer-field:focus-within { background: rgba(255,255,255,.13); border-color: rgba(255,255,255,.32); box-shadow: 0 0 0 3px rgba(255,255,255,.11); }
 
-.activity-date,.schedule-card,.notice-item,.empty-state,.toast,.alarm-card {
+.activity-date,.schedule-card,.notice-item,.empty-state,.toast {
   background: rgba(255,255,255,.085);
   backdrop-filter: blur(30px) saturate(140%);
   -webkit-backdrop-filter: blur(30px) saturate(140%);
@@ -3216,7 +3122,7 @@ textarea:focus-visible {
   box-shadow: 0 16px 40px rgba(0,0,0,.18), inset 0 1px 1px rgba(255,255,255,.12);
 }
 .schedule-card::before { background: rgba(255,255,255,.78); }
-.schedule-kind,.eyebrow,.section-kicker,.alarm-kind { color: rgba(255,255,255,.82); }
+.schedule-kind,.eyebrow,.section-kicker { color: rgba(255,255,255,.82); }
 .schedule-actions { flex-wrap: wrap; }
 .mini-btn,.text-btn { color: rgba(255,255,255,.9); }
 .mini-btn.danger { color: rgba(255,205,205,.95); }
@@ -3279,7 +3185,7 @@ textarea:focus-visible {
 
 body.settings-only { background: transparent; }
 body.settings-only #chat-shell { background: transparent; border: 0; border-radius: 0; box-shadow: none; }
-body.settings-only #header,body.settings-only #workspace,body.settings-only #toast-region,body.settings-only #alarm-overlay { display: none !important; }
+body.settings-only #header,body.settings-only #workspace,body.settings-only #toast-region { display: none !important; }
 body.settings-only #settings-overlay { display: flex; inset: 0; position: fixed; }
 body.settings-only #settings-panel { height: calc(100vh - 36px); width: calc(100vw - 36px); }
 
@@ -3672,44 +3578,6 @@ html[data-glass-contrast] #send-btn {
   color: var(--adaptive-primary-text, #151517) !important;
 }
 
-/* Dedicated timer and reminder alert */
-#alarm-overlay {
-  background: rgba(8,8,10,.42);
-  backdrop-filter: blur(34px) saturate(145%);
-  -webkit-backdrop-filter: blur(34px) saturate(145%);
-  padding: 18px;
-}
-.alarm-card {
-  align-items: center;
-  background: var(--adaptive-shell, rgba(24,24,28,.9));
-  border: 1px solid var(--adaptive-border, rgba(255,255,255,.2));
-  border-radius: 34px;
-  display: flex;
-  flex-direction: column;
-  justify-content: flex-start;
-  min-height: 330px;
-  padding: 26px 24px 20px;
-  width: min(360px, 100%);
-}
-.alert-symbol {
-  align-items: center;
-  background: var(--adaptive-control-strong, rgba(255,255,255,.15));
-  border: 1px solid var(--adaptive-border, rgba(255,255,255,.2));
-  border-radius: 24px;
-  box-shadow: 0 14px 34px rgba(0,0,0,.16), inset 0 1px 1px rgba(255,255,255,.2);
-  display: flex;
-  font-size: 42px;
-  height: 82px;
-  justify-content: center;
-  margin-bottom: 18px;
-  width: 82px;
-}
-.alarm-card h2 { color: var(--adaptive-text, #fff); font-size: 23px; }
-.alarm-card p { color: var(--adaptive-text, #fff); font-size: 14px; line-height: 1.5; max-width: 290px; }
-.alarm-time { color: var(--adaptive-muted, rgba(255,255,255,.7)); }
-.alarm-actions { margin-top: auto; width: 100%; }
-.alarm-actions .primary-btn,.alarm-actions .secondary-btn { min-height: 44px; }
-
 /* GPU and long-session performance */
 #chat-shell {
   backdrop-filter: blur(18px) saturate(115%);
@@ -3723,17 +3591,16 @@ html[data-glass-contrast] #send-btn {
   contain: layout paint;
   box-shadow: 0 18px 46px rgba(0,0,0,.26), inset 0 1px 1px rgba(255,255,255,.12);
 }
-#settings-overlay,
-#alarm-overlay {
+#settings-overlay {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
 }
 #header,.message-bubble,.composer-field,.header-btn,.window-btn,.chip-btn,
-.activity-date,.schedule-card,.notice-item,.empty-state,.toast,.alarm-card,
+.activity-date,.schedule-card,.notice-item,.empty-state,.toast,
 .panel-header,.settings-hero,.settings-section,.theme-card,.contact-stage,.mode-row,
 .mode-app-row,.contact-item,.field,.field-textarea,.field-select,.primary-btn,
 .secondary-btn,.danger-btn,.icon-btn,.contact-add-btn,.permission-option,.mode-tab,
-.mode-app-tab,.glass-tint-control,.alert-symbol {
+.mode-app-tab,.glass-tint-control {
   backdrop-filter: none !important;
   -webkit-backdrop-filter: none !important;
 }
@@ -3752,7 +3619,6 @@ html[data-glass-contrast] #send-btn {
 .toast,
 .schedule-card,
 .notice-item,
-.alarm-card,
 .settings-section,
 .theme-card,
 .mode-row,
@@ -3761,7 +3627,7 @@ html[data-glass-contrast] #send-btn {
   backface-visibility: hidden;
   transform: translateZ(0);
 }
-.toast,.schedule-card,.notice-item,.alarm-card { contain: layout paint; }
+.toast,.schedule-card,.notice-item { contain: layout paint; }
 
 /* Requested compact settings refinements */
 .settings-content .settings-section[data-settings-section="system"] {

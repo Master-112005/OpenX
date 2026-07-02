@@ -80,12 +80,12 @@ const VoiceSettings = Object.freeze({
   ui: Object.freeze({
     overlayEnabled: true,
     showPartialTranscript: true,
-    animationDurationMs: 160,
+    animationDurationMs: 420,
     fadeDurationMs: 160,
     autoCloseDelayMs: 900,
     size: Object.freeze({ width: 256, height: 50 }),
-    mediumSize: Object.freeze({ width: 360, height: 118 }),
-    expandedSize: Object.freeze({ width: 440, height: 236 }),
+    mediumSize: Object.freeze({ width: 320, height: 148 }),
+    expandedSize: Object.freeze({ width: 360, height: 360 }),
     position: Object.freeze({ horizontal: 'center', vertical: 'top', yOffset: 12 }),
     accessibility: Object.freeze({
       reducedMotion: false,

@@ -32,6 +32,8 @@ class VoiceWindowController {
     this.activeSize = { ...this.configuration.size };
     this.resizeTimer = null;
     this.boundsAnimationTimer = null;
+    this.resultRevealTimer = null;
+    this.resultAutoHideTimer = null;
     this.pendingSizeMode = null;
     this.pendingSize = null;
     this.lastBounds = null;
@@ -157,6 +159,7 @@ class VoiceWindowController {
     if (this.window && !this._isDestroyed(this.window)) {
       this.ipc.send(VoiceOverlayIPC.OPERATIONS.UPDATE_STATE, { view });
       if (this._shouldCollapseForState(view?.state)) {
+        this._clearResultTimers();
         this._setSizeMode('compact', { delayMs: 140 });
         this.ipc.send(VoiceOverlayIPC.OPERATIONS.DISPLAY_ASSISTANT_RESULT, {});
       }
@@ -185,13 +188,58 @@ class VoiceWindowController {
    * @returns {{updated: boolean, payload: object}}
    */
   updateAssistantResult(payload = {}) {
+    const hasPayload = this._hasAssistantResultPayload(payload);
+    if (hasPayload && (!this.window || this._isDestroyed(this.window))) {
+      this.createWindow();
+    }
     if (this.window && !this._isDestroyed(this.window)) {
+      this._clearResultTimers();
+      if (!hasPayload) {
+        this._setSizeMode('compact', { delayMs: 120 });
+        this._sendOverlayOperation(VoiceOverlayIPC.OPERATIONS.DISPLAY_ASSISTANT_RESULT, {});
+        return { updated: true, payload };
+      }
+
+      if (!this.visible) {
+        if (typeof this.window.setAlwaysOnTop === 'function') this.window.setAlwaysOnTop(true, 'screen-saver');
+        if (typeof this.window.showInactive === 'function') this.window.showInactive();
+        else if (typeof this.window.show === 'function') this.window.show();
+        this.visible = true;
+      }
+
       const displayMode = this._sizeModeForAssistantResult(payload);
-      this._setSizeMode(displayMode, {
-        immediate: true,
-        size: this._sizeForAssistantResult(payload, displayMode)
+      const previewStatus = String(payload.previewStatus || payload.heading || 'OpenX');
+      const previewState = String(payload.presentationState || this.lastView?.state || 'READY');
+      this._setSizeMode('compact', { immediate: true });
+      this._sendOverlayOperation(VoiceOverlayIPC.OPERATIONS.UPDATE_STATE, {
+        view: {
+          ...(this.lastView || {}),
+          state: previewState,
+          title: 'OpenX',
+          statusText: previewStatus,
+          icon: payload.icon || this.lastView?.icon || 'OX'
+        }
       });
-      this.ipc.send(VoiceOverlayIPC.OPERATIONS.DISPLAY_ASSISTANT_RESULT, { ...payload, displayMode });
+
+      const revealDelayMs = Math.max(0, Math.min(1000, Number(payload.preExpandDelayMs) || 80));
+      this.resultRevealTimer = setTimeout(() => {
+        this.resultRevealTimer = null;
+        this._setSizeMode(displayMode, {
+          immediate: true,
+          size: this._sizeForAssistantResult(payload, displayMode)
+        });
+        this._sendOverlayOperation(VoiceOverlayIPC.OPERATIONS.DISPLAY_ASSISTANT_RESULT, { ...payload, displayMode });
+        const autoHideMs = Number(payload.autoHideMs) || 0;
+        if (autoHideMs > 0) {
+          this.resultAutoHideTimer = setTimeout(() => {
+            this.resultAutoHideTimer = null;
+            this._setSizeMode('compact', { delayMs: 120 });
+            this._sendOverlayOperation(VoiceOverlayIPC.OPERATIONS.DISPLAY_ASSISTANT_RESULT, {});
+          }, Math.max(1200, Math.min(30000, autoHideMs)));
+          if (typeof this.resultAutoHideTimer.unref === 'function') this.resultAutoHideTimer.unref();
+        }
+      }, revealDelayMs);
+      if (typeof this.resultRevealTimer.unref === 'function') this.resultRevealTimer.unref();
     }
     return { updated: true, payload };
   }
@@ -222,6 +270,7 @@ class VoiceWindowController {
     this.visible = false;
     this._clearResizeTimer();
     this._clearBoundsAnimation();
+    this._clearResultTimers();
     return { destroyed: true };
   }
 
@@ -294,12 +343,12 @@ class VoiceWindowController {
 :root { --voice-bg: #000; --voice-text: #f7f8fb; --voice-muted: rgba(247,248,251,.66); --voice-accent: #4488ff; --voice-border: rgba(255,255,255,.08); --voice-blur: 0px; --voice-ease: cubic-bezier(.16,1,.3,1); }
 html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: transparent; font-family: Segoe UI, system-ui, sans-serif; color: var(--voice-text); -webkit-font-smoothing: antialiased; text-rendering: geometricPrecision; }
 body { animation: overlay-in 220ms var(--voice-ease) both; }
-#voice-overlay { box-sizing: border-box; height: 100vh; padding: 7px 13px; border: 1px solid var(--voice-border); border-radius: 999px; background: #000; box-shadow: 0 12px 30px rgba(0,0,0,.40), inset 0 1px 1px rgba(255,255,255,.08); display: grid; grid-template-columns: 34px minmax(0,1fr); gap: 9px; align-items: center; contain: layout paint style; transform: translate3d(0,0,0); transition: border-radius 220ms var(--voice-ease), box-shadow 220ms var(--voice-ease), padding 220ms var(--voice-ease), grid-template-columns 220ms var(--voice-ease), gap 220ms var(--voice-ease); will-change: transform, opacity; }
-#voice-overlay.expanded { padding: 16px 18px; border-radius: 28px; grid-template-columns: 50px minmax(0,1fr); align-items: start; box-shadow: 0 20px 64px rgba(0,0,0,.44), inset 0 1px 1px rgba(255,255,255,.10); }
-#voice-overlay.expanded.medium { padding: 11px 15px; border-radius: 24px; grid-template-columns: 42px minmax(0,1fr); gap: 10px; align-items: center; box-shadow: 0 18px 48px rgba(0,0,0,.42), inset 0 1px 1px rgba(255,255,255,.10); }
+#voice-overlay { box-sizing: border-box; height: 100vh; padding: 7px 13px; border: 1px solid var(--voice-border); border-radius: 999px; background: #000; box-shadow: 0 12px 30px rgba(0,0,0,.40), inset 0 1px 1px rgba(255,255,255,.08); display: grid; grid-template-columns: 34px minmax(0,1fr); gap: 9px; align-items: center; contain: layout paint style; transform: translate3d(0,0,0); transition: border-radius 420ms var(--voice-ease), box-shadow 420ms var(--voice-ease), padding 420ms var(--voice-ease), grid-template-columns 420ms var(--voice-ease), gap 420ms var(--voice-ease); will-change: transform, opacity; }
+#voice-overlay.expanded { padding: 18px; border-radius: 34px; grid-template-columns: 48px minmax(0,1fr); align-items: start; box-shadow: 0 20px 64px rgba(0,0,0,.44), inset 0 1px 1px rgba(255,255,255,.10); }
+#voice-overlay.expanded.medium { padding: 13px 15px; border-radius: 26px; grid-template-columns: 42px minmax(0,1fr); gap: 10px; align-items: center; box-shadow: 0 18px 48px rgba(0,0,0,.42), inset 0 1px 1px rgba(255,255,255,.10); }
 #voice-overlay section { min-width: 0; overflow: hidden; }
-#icon { width: 32px; height: 32px; border-radius: 999px; display: grid; place-items: center; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.10); font-size: 11px; font-weight: 750; transform: translate3d(0,0,0); transition: width 220ms var(--voice-ease), height 220ms var(--voice-ease), border-radius 220ms var(--voice-ease), transform 220ms var(--voice-ease), opacity 220ms var(--voice-ease), border-color 220ms var(--voice-ease); will-change: transform, opacity; }
-#voice-overlay.expanded #icon { width: 50px; height: 50px; border-radius: 16px; background: color-mix(in srgb, var(--voice-accent) 18%, transparent); border-color: color-mix(in srgb, var(--voice-accent) 36%, transparent); font-size: 13px; }
+#icon { width: 32px; height: 32px; border-radius: 999px; display: grid; place-items: center; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.10); font-size: 11px; font-weight: 750; transform: translate3d(0,0,0); transition: width 420ms var(--voice-ease), height 420ms var(--voice-ease), border-radius 420ms var(--voice-ease), transform 420ms var(--voice-ease), opacity 420ms var(--voice-ease), border-color 420ms var(--voice-ease); will-change: transform, opacity; }
+#voice-overlay.expanded #icon { width: 48px; height: 48px; border-radius: 18px; background: color-mix(in srgb, var(--voice-accent) 18%, transparent); border-color: color-mix(in srgb, var(--voice-accent) 36%, transparent); font-size: 13px; }
 #voice-overlay.expanded.medium #icon { width: 40px; height: 40px; border-radius: 14px; font-size: 12px; }
 #title { display: none; font-size: 15px; font-weight: 650; line-height: 1.25; }
 #voice-overlay.expanded #title { display: block; }
@@ -310,7 +359,8 @@ body { animation: overlay-in 220ms var(--voice-ease) both; }
 #transcript { margin-top: 2px; min-height: 0; max-width: 100%; color: var(--voice-muted); font-size: 12px; line-height: 1.15; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transform: translate3d(0,0,0); transition: opacity 160ms var(--voice-ease), transform 160ms var(--voice-ease); will-change: opacity, transform; }
 #voice-overlay.expanded #transcript { margin-top: 10px; min-height: 20px; color: var(--voice-text); font-size: 14px; line-height: 1.35; }
 #voice-overlay.expanded.medium #transcript { margin-top: 3px; min-height: 0; color: var(--voice-muted); font-size: 12px; line-height: 1.2; white-space: nowrap; }
-#assistant-response { margin-top: 10px; max-height: 154px; overflow: hidden auto; padding-right: 4px; opacity: 0; transform: translate3d(0, 6px, 0) scale(.992); transform-origin: top center; transition: opacity 180ms var(--voice-ease), transform 180ms var(--voice-ease); will-change: opacity, transform; contain: layout paint style; scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--voice-accent) 55%, transparent) transparent; }
+#assistant-response { margin-top: 10px; max-height: 248px; overflow: hidden auto; padding-right: 0; opacity: 0; transform: translate3d(0, 8px, 0) scale(.992); transform-origin: top center; transition: opacity 260ms var(--voice-ease), transform 260ms var(--voice-ease); will-change: opacity, transform; contain: layout paint style; scrollbar-width: none; -ms-overflow-style: none; }
+#assistant-response::-webkit-scrollbar { width: 0; height: 0; display: none; }
 #assistant-response.visible { opacity: 1; transform: translate3d(0,0,0); }
 #voice-overlay.expanded.medium #assistant-response { margin-top: 6px; max-height: 48px; overflow: hidden; padding-right: 0; }
 .voice-response-heading { margin-bottom: 5px; color: rgba(247,248,251,.56); font-size: 11px; font-weight: 700; letter-spacing: .08em; line-height: 1.1; text-transform: uppercase; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -321,6 +371,12 @@ body { animation: overlay-in 220ms var(--voice-ease) both; }
 .voice-card-number { width: 24px; height: 24px; border-radius: 9px; display: grid; place-items: center; color: var(--voice-text); background: color-mix(in srgb, var(--voice-accent) 28%, transparent); border: 1px solid color-mix(in srgb, var(--voice-accent) 45%, transparent); font-size: 12px; font-weight: 700; }
 .voice-card strong { display: block; min-width: 0; font-size: 13px; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .voice-card small { display: block; margin-top: 3px; color: var(--voice-muted); font-size: 11px; line-height: 1.25; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.voice-action-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 12px; }
+.voice-action { min-width: 0; height: 34px; border: 1px solid rgba(255,255,255,.14); border-radius: 999px; background: rgba(255,255,255,.08); color: var(--voice-text); font: inherit; font-size: 12px; font-weight: 750; cursor: pointer; transform: translate3d(0,0,0); transition: transform 160ms var(--voice-ease), background 160ms var(--voice-ease), border-color 160ms var(--voice-ease), opacity 160ms var(--voice-ease); }
+.voice-action:hover { background: rgba(255,255,255,.13); border-color: rgba(255,255,255,.22); }
+.voice-action:active { transform: translate3d(0,1px,0) scale(.985); }
+.voice-action.primary { background: color-mix(in srgb, var(--voice-accent) 34%, rgba(255,255,255,.08)); border-color: color-mix(in srgb, var(--voice-accent) 50%, transparent); }
+.voice-action[disabled] { opacity: .55; cursor: default; transform: none; }
 .listening #icon { animation: pulse 1.4s var(--voice-ease) infinite; }
 .processing #icon { animation: pulse 1.7s var(--voice-ease) infinite; }
 .error #icon { color: #ffb1b1; border-color: rgba(255,120,120,.45); }
@@ -354,6 +410,24 @@ body { animation: overlay-in 220ms var(--voice-ease) both; }
     }
     if (this.screen?.getPrimaryDisplay) return this.screen.getPrimaryDisplay();
     return { workArea: { x: 0, y: 0, width: 1280, height: 720 } };
+  }
+
+  _sendOverlayOperation(operation, payload = {}) {
+    const contents = this.window?.webContents;
+    if (
+      contents &&
+      typeof contents.isLoading === 'function' &&
+      contents.isLoading() &&
+      typeof contents.once === 'function'
+    ) {
+      contents.once('did-finish-load', () => {
+        if (this.window && !this._isDestroyed(this.window)) {
+          this.ipc.send(operation, payload);
+        }
+      });
+      return { sent: false, queued: true, operation };
+    }
+    return this.ipc.send(operation, payload);
   }
 
   _currentSize() {
@@ -410,6 +484,17 @@ body { animation: overlay-in 220ms var(--voice-ease) both; }
     }
   }
 
+  _clearResultTimers() {
+    if (this.resultRevealTimer) {
+      clearTimeout(this.resultRevealTimer);
+      this.resultRevealTimer = null;
+    }
+    if (this.resultAutoHideTimer) {
+      clearTimeout(this.resultAutoHideTimer);
+      this.resultAutoHideTimer = null;
+    }
+  }
+
   _defaultSizeForMode(mode) {
     if (mode === 'expanded') return this.configuration.expandedSize;
     if (mode === 'medium') return this.configuration.mediumSize;
@@ -440,7 +525,7 @@ body { animation: overlay-in 220ms var(--voice-ease) both; }
       return;
     }
 
-    const duration = Math.max(90, Math.min(180, Number(this.configuration.animationDurationMs) || 160));
+    const duration = Math.max(240, Math.min(560, Number(this.configuration.animationDurationMs) || 420));
     const startedAt = Date.now();
     const step = () => {
       const progress = Math.min(1, (Date.now() - startedAt) / duration);
@@ -481,6 +566,14 @@ body { animation: overlay-in 220ms var(--voice-ease) both; }
     return 'compact';
   }
 
+  _hasAssistantResultPayload(payload = {}) {
+    return Boolean(String(payload.response || '').trim()) ||
+      Boolean(String(payload.heading || '').trim()) ||
+      (Array.isArray(payload.resultEntries) && payload.resultEntries.length > 0) ||
+      (Array.isArray(payload.choices) && payload.choices.length > 0) ||
+      (Array.isArray(payload.actions) && payload.actions.length > 0);
+  }
+
   _sizeForAssistantResult(payload = {}, mode = this._sizeModeForAssistantResult(payload)) {
     if (mode === 'compact') return this.configuration.size;
     if (mode === 'medium') return this.configuration.mediumSize;
@@ -491,13 +584,13 @@ body { animation: overlay-in 220ms var(--voice-ease) both; }
     const cardCount = Math.min(4, Math.max(0, choices.length || resultEntries.length));
     if (cardCount > 0) {
       return this._normalizeSize({
-        width: choices.length > 0 ? 430 : 420,
-        height: 132 + (cardCount * 36)
+        width: 360,
+        height: 156 + (cardCount * 46)
       });
     }
     return this._normalizeSize({
-      width: responseLength > 340 ? 430 : 400,
-      height: responseLength > 340 ? 204 : 166
+      width: 360,
+      height: responseLength > 340 ? 320 : 236
     });
   }
 

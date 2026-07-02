@@ -50,6 +50,10 @@ describe('Electron Chat Shortcut', function() {
     assert.match(script, /overlay\.attachToSessionManager\(manager\)/);
     assert.match(script, /voiceOverlay = createVoiceOverlayForManager\(voiceSessionManager\)/);
     assert.match(script, /new VoiceTheme\(\{ settings: settingsService\?\.getSnapshot\?\.\(\) \|\| \{\} \}\)/);
+    assert.match(script, /function presentScheduleInDynamicIsland\(schedule = \{\}\)/);
+    assert.match(script, /presentScheduleInDynamicIsland\(envelope\.payload\)/);
+    assert.match(script, /preExpandDelayMs: 1000/);
+    assert.doesNotMatch(script, /alertWindow/);
   });
 
   it('should use local desktop voice providers instead of empty audio placeholders', function() {

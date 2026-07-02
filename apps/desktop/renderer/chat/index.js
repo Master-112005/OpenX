@@ -43,12 +43,6 @@ const scheduleListEl = document.getElementById('schedule-list');
 const scheduleCountEl = document.getElementById('schedule-count');
 const notificationListEl = document.getElementById('notification-list');
 const toastRegionEl = document.getElementById('toast-region');
-const alarmOverlay = document.getElementById('alarm-overlay');
-const alarmKindEl = document.getElementById('alarm-kind');
-const alarmTitleEl = document.getElementById('alarm-title');
-const alarmMessageEl = document.getElementById('alarm-message');
-const alarmTimeEl = document.getElementById('alarm-time');
-const alarmSymbolEl = document.getElementById('alarm-symbol');
 
 const MODE_LIMIT = 5;
 const MODE_APP_LIMIT = 5;
@@ -72,10 +66,6 @@ const selectedModeApps = new Map();
 let activeWorkspaceView = 'chat';
 let scheduleItems = loadStoredList(SCHEDULE_STORAGE_KEY);
 let notificationHistory = loadStoredList(NOTIFICATION_STORAGE_KEY);
-let activeAlarmId = null;
-let alertAudioContext = null;
-let alertSoundInterval = null;
-let activeAlertTones = [];
 let isAssistantMuted = localStorage.getItem(ASSISTANT_MUTED_STORAGE_KEY) === 'true';
 let glassTintAnimationFrame = null;
 let pendingGlassTintValue = 42;
@@ -519,82 +509,11 @@ function armSchedule(item) {
   scheduleTimers.set(item.id, timer);
 }
 
-function getAlertAudioContext() {
-  if (!alertAudioContext) {
-    const Context = window.AudioContext || window.webkitAudioContext;
-    if (!Context) return null;
-    alertAudioContext = new Context();
-  }
-  if (alertAudioContext.state === 'suspended') {
-    alertAudioContext.resume().catch(() => {});
-  }
-  return alertAudioContext;
-}
-
-function stopScheduleSound() {
-  if (alertSoundInterval) {
-    clearInterval(alertSoundInterval);
-    alertSoundInterval = null;
-  }
-  activeAlertTones.forEach(tone => {
-    try {
-      tone.stop();
-    } catch (_) {}
-  });
-  activeAlertTones = [];
-}
-
-function playAlertTone(frequency, delay, duration) {
-  const context = getAlertAudioContext();
-  if (!context) return;
-  const oscillator = context.createOscillator();
-  const gain = context.createGain();
-  const startAt = context.currentTime + delay;
-  const stopAt = startAt + duration;
-  oscillator.type = 'sine';
-  oscillator.frequency.setValueAtTime(frequency, startAt);
-  gain.gain.setValueAtTime(0.0001, startAt);
-  gain.gain.exponentialRampToValueAtTime(0.08, startAt + 0.02);
-  gain.gain.exponentialRampToValueAtTime(0.0001, stopAt);
-  oscillator.connect(gain);
-  gain.connect(context.destination);
-  oscillator.start(startAt);
-  oscillator.stop(stopAt + 0.03);
-  activeAlertTones.push(oscillator);
-  oscillator.onended = () => {
-    activeAlertTones = activeAlertTones.filter(tone => tone !== oscillator);
-  };
-}
-
-function playScheduleSound(kind) {
-  const normalized = String(kind || '').toLowerCase();
-  const pattern = normalized === 'alarm'
-    ? [[880, 0, 0.16], [660, 0.22, 0.16], [880, 0.44, 0.22]]
-    : normalized === 'timer'
-      ? [[640, 0, 0.14], [820, 0.18, 0.18]]
-      : null;
-  if (!pattern) return;
-  stopScheduleSound();
-  const playPattern = () => pattern.forEach(([frequency, delay, duration]) => playAlertTone(frequency, delay, duration));
-  playPattern();
-  alertSoundInterval = setInterval(playPattern, normalized === 'alarm' ? 1200 : 2200);
-}
-
 function triggerSchedule(id) {
   const item = scheduleItems.find(entry => entry.id === id);
   if (!item || !['scheduled', 'due'].includes(item.status)) return;
-  if (item.status === 'due' && activeAlarmId === item.id && !alarmOverlay.hidden) return;
   if (item.status === 'scheduled') item.status = 'due';
   saveStoredList(SCHEDULE_STORAGE_KEY, scheduleItems);
-  activeAlarmId = item.id;
-  alarmKindEl.textContent = item.kind;
-  const alertStyle = scheduleTone(item.kind, item.category, item.message);
-  alarmSymbolEl.textContent = item.symbol || alertStyle.symbol;
-  alarmTitleEl.textContent = item.kind === 'Reminder' ? `${alertStyle.label} reminder` : `${item.kind} is ready`;
-  alarmMessageEl.textContent = item.message;
-  alarmTimeEl.textContent = formatDueDate(item.dueAt);
-  alarmOverlay.hidden = false;
-  playScheduleSound(item.kind);
   showToast(`${item.kind} due`, item.message, scheduleTone(item.kind, item.category, item.message).tone, { duration: 0 });
   renderActivity();
 }
@@ -611,7 +530,6 @@ function updateSchedule(id, changes) {
 function snoozeSchedule(id, minutes = 5) {
   const item = scheduleItems.find(entry => entry.id === id);
   if (!item) return;
-  stopScheduleSound();
   updateSchedule(id, {
     status: 'scheduled',
     dueAt: new Date(Date.now() + (minutes * 60 * 1000)).toISOString()
@@ -668,14 +586,6 @@ function renderSchedules() {
       snooze.textContent = 'Snooze 5 min';
       snooze.addEventListener('click', () => snoozeSchedule(item.id));
       actions.appendChild(snooze);
-    }
-    if (item.status === 'due' && !window.openx) {
-      const open = document.createElement('button');
-      open.className = 'mini-btn';
-      open.type = 'button';
-      open.textContent = 'Open alert';
-      open.addEventListener('click', () => triggerSchedule(item.id));
-      actions.appendChild(open);
     }
     const dismiss = document.createElement('button');
     dismiss.className = 'mini-btn danger';
@@ -1746,20 +1656,6 @@ document.getElementById('clear-notifications-btn').addEventListener('click', () 
   saveStoredList(NOTIFICATION_STORAGE_KEY, notificationHistory);
   renderNotifications();
 });
-document.getElementById('alarm-dismiss-btn').addEventListener('click', () => {
-  stopScheduleSound();
-  if (activeAlarmId) updateSchedule(activeAlarmId, { status: 'completed' });
-  activeAlarmId = null;
-  alarmOverlay.hidden = true;
-});
-document.getElementById('alarm-snooze-btn').addEventListener('click', () => {
-  if (activeAlarmId) {
-    snoozeSchedule(activeAlarmId);
-  }
-  activeAlarmId = null;
-  alarmOverlay.hidden = true;
-});
-window.addEventListener('beforeunload', stopScheduleSound);
 quickBtns.forEach(button => {
   button.addEventListener('click', () => {
     const command = button.dataset.cmd;
