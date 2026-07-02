@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, globalShortcut, session, screen } = require('electron');
+const { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, globalShortcut, session, screen, powerMonitor } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const os = require('os');
@@ -63,6 +63,12 @@ const RENDERER_RECOVERABLE_REASONS = new Set([
   'oom',
   'launch-failed',
   'integrity-failure'
+]);
+const REQUIRED_PARAKEET_MODEL_FILES = Object.freeze([
+  'encoder.int8.onnx',
+  'decoder.int8.onnx',
+  'joiner.int8.onnx',
+  'tokens.txt'
 ]);
 
 if (!app.isPackaged) {
@@ -168,11 +174,13 @@ let voiceCaptureStartOptions = null;
 let voiceCaptureFrameReceiver = null;
 let voiceCaptureWarmupTimer = null;
 let voiceResourceWarmupTimer = null;
+let voiceResumeRecoveryTimer = null;
 let voiceStartInFlight = false;
 let voiceLastStartAt = 0;
 let voiceSpeakingStopTapAt = 0;
 let voiceSpeakingStopSessionId = null;
 let voiceMediaQuietingState = null;
+let powerRecoveryHandlersRegistered = false;
 let voiceCaptureFrameStats = {
   received: 0,
   delivered: 0,
@@ -739,7 +747,51 @@ function scheduleVoiceResourceWarmup(reason = 'post-startup') {
   }
 }
 
+function clearVoiceResumeRecoveryTimer() {
+  if (voiceResumeRecoveryTimer) {
+    clearTimeout(voiceResumeRecoveryTimer);
+    voiceResumeRecoveryTimer = null;
+  }
+}
+
+function resetVoiceRuntimeAfterPowerEvent(reason = 'system-power-event') {
+  voiceStartInFlight = false;
+  voiceSpeakingStopTapAt = 0;
+  voiceSpeakingStopSessionId = null;
+
+  try {
+    if (voiceSessionManager?.isActive?.()) {
+      voiceSessionManager.cancelSession(reason);
+    } else if (voiceSessionManager?.isBusy?.()) {
+      voiceSessionManager.reset();
+    }
+  } catch (error) {
+    mainLogger.warn('Voice session reset after power event failed', {
+      reason,
+      error: error.message
+    });
+  }
+
+  destroyVoiceCaptureWindow();
+}
+
+function scheduleVoiceResumeRecovery(reason = 'system-resume') {
+  clearVoiceResumeRecoveryTimer();
+  resetVoiceRuntimeAfterPowerEvent(reason);
+  voiceResumeRecoveryTimer = setTimeout(() => {
+    voiceResumeRecoveryTimer = null;
+    if (cleanupFinished || cleanupPromise) return;
+    mainLogger.info('Voice runtime recovery after system resume started', { reason });
+    scheduleVoiceRuntimePrewarm(reason);
+    scheduleVoiceResourceWarmup(reason);
+  }, 1200);
+  if (typeof voiceResumeRecoveryTimer.unref === 'function') {
+    voiceResumeRecoveryTimer.unref();
+  }
+}
+
 function destroyVoiceCaptureWindow() {
+  clearVoiceResumeRecoveryTimer();
   if (voiceCaptureWarmupTimer) {
     clearTimeout(voiceCaptureWarmupTimer);
     voiceCaptureWarmupTimer = null;
@@ -812,6 +864,66 @@ function createDesktopMicrophoneBackend() {
   return captureBackend;
 }
 
+function hasCompleteParakeetModel(modelPath) {
+  if (!modelPath || typeof modelPath !== 'string') return false;
+  try {
+    return fs.existsSync(modelPath) &&
+      REQUIRED_PARAKEET_MODEL_FILES.every(fileName => fs.existsSync(path.join(modelPath, fileName)));
+  } catch (_) {
+    return false;
+  }
+}
+
+function uniqueExistingPathCandidates(candidates = []) {
+  const seen = new Set();
+  const unique = [];
+  for (const candidate of candidates) {
+    if (!candidate) continue;
+    const resolved = path.resolve(String(candidate));
+    const key = resolved.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    unique.push(resolved);
+  }
+  return unique;
+}
+
+function resolveDesktopSttModelPath() {
+  const configuredPath = runtimeConfig?.voice?.recognition?.modelPath || runtimeConfig?.voice?.stt?.modelPath;
+  const envPath = process.env.OPENX_STT_MODEL_PATH;
+  const executableDir = process.execPath ? path.dirname(process.execPath) : '';
+  const appPath = typeof app.getAppPath === 'function' ? app.getAppPath() : '';
+  const appPathDir = appPath && path.extname(appPath).toLowerCase() === '.asar'
+    ? path.dirname(appPath)
+    : appPath;
+  const candidateRoots = uniqueExistingPathCandidates([
+    envPath,
+    configuredPath,
+    path.join(__dirname, '..', '..', '..', 'models', 'parakeet'),
+    path.join(process.cwd(), 'models', 'parakeet'),
+    appPath ? path.join(appPath, 'models', 'parakeet') : '',
+    appPathDir ? path.join(appPathDir, 'models', 'parakeet') : '',
+    process.resourcesPath ? path.join(process.resourcesPath, 'models', 'parakeet') : '',
+    process.resourcesPath ? path.join(path.dirname(process.resourcesPath), 'models', 'parakeet') : '',
+    executableDir ? path.join(executableDir, 'models', 'parakeet') : ''
+  ]);
+  const modelPath = candidateRoots.find(hasCompleteParakeetModel);
+  if (modelPath) {
+    mainLogger.info('Voice STT model path resolved', {
+      modelPath,
+      sourceCount: candidateRoots.length
+    });
+    return modelPath;
+  }
+
+  const fallbackPath = path.resolve(__dirname, '..', '..', '..', 'models', 'parakeet');
+  mainLogger.warn('Voice STT model path could not be validated; using fallback path', {
+    fallbackPath,
+    checked: candidateRoots
+  });
+  return fallbackPath;
+}
+
 function createDesktopVoiceResources() {
   const microphoneDevice = {
     id: 'desktop-default-microphone',
@@ -847,7 +959,7 @@ function createDesktopVoiceResources() {
   });
   const sttEngine = new STTEngine({
     configuration: new STTConfiguration({
-      modelPath: path.resolve(process.cwd(), 'models', 'parakeet')
+      modelPath: resolveDesktopSttModelPath()
     }),
     logger: mainLogger
   });
@@ -2004,6 +2116,26 @@ async function reloadRuntimeServices() {
   showTimerWidget();
 }
 
+function registerPowerRecoveryHandlers() {
+  if (powerRecoveryHandlersRegistered || !powerMonitor || typeof powerMonitor.on !== 'function') return;
+  powerRecoveryHandlersRegistered = true;
+
+  powerMonitor.on('suspend', () => {
+    mainLogger.info('System suspend detected; pausing voice runtime');
+    resetVoiceRuntimeAfterPowerEvent('system-suspend');
+  });
+
+  powerMonitor.on('resume', () => {
+    mainLogger.info('System resume detected; scheduling voice recovery');
+    scheduleVoiceResumeRecovery('system-resume');
+  });
+
+  powerMonitor.on('unlock-screen', () => {
+    mainLogger.info('Screen unlock detected; refreshing voice runtime');
+    scheduleVoiceResumeRecovery('screen-unlock');
+  });
+}
+
 function normalizeError(reason) {
   if (reason instanceof Error) return reason;
   if (typeof reason === 'string') return new Error(reason);
@@ -2099,6 +2231,7 @@ app.whenReady().then(async () => {
   eventBus.subscribe(EVENTS.COMMAND_EXECUTED, envelope => handleTimerWidgetCommand(envelope.payload));
   eventBus.subscribe(EVENTS.COMMAND_EXECUTED, envelope => handlePlannerCommand(envelope.payload));
   setupIPC();
+  registerPowerRecoveryHandlers();
   createTray();
   await initializeAssistant();
   await initializePhoneServer();

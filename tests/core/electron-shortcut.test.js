@@ -57,7 +57,14 @@ describe('Electron Chat Shortcut', function() {
     assert.match(script, /new AudioDeviceManager\(\{ provider: deviceProvider/);
     assert.match(script, /new AudioCapture\(/);
     assert.match(script, /new STTEngine\(/);
-    assert.match(script, /path\.resolve\(process\.cwd\(\), 'models', 'parakeet'\)/);
+    assert.match(script, /function resolveDesktopSttModelPath\(\)/);
+    assert.match(script, /REQUIRED_PARAKEET_MODEL_FILES/);
+    assert.match(script, /modelPath: resolveDesktopSttModelPath\(\)/);
+    assert.match(script, /process\.resourcesPath/);
+    assert.match(script, /process\.env\.OPENX_STT_MODEL_PATH/);
+    assert.match(script, /function scheduleVoiceResumeRecovery\(reason = 'system-resume'\)/);
+    assert.match(script, /powerMonitor\.on\('resume'/);
+    assert.match(script, /powerMonitor\.on\('unlock-screen'/);
   });
 
   it('should open a real microphone stream for the OS privacy indicator only from the trusted capture renderer', function() {

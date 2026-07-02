@@ -44,14 +44,17 @@ function appendVoiceCard(list, entry, options = {}) {
 function renderVoiceAssistantResult(payload = {}) {
   const responseEl = document.getElementById('assistant-response');
   if (!responseEl) return;
+  const root = document.getElementById('voice-overlay');
   if (voiceAssistantResultClearTimer) {
     clearTimeout(voiceAssistantResultClearTimer);
     voiceAssistantResultClearTimer = null;
   }
   const hasPayload = Boolean(String(payload.response || '').trim()) ||
+    Boolean(String(payload.heading || '').trim()) ||
     (Array.isArray(payload.resultEntries) && payload.resultEntries.length > 0) ||
     (Array.isArray(payload.choices) && payload.choices.length > 0);
   if (!hasPayload) {
+    if (root) root.classList.remove('expanded', 'medium', 'large');
     responseEl.classList.remove('visible');
     voiceAssistantResultClearTimer = setTimeout(() => {
       voiceAssistantResultClearTimer = null;
@@ -59,8 +62,21 @@ function renderVoiceAssistantResult(payload = {}) {
     }, 180);
     return;
   }
+  if (root) {
+    const displayMode = String(payload.displayMode || 'expanded').toLowerCase();
+    root.classList.add('expanded');
+    root.classList.toggle('medium', displayMode === 'medium');
+    root.classList.toggle('large', displayMode !== 'medium');
+  }
   responseEl.replaceChildren();
   const fragment = document.createDocumentFragment();
+  const heading = String(payload.heading || '').trim();
+  if (heading) {
+    const headingEl = document.createElement('div');
+    headingEl.className = 'voice-response-heading';
+    headingEl.textContent = heading;
+    fragment.appendChild(headingEl);
+  }
   const response = String(payload.response || '').trim();
   if (response) {
     const text = document.createElement('div');
@@ -74,7 +90,7 @@ function renderVoiceAssistantResult(payload = {}) {
   if (cards.length > 0) {
     const list = document.createElement('ol');
     list.className = 'voice-card-list';
-    for (const card of cards.slice(0, 8)) {
+    for (const card of cards.slice(0, 6)) {
       const normalized = choices.length > 0
         ? {
             index: card.index,

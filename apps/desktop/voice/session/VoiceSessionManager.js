@@ -191,9 +191,11 @@ class VoiceSessionManager {
         warmed.push(resource);
       } catch (error) {
         failed.push({ resource, error: error.message });
-        this._publish(SESSION_EVENTS.VOICE_ERROR, this._buildEventPayload(null, {
-          error: this._normalizeError(error)
-        }));
+        if (this.currentSession) {
+          this._publish(SESSION_EVENTS.VOICE_ERROR, this._buildEventPayload(null, {
+            error: this._normalizeError(error)
+          }));
+        }
       }
     };
 

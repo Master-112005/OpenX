@@ -293,12 +293,34 @@ class VoiceOverlay extends EventEmitter {
   _buildAssistantResultPayload(result = {}) {
     const intent = String(result?.intent || '');
     return Object.freeze({
-      response: String(result?.response || result?.message || '').slice(0, 480),
+      heading: this._buildAssistantResultHeading(result, intent),
+      response: this._formatAssistantResponseText(result),
       intent,
       success: Boolean(result?.success),
       choices: this._normalizeChoices(result?.data?.choices),
       resultEntries: this._normalizeResultEntries(result, intent)
     });
+  }
+
+  _formatAssistantResponseText(result = {}) {
+    return String(result?.response || result?.message || '')
+      .replace(/\s+/g, ' ')
+      .replace(/\s+([,.!?;:])/g, '$1')
+      .trim()
+      .slice(0, 420);
+  }
+
+  _buildAssistantResultHeading(result = {}, intent = '') {
+    if (result?.needsClarification && Array.isArray(result?.data?.choices) && result.data.choices.length > 0) {
+      return 'Choose an option';
+    }
+    if (/^folder\./.test(intent)) return 'Folder';
+    if (/^file\./.test(intent)) return 'Files';
+    if (intent === 'browser.search') return 'Search';
+    if (/^(?:timer|alarm|reminder)\./.test(intent)) return 'Schedule';
+    if (/^media\./.test(intent)) return 'Media';
+    if (result?.success === false) return 'Needs attention';
+    return 'OpenX';
   }
 
   _normalizeChoices(choices) {

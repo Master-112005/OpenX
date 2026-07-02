@@ -4,10 +4,11 @@ const { VoiceUIError } = require('./VoiceUIErrors');
 
 const DEFAULT_CONFIGURATION = Object.freeze({
   overlayEnabled: true,
-  size: Object.freeze({ width: 420, height: 176 }),
-  expandedSize: Object.freeze({ width: 520, height: 300 }),
-  position: Object.freeze({ horizontal: 'center', vertical: 'above-center', yOffset: -96 }),
-  animationDurationMs: 180,
+  size: Object.freeze({ width: 256, height: 50 }),
+  mediumSize: Object.freeze({ width: 360, height: 118 }),
+  expandedSize: Object.freeze({ width: 440, height: 236 }),
+  position: Object.freeze({ horizontal: 'center', vertical: 'top', yOffset: 12 }),
+  animationDurationMs: 160,
   fadeDurationMs: 160,
   autoCloseDelayMs: 900,
   transcriptFont: 'Segoe UI',
@@ -85,10 +86,10 @@ class VoiceConfiguration {
    * @returns {true}
    */
   static validate(config) {
-    if (!Number.isInteger(config.size?.width) || config.size.width < 260) {
+    if (!Number.isInteger(config.size?.width) || config.size.width < 220) {
       throw new VoiceUIError('Voice overlay width is invalid.', { code: 'InvalidVoiceUIConfiguration' });
     }
-    if (!Number.isInteger(config.size?.height) || config.size.height < 120) {
+    if (!Number.isInteger(config.size?.height) || config.size.height < 44) {
       throw new VoiceUIError('Voice overlay height is invalid.', { code: 'InvalidVoiceUIConfiguration' });
     }
     if (!Number.isInteger(config.expandedSize?.width) || config.expandedSize.width < config.size.width) {
@@ -96,6 +97,12 @@ class VoiceConfiguration {
     }
     if (!Number.isInteger(config.expandedSize?.height) || config.expandedSize.height < config.size.height) {
       throw new VoiceUIError('Voice overlay expanded height is invalid.', { code: 'InvalidVoiceUIConfiguration' });
+    }
+    if (!Number.isInteger(config.mediumSize?.width) || config.mediumSize.width < config.size.width || config.mediumSize.width > config.expandedSize.width) {
+      throw new VoiceUIError('Voice overlay medium width is invalid.', { code: 'InvalidVoiceUIConfiguration' });
+    }
+    if (!Number.isInteger(config.mediumSize?.height) || config.mediumSize.height < config.size.height || config.mediumSize.height > config.expandedSize.height) {
+      throw new VoiceUIError('Voice overlay medium height is invalid.', { code: 'InvalidVoiceUIConfiguration' });
     }
     for (const field of ['animationDurationMs', 'fadeDurationMs', 'autoCloseDelayMs']) {
       if (!Number.isFinite(config[field]) || config[field] < 0) {

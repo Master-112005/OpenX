@@ -376,6 +376,42 @@ describe('Voice Subsystem Architecture', function() {
     assert.deepEqual(calls, ['audioProcessor', 'sttEngine', 'transcriptProcessor']);
   });
 
+  it('should keep background voice warm-up failures out of the user-visible error stream', function() {
+    const { VoiceSessionManager, SESSION_EVENTS } = require('../../apps/desktop/voice');
+    const errors = [];
+    const manager = new VoiceSessionManager({
+      resources: {
+        audioProcessor: {
+          on() {},
+          initialize() { return { initialized: true }; },
+          reset() {},
+          getStatus() { return { initialized: true }; }
+        },
+        sttEngine: {
+          on() {},
+          initialize() { throw new Error('STT model was not found.'); },
+          getStatus() { return { initialized: false }; },
+          cancel() {}
+        },
+        transcriptProcessor: {
+          on() {},
+          getStatus() { return { initialized: true }; },
+          reset() {}
+        }
+      },
+      setTimeout: () => ({ unref() {} }),
+      clearTimeout: () => {}
+    });
+    manager.on(SESSION_EVENTS.VOICE_ERROR, event => errors.push(event));
+
+    const warmed = manager.warmUpResources('background-resume');
+
+    assert.equal(warmed.success, false);
+    assert.equal(warmed.failed.length, 1);
+    assert.equal(warmed.failed[0].resource, 'sttEngine');
+    assert.equal(errors.length, 0);
+  });
+
   it('should schedule and clear lifecycle timeout placeholders only', function() {
     const { VoiceSessionManager } = require('../../apps/desktop/voice');
     const scheduled = [];
@@ -1765,7 +1801,7 @@ describe('Voice Subsystem Architecture', function() {
     assert.equal(manager.getMetrics().runtimePipeline.duplicateFinals, 1);
   });
 
-  it('should create, position, show, update, and hide the Voice overlay window through minimal IPC', function() {
+  it('should create, position, show, update, and hide the Voice overlay window through minimal IPC', async function() {
     const { VoiceWindowController } = require('../../apps/desktop/voice');
     const sent = [];
     const bounds = [];
@@ -1790,13 +1826,18 @@ describe('Voice Subsystem Architecture', function() {
         getPrimaryDisplay: () => ({ workArea: { x: 10, y: 20, width: 1000, height: 700 } })
       },
       configuration: {
-        size: { width: 420, height: 176 },
-        expandedSize: { width: 520, height: 300 },
-        position: { yOffset: -96 }
+        size: { width: 256, height: 50 },
+        mediumSize: { width: 360, height: 118 },
+        expandedSize: { width: 440, height: 236 },
+        position: { vertical: 'top', yOffset: 12 }
       }
     });
 
     const shown = controller.show({ state: 'LISTENING', statusText: 'Listening' });
+    controller.updateAssistantResult({
+      response: 'Opening screenshots.'
+    });
+    await new Promise(resolve => setTimeout(resolve, 190));
     controller.updateAssistantResult({
       response: 'I found 2 matching folders. Choose a number.',
       choices: [
@@ -1804,14 +1845,18 @@ describe('Voice Subsystem Architecture', function() {
         { index: 2, title: 'Screenshots - C:\\B\\Screenshots', path: 'C:\\B\\Screenshots' }
       ]
     });
+    await new Promise(resolve => setTimeout(resolve, 190));
+    controller.updateState({ state: 'LISTENING', statusText: 'Listening' });
+    await new Promise(resolve => setTimeout(resolve, 210));
     controller.updateTranscript({ transcript: 'open visual', partial: true });
     controller.hide();
 
     assert.equal(shown.visible, true);
     assert.equal(controller.getStatus().created, true);
-    assert.deepEqual(bounds[0], { x: 300, y: 186, width: 420, height: 176 });
-    assert.ok(bounds.some(entry => entry.width === 520 && entry.height === 300));
-    assert.deepEqual(bounds[bounds.length - 1], { x: 300, y: 186, width: 420, height: 176 });
+    assert.deepEqual(bounds[0], { x: 382, y: 32, width: 256, height: 50 });
+    assert.ok(bounds.some(entry => entry.x === 330 && entry.y === 32 && entry.width === 360 && entry.height === 118));
+    assert.ok(bounds.some(entry => entry.x === 295 && entry.y === 32 && entry.width === 430 && entry.height === 204));
+    assert.deepEqual(bounds[bounds.length - 1], { x: 382, y: 32, width: 256, height: 50 });
     assert.ok(sent.some(message => message.operation === 'showOverlay'));
     assert.ok(sent.some(message => message.operation === 'displayAssistantResult'));
     assert.ok(sent.some(message => message.operation === 'updateTranscript'));
@@ -1883,6 +1928,7 @@ describe('Voice Subsystem Architecture', function() {
     assert.equal(update.updated, true);
     assert.equal(windowUpdates.length, 1);
     assert.equal(windowUpdates[0].response, 'I found 2 matching folders. Choose a number.');
+    assert.equal(windowUpdates[0].heading, 'Choose an option');
     assert.equal(windowUpdates[0].choices.length, 2);
     assert.equal(windowUpdates[0].choices[0].path, 'C:\\A\\Screenshots');
   });
